@@ -56,6 +56,16 @@
           <button class="service-action" id="newCashTab" type="button"><span class="service-icon">ج.م</span><b>طلب سلفة</b><small>طلب عهدة مالية</small></button>
           <button class="service-action" id="myRequestsTab" type="button"><span class="service-icon">▤</span><b>طلباتي</b><small>متابعة الحالة</small></button>
         </div>
+        <button class="service-action" id="complaintsTab" type="button"><span class="service-icon">✉</span><b>الشكاوى</b><small>تقديم ومتابعة والرد</small></button>
+        <div class="form-divider"></div>
+        <div id="complaintForm" class="request-form hidden">
+          <div class="form-title"><span class="form-title-icon">✉</span><div><h3>تقديم شكوى</h3><p>اكتب تفاصيل الشكوى وسيتم إرسالها للإدارة بسرية</p></div></div>
+          <label>تصنيف الشكوى<select id="complaintType"><option value="شكوى إدارية">شكوى إدارية</option><option value="شكوى بخصوص موظف">شكوى بخصوص موظف</option><option value="شكوى بخصوص العمل">شكوى بخصوص العمل</option><option value="اقتراح">اقتراح</option><option value="أخرى">أخرى</option></select></label>
+          <label>الشخص المعني (اختياري)<input id="complaintPerson" type="text" maxlength="120" placeholder="اسم الشخص إن وجد"></label>
+          <label>تفاصيل الشكوى<textarea id="complaintDetails" rows="4" maxlength="3000" placeholder="اكتب تفاصيل الشكوى بوضوح..."></textarea></label>
+          <button id="submitComplaint" class="primary-btn submit-action">إرسال الشكوى</button>
+        </div>
+        <div id="complaintThread" class="request-form hidden"></div>
         <div class="form-divider"></div>
         <div id="leaveForm" class="request-form hidden">
           <div class="form-title"><span class="form-title-icon">◷</span><div><h3>طلب إذن</h3><p>حدد نوع الإذن والتاريخ والسبب</p></div></div>
@@ -84,7 +94,7 @@
       <section>
         <div class="section-head"><h2>الخدمات</h2><span class="muted">الخدمات المتاحة</span></div>
         <div class="tiles">
-          <button class="tile" data-entity="complaints"><span>💬</span><b>الشكاوى</b><small>المتابعة والردود</small></button>
+          
           <button class="tile" data-entity="cash"><span>💰</span><b>سجلات العهد</b><small>متابعة الصرف والتسويات</small></button>
         </div>
       </section>

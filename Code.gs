@@ -10,7 +10,7 @@
  */
 
 const MH = Object.freeze({
-  VERSION: '1.5.0',
+  VERSION: '1.7.0',
   TZ: 'Africa/Cairo',
   AUTH_MAX_AGE_SECONDS: 300,
   SHEETS: {
@@ -137,6 +137,18 @@ function doPost(e) {
 
       case 'cash_create':
         data = createCashRequest_(profile, body);
+        break;
+      case 'complaint_create':
+        data = createComplaint_(profile, body);
+        break;
+      case 'complaint_thread':
+        data = complaintThread_(profile, body);
+        break;
+      case 'complaint_message':
+        data = complaintMessage_(profile, body);
+        break;
+      case 'complaint_status':
+        data = complaintStatus_(profile, body);
         break;
 
       case 'cash_decide':
@@ -1127,4 +1139,74 @@ function decideLeaveRequest_(profile, body) {
     }
   } finally { lock.releaseLock(); }
   return {decided:true,status:decision,requestId:get('رقم الطلب')};
+}
+
+
+/* COMPLAINTS + TWO-WAY THREAD — V1.7 */
+const MH_COMPLAINT = Object.freeze({
+  HEADERS: ['رقم الشكوى','التاريخ والوقت','Chat ID','اسم الموظف','نوع الشكوى','الشخص المعني','تفاصيل الشكوى','الحالة','ملاحظات المدير','تاريخ آخر تحديث','نتيجة التعامل'],
+  MESSAGE_HEADERS: ['رقم الرسالة','رقم الشكوى','Chat ID المرسل','صفة المرسل','اسم المرسل','نص الرسالة','التاريخ والوقت'],
+  REVIEW_ROLES: ['super_admin','admin','supervisor']
+});
+function createComplaint_(profile, body) {
+  if (profile.role !== 'employee') throw new Error('EMPLOYEE_ONLY');
+  const type=String(body.type||'').trim(), person=String(body.person||'').trim(), details=String(body.details||'').trim();
+  if (!['شكوى إدارية','شكوى بخصوص موظف','شكوى بخصوص العمل','اقتراح','أخرى'].includes(type) || details.length<10 || details.length>3000 || person.length>120) throw new Error('INVALID_COMPLAINT');
+  const sh=mhSheet_(MH.SHEETS.complaints); mhAssertHeaders_(sh,MH_COMPLAINT.HEADERS);
+  const lock=LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    const now=mhNow_(), id='CMP-'+Utilities.formatDate(new Date(),MH.TZ,'yyyyMMdd-HHmmss')+'-'+String(profile.chatId).slice(-4);
+    const row=new Array(MH_COMPLAINT.HEADERS.length).fill('');
+    const set=(h,v)=>row[MH_COMPLAINT.HEADERS.indexOf(h)]=v;
+    set('رقم الشكوى',id);set('التاريخ والوقت',now);set('Chat ID',profile.chatId);set('اسم الموظف',profile.name);
+    set('نوع الشكوى',type);set('الشخص المعني',person);set('تفاصيل الشكوى',details);set('الحالة','جديدة');set('تاريخ آخر تحديث',now);
+    sh.appendRow(row);
+    return {submitted:true,complaintId:id,status:'جديدة',message:'تم تسجيل الشكوى.'};
+  } finally {lock.releaseLock();}
+}
+function complaintRecord_(profile, complaintId) {
+  const sh=mhSheet_(MH.SHEETS.complaints); mhAssertHeaders_(sh,MH_COMPLAINT.HEADERS);
+  const vals=sh.getDataRange().getValues(), headers=vals[0].map(String);
+  const idx=headers.indexOf('رقم الشكوى'), owner=headers.indexOf('Chat ID');
+  for(let i=1;i<vals.length;i++) if(String(vals[i][idx])===String(complaintId)) {
+    const isReviewer=MH_COMPLAINT.REVIEW_ROLES.includes(profile.role);
+    if(!isReviewer && String(vals[i][owner])!==profile.chatId) throw new Error('FORBIDDEN');
+    const o={};headers.forEach((h,j)=>o[h]=vals[i][j]);
+    return {sheet:sh,row:i+1,data:o};
+  }
+  throw new Error('COMPLAINT_NOT_FOUND');
+}
+function complaintThread_(profile, body) {
+  const c=complaintRecord_(profile,String(body.complaintId||''));
+  const ms=mhSheet_(MH.SHEETS.complaintMessages); mhAssertHeaders_(ms,MH_COMPLAINT.MESSAGE_HEADERS);
+  const rows=ms.getDataRange().getValues(), h=rows[0].map(String), out=[];
+  for(let i=1;i<rows.length;i++) if(String(rows[i][h.indexOf('رقم الشكوى')])===String(body.complaintId)) {
+    const m={};h.forEach((k,j)=>m[k]=rows[i][j]);
+    out.push({senderRole:m['صفة المرسل'],senderName:m['اسم المرسل'],message:m['نص الرسالة'],createdAt:m['التاريخ والوقت']});
+  }
+  const d=c.data;
+  return {complaint:{id:d['رقم الشكوى'],type:d['نوع الشكوى'],status:d['الحالة'],createdAt:d['التاريخ والوقت'],details:d['تفاصيل الشكوى'],employeeName:d['اسم الموظف']},messages:out.slice(-100)};
+}
+function complaintMessage_(profile, body) {
+  const id=String(body.complaintId||''), message=String(body.message||'').trim();
+  if(message.length<2||message.length>2000) throw new Error('INVALID_COMPLAINT_MESSAGE');
+  const c=complaintRecord_(profile,id);
+  if(String(c.data['الحالة'])==='مغلقة') throw new Error('COMPLAINT_CLOSED');
+  const sh=mhSheet_(MH.SHEETS.complaintMessages); mhAssertHeaders_(sh,MH_COMPLAINT.MESSAGE_HEADERS);
+  const role=profile.role==='employee'?'موظف':'مدير', now=mhNow_();
+  sh.appendRow(['MSG-'+Utilities.getUuid(),id,profile.chatId,role,profile.name,message,now]);
+  c.sheet.getRange(c.row,10).setValue(now);
+  c.sheet.getRange(c.row,8).setValue(role==='موظف'?'بانتظار رد الإدارة':'بانتظار رد الموظف');
+  return {sent:true,createdAt:now};
+}
+function complaintStatus_(profile, body) {
+  mhRequireRole_(profile,MH_COMPLAINT.REVIEW_ROLES);
+  const c=complaintRecord_(profile,String(body.complaintId||''));
+  const next=String(body.status||''), note=String(body.note||'').trim();
+  const allowed=['قيد التحقيق','تم الحل','مغلقة'];
+  const current=String(c.data['الحالة']||'');
+  const transitions={'جديدة':['قيد التحقيق','تم الحل','مغلقة'],'قيد التحقيق':['تم الحل','مغلقة'],'بانتظار رد الإدارة':['قيد التحقيق','تم الحل','مغلقة'],'بانتظار رد الموظف':['قيد التحقيق','تم الحل','مغلقة'],'تم الحل':['مغلقة']};
+  if(!allowed.includes(next)||!(transitions[current]||[]).includes(next)) throw new Error('INVALID_COMPLAINT_STATUS');
+  const now=mhNow_();c.sheet.getRange(c.row,8).setValue(next);c.sheet.getRange(c.row,9).setValue(note);c.sheet.getRange(c.row,10).setValue(now);
+  return {updated:true,status:next};
 }

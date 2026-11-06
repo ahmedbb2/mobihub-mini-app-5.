@@ -7,6 +7,7 @@
   let initData = '';
   let currentAttendance = null;
   let pendingUniform = false;
+  let currentRole = 'employee';
 
   const errorMessages = {
     UNAUTHORIZED: 'تعذر التحقق من هوية Telegram. أغلق التطبيق وافتحه مرة أخرى.',
@@ -26,7 +27,11 @@
     INVALID_LEAVE_DATE: 'اختر تاريخ اليوم أو تاريخًا قادمًا صحيحًا.', DUPLICATE_LEAVE_OVERLAP: 'لديك طلب إذن معلق أو معتمد يتعارض مع هذه الفترة.',
     NO_ACTIVE_SHIFT_ASSIGNED: 'لا توجد وردية نشطة لك في هذا التاريخ.', LEAVE_OUTSIDE_SHIFT: 'وقت أو مدة الإذن خارج حدود ورديتك.',
     LEAVE_START_NOT_FUTURE: 'بداية الإذن يجب أن تكون في وقت قادم.', FULL_DAY_LEAVE_AFTER_SHIFT_START: 'لا يمكن طلب إذن يوم كامل بعد بداية الوردية.',
-    LEAVE_CONFLICT_CONFIRMED_ABSENCE: 'لا يمكن اعتماد الإذن بعد تأكيد الغياب لهذا التاريخ.', REQUEST_ALREADY_REVIEWED: 'تمت مراجعة الطلب بالفعل.', LEAVE_ALREADY_REVIEWED: 'تمت مراجعة الإذن بالفعل.', INVALID_REQUEST_TYPE: 'نوع الطلب غير صحيح.', INVALID_LEAVE_TYPE: 'نوع الإذن غير صحيح.', INVALID_LEAVE_DAYS: 'عدد الأيام غير متاح.', INVALID_LEAVE_HOURS: 'مدة الإذن غير متاحة.', INVALID_LEAVE_TIME: 'وقت الإذن غير صحيح.', REQUEST_NOT_FOUND: 'الطلب غير موجود.', LEAVE_NOT_FOUND: 'طلب الإذن غير موجود.', INVALID_DECISION: 'القرار أو رقم السجل غير صحيح.', INVALID_CASH_AMOUNT: 'اكتب مبلغًا موجبًا صحيحًا بالجنيه.', INVALID_CASH_PURPOSE: 'اكتب الغرض من السلفة بوضوح (3 أحرف على الأقل).', CASH_ALREADY_REVIEWED: 'تمت مراجعة طلب السلفة بالفعل.', CASH_PAYOUT_NOT_ALLOWED: 'لا يمكن تسجيل الصرف قبل الموافقة أو تم تسجيل الصرف بالفعل.', CASH_REQUEST_NOT_FOUND: 'طلب السلفة غير موجود.', OPEN_CASH_CUSTODY: 'لا يمكن تسجيل الانصراف قبل إغلاق العهدة المفتوحة وتسوية المبلغ المتبقي.', SHEET_SCHEMA_MISMATCH: 'أعمدة الشيت لا تطابق النسخة المطلوبة. أوقف الاختبار وراجع الأعمدة.'
+    LEAVE_CONFLICT_CONFIRMED_ABSENCE: 'لا يمكن اعتماد الإذن بعد تأكيد الغياب لهذا التاريخ.', REQUEST_ALREADY_REVIEWED: 'تمت مراجعة الطلب بالفعل.', LEAVE_ALREADY_REVIEWED: 'تمت مراجعة الإذن بالفعل.', INVALID_REQUEST_TYPE: 'نوع الطلب غير صحيح.', INVALID_LEAVE_TYPE: 'نوع الإذن غير صحيح.', INVALID_LEAVE_DAYS: 'عدد الأيام غير متاح.', INVALID_LEAVE_HOURS: 'مدة الإذن غير متاحة.', INVALID_LEAVE_TIME: 'وقت الإذن غير صحيح.', REQUEST_NOT_FOUND: 'الطلب غير موجود.', LEAVE_NOT_FOUND: 'طلب الإذن غير موجود.', INVALID_DECISION: 'القرار أو رقم السجل غير صحيح.', INVALID_CASH_AMOUNT: 'اكتب مبلغًا موجبًا صحيحًا بالجنيه.', INVALID_CASH_PURPOSE: 'اكتب الغرض من السلفة بوضوح (3 أحرف على الأقل).', CASH_ALREADY_REVIEWED: 'تمت مراجعة طلب السلفة بالفعل.', CASH_PAYOUT_NOT_ALLOWED: 'لا يمكن تسجيل الصرف قبل الموافقة أو تم تسجيل الصرف بالفعل.', CASH_REQUEST_NOT_FOUND: 'طلب السلفة غير موجود.', OPEN_CASH_CUSTODY: 'لا يمكن تسجيل الانصراف قبل إغلاق العهدة المفتوحة وتسوية المبلغ المتبقي.', SHEET_SCHEMA_MISMATCH: 'أعمدة الشيت لا تطابق النسخة المطلوبة. أوقف الاختبار وراجع الأعمدة.',
+    INVALID_COMPLAINT: 'راجع تصنيف الشكوى والتفاصيل؛ التفاصيل مطلوبة من 10 إلى 3000 حرف.',
+    COMPLAINT_NOT_FOUND: 'الشكوى غير موجودة.',
+    COMPLAINT_CLOSED: 'الشكوى مغلقة ولا يمكن إضافة رد جديد.',
+    INVALID_COMPLAINT_MESSAGE: 'اكتب رسالة من حرفين إلى 2000 حرف.'
   };
 
   function fail(message) {
@@ -158,6 +163,7 @@
     if (!initData) return fail('بيانات Telegram غير متاحة. افتح التطبيق من داخل Telegram.');
     try {
       const data = await api('bootstrap');
+      currentRole = data.profile.role || 'employee';
       $('userName').textContent = data.profile.name;
       const roleNames = { employee: 'موظف', supervisor: 'مشرف', admin: 'مدير', finance: 'مالية', super_admin: 'مدير النظام' };
       $('userRole').textContent = roleNames[data.profile.role] || data.profile.role;
@@ -177,6 +183,11 @@
     try {
       const rows = await api('list', { entity });
       if (!rows.length) { $('resultBody').textContent = 'لا توجد سجلات.'; return; }
+      if(entity==='complaints'){
+        $('resultBody').innerHTML=rows.map(row=>`<article class="record complaint-card"><strong>${escapeHtml(row['رقم الشكوى']||'شكوى')} · ${escapeHtml(row['نوع الشكوى']||'')}</strong><small class="record-meta">${escapeHtml(row['الحالة']||'جديدة')} · ${escapeHtml(row['التاريخ والوقت']||'')}</small><p>${escapeHtml(row['تفاصيل الشكوى']||'')}</p><button class="secondary-btn" data-open-complaint="${escapeHtml(row['رقم الشكوى']||'')}">فتح المحادثة</button></article>`).join('');
+        $('resultBody').querySelectorAll('[data-open-complaint]').forEach(b=>b.addEventListener('click',()=>openComplaint(b.dataset.openComplaint)));
+        return;
+      }
       $('resultBody').innerHTML = rows.map(row => {
         const title = row['رقم الطلب'] || row['رقم الشكوى'] || row['نوع الطلب'] || row['نوع الإذن'] || 'سجل';
         const status = row['حالة العهدة'] || row['حالة التسوية'] || row['حالة الصرف'] || row['الحالة'] || row['القرار'] || '';
@@ -242,10 +253,33 @@
   }
   async function decideCash(row,decision){ const note=decision==='مرفوض'?prompt('سبب الرفض (اختياري):')||'':''; if(!confirm(`تأكيد إجراء «${decision}»؟`))return; try{await api('cash_decide',{row:Number(row),decision,note});await loadCashReviews();messageRequest('تم تحديث طلب السلفة.');}catch(e){messageRequest(e.message,true);} }
 
+
+  async function submitComplaint(){
+    const b=$('submitComplaint'); b.disabled=true;
+    try{
+      const r=await api('complaint_create',{type:$('complaintType').value,person:$('complaintPerson').value,details:$('complaintDetails').value});
+      $('complaintDetails').value=''; $('complaintPerson').value='';
+      messageRequest(`تم تسجيل الشكوى بنجاح. رقم الشكوى: ${r.complaintId}`);
+      await showList('complaints');
+    }catch(e){messageRequest(e.message,true);}finally{b.disabled=false;}
+  }
+  async function openComplaint(id){
+    const box=$('resultBody'); box.textContent='جاري تحميل المحادثة...';
+    try{
+      const d=await api('complaint_thread',{complaintId:id});
+      const msgs=(d.messages||[]).map(m=>`<div class="record"><strong>${escapeHtml(m.senderName||m.senderRole)}</strong><small class="record-meta">${escapeHtml(m.createdAt||'')}</small><p>${escapeHtml(m.message||'')}</p></div>`).join('');
+      box.innerHTML=`<article class="record"><strong>${escapeHtml(d.complaint.id)} · ${escapeHtml(d.complaint.type)}</strong><small class="record-meta">${escapeHtml(d.complaint.status)} · ${escapeHtml(d.complaint.createdAt)}</small><p>${escapeHtml(d.complaint.details)}</p></article><div class="complaint-messages">${msgs||'<p class="muted">لا توجد ردود حتى الآن.</p>'}</div>${d.complaint.status==='مغلقة'?'':`<label>اكتب ردك<textarea id="complaintReply" rows="3" maxlength="2000" placeholder="اكتب رسالتك..."></textarea></label><button class="primary-btn" id="sendComplaintReply">إرسال الرد</button>`}${['super_admin','admin','supervisor'].includes(currentRole)?`<div class="review-actions"><button class="secondary-btn" data-cstatus="قيد التحقيق">قيد التحقيق</button><button class="secondary-btn" data-cstatus="تم الحل">تم الحل</button><button class="secondary-btn" data-cstatus="مغلقة">إغلاق الشكوى</button></div>`:''}`;
+      const send=$('sendComplaintReply'); if(send) send.addEventListener('click',async()=>{send.disabled=true;try{await api('complaint_message',{complaintId:id,message:$('complaintReply').value});await openComplaint(id);}catch(e){messageRequest(e.message,true);send.disabled=false;}});
+      box.querySelectorAll('[data-cstatus]').forEach(btn=>btn.addEventListener('click',async()=>{const status=btn.dataset.cstatus;const note=status==='مغلقة'?(prompt('ملاحظة الإغلاق (اختياري):')||''):'';if(!confirm(`تأكيد تغيير حالة الشكوى إلى «${status}»؟`))return;btn.disabled=true;try{await api('complaint_status',{complaintId:id,status,note});await openComplaint(id);}catch(e){messageRequest(e.message,true);btn.disabled=false;}}));
+      $('resultTitle').textContent='محادثة الشكوى';
+    }catch(e){box.textContent=e.message;}
+  }
   function messageRequest(text,isError=false){const el=$('requestMessage');el.textContent=text;el.classList.toggle('is-error',isError);el.classList.remove('hidden');}
   function switchRequestForm(which){
     $('leaveForm').classList.toggle('hidden',which!=='leave');
     $('cashForm').classList.toggle('hidden',which!=='cash');
+    $('complaintForm').classList.toggle('hidden',which!=='complaint');
+    $('complaintsTab').classList.toggle('active',which==='complaint');
     $('newLeaveTab').classList.toggle('active',which==='leave');
     $('newCashTab').classList.toggle('active',which==='cash');
     $('myRequestsTab').classList.remove('active');
@@ -279,6 +313,8 @@
     showList('requests');
   });
   $('submitCash').addEventListener('click',submitCash);
+  $('submitComplaint').addEventListener('click',submitComplaint);
+  $('complaintsTab').addEventListener('click',()=>{switchRequestForm('complaint');$('complaintForm').classList.remove('hidden');$('leaveForm').classList.add('hidden');$('cashForm').classList.add('hidden');$('complaintsTab').classList.add('active');showList('complaints');});
   $('leaveType').addEventListener('change',syncLeaveFields);
   $('submitLeave').addEventListener('click',submitLeave);
   $('refreshReviews').addEventListener('click',loadReviews);
