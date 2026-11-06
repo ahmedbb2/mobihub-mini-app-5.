@@ -47,7 +47,7 @@
       </section>
 
 
-      <section id="requestCenter" class="request-panel">
+      <section id="requestCenter" class="request-panel hidden">
         <div class="section-head request-heading">
           <div><h2>الخدمات والطلبات</h2><p class="muted">اختار الخدمة اللي محتاجها</p></div>
           <span class="section-icon">✦</span>
@@ -100,7 +100,7 @@
       <section id="cashReviewCenter" class="management hidden"><div class="section-head"><h2>مراجعة السلف والعهد</h2><button id="refreshCashReviews" class="text-btn">تحديث</button></div><div id="cashReviewBody" class="review-list">اضغط تحديث لعرض طلبات السلف.</div></section>
 
 
-      <section id="financeCenter" class="request-panel">
+      <section id="financeCenter" class="request-panel hidden">
         <div class="section-head request-heading"><div><h2>الخصومات والمكافآت</h2><p class="muted">ملخصك المالي ومتابعة الاستحقاقات</p></div><span class="section-icon">ج.م</span></div>
         <div class="request-tabs finance-tabs">
           <button class="service-action" id="myFinanceTab" type="button"><span class="service-icon">▤</span><b>ملخصي</b><small>مكافآتي وخصوماتي</small></button>
@@ -171,11 +171,27 @@
           </div>
         </div>
         <div class="home-group">
-          <div class="home-group-head"><b>التقارير والأجهزة</b><small>ملخص الشهر ومتابعة الأجهزة</small></div>
+          <div class="home-group-head"><b>الأجهزة</b><small>تسجيل الأجهزة ومتابعة حركتها</small></div>
           <div class="home-grid">
-            <button class="home-card" data-home-action="monthly"><span class="home-icon">▥</span><b>ملخص الشهر</b><small>تقرير عام عن الشهر</small></button>
-            <button class="home-card" data-home-action="devices"><span class="home-icon">▣</span><b>حالة الجهاز</b><small>متابعة الأجهزة المسجلة</small></button>
+            <button class="home-card hidden" id="registerDeviceCard" data-home-action="device-register"><span class="home-icon">＋</span><b>تسجيل جهاز</b><small>استلام طلب وإسناده لفني</small></button>
+            <button class="home-card" data-home-action="devices"><span class="home-icon">▣</span><b>حالة الأجهزة</b><small>متابعة الأجهزة المسندة إليك</small></button>
           </div>
+        </div>
+        <div class="home-group">
+          <div class="home-group-head"><b>التقارير</b><small>مراجعة الأداء والحضور خلال الشهر</small></div>
+          <div class="home-grid">
+            <button class="home-card" data-home-action="monthly"><span class="home-icon">▥</span><b>ملخص الشهر</b><small>تقرير الحضور والتأخير والأذونات</small></button>
+          </div>
+        </div>
+      </section>
+      <section id="deviceRegisterPanel" class="request-panel hidden">
+        <div class="section-head request-heading"><div><h2>تسجيل جهاز جديد</h2><p class="muted">أدخل رقم الطلب الصادر من نظام الاستلام ثم اختر الفني المسؤول</p></div><span class="section-icon">＋</span></div>
+        <div class="request-form">
+          <div class="notice-soft"><span>ⓘ</span> يتم تسجيل رقم الطلب والإسناد وسجل الحركة. بيانات العميل والجهاز التفصيلية تظل في نظام الاستلام الخارجي.</div>
+          <label>رقم الطلب<input id="deviceOrderId" type="text" maxlength="60" placeholder="رقم الطلب كما يظهر في نظام الاستلام"></label>
+          <label>الفني المسؤول<select id="deviceTechnician"><option value="">اختر الفني المسؤول</option></select></label>
+          <button id="submitDeviceRegister" class="primary-btn submit-action">تسجيل الجهاز وإسناده</button>
+          <p id="deviceRegisterMessage" class="inline-message hidden" aria-live="polite"></p>
         </div>
       </section>
       <section id="management" class="management hidden">

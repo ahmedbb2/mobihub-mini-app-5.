@@ -191,7 +191,9 @@
     if(isManager) {
       $('welcomeEyebrow').textContent = 'لوحة الإدارة والتشغيل';
       manager.classList.remove('hidden'); employee.classList.add('hidden');
-      mount(manager, ['stats','homeActions','attendance','reviewCenter','cashReviewCenter','financeCenter','results','management']);
+      mount(manager, ['stats','homeActions','attendance','reviewCenter','cashReviewCenter','financeCenter','deviceRegisterPanel','results','management']);
+      $('financeCenter').classList.add('hidden');
+      $('deviceRegisterPanel').classList.add('hidden');
       $('requestCenter').classList.add('hidden');
       if(role==='supervisor') {
         $('deductionAdminTab').classList.add('hidden');
@@ -210,7 +212,10 @@
     } else {
       $('welcomeEyebrow').textContent = 'مساحة الموظف';
       employee.classList.remove('hidden'); manager.classList.add('hidden');
-      mount(employee, ['stats','homeActions','attendance','requestCenter','financeCenter','results']);
+      mount(employee, ['stats','homeActions','attendance','requestCenter','financeCenter','deviceRegisterPanel','results']);
+      $('requestCenter').classList.add('hidden');
+      $('financeCenter').classList.add('hidden');
+      $('deviceRegisterPanel').classList.add('hidden');
       $('reviewCenter').classList.add('hidden'); $('cashReviewCenter').classList.add('hidden'); $('management').classList.add('hidden');
       $('financeCenter').classList.remove('hidden');
       $('deductionAdminTab').classList.add('hidden'); $('rewardAdminTab').classList.add('hidden');
@@ -221,7 +226,7 @@
     }
     nav.classList.remove('hidden');
     nav.querySelectorAll('[data-nav-target]').forEach(btn=>btn.addEventListener('click',()=>{
-      const target=$(btn.dataset.navTarget); if(target){target.scrollIntoView({behavior:'smooth',block:'start'});}
+      const target=$(btn.dataset.navTarget); if(target){target.classList.remove('hidden');target.scrollIntoView({behavior:'smooth',block:'start'});}
       nav.querySelectorAll('button').forEach(b=>b.classList.toggle('active',b===btn));
     }));
   }
@@ -238,6 +243,7 @@
       $('userRole').textContent = roleNames[data.profile.role] || data.profile.role;
       renderStats(data.summary);
       buildWorkspace(currentRole, data.permissions);
+      try { const deviceOptions=await api('device_registration_options'); if(deviceOptions.allowed) $('registerDeviceCard').classList.remove('hidden'); } catch (_) { /* hide intake action when not authorized */ }
       if (data.permissions.viewManagement) $('management').classList.remove('hidden');
       if (data.permissions.reviewRequests) { $('reviewCenter').classList.remove('hidden'); await loadReviews(); }
       if (data.permissions.finance) { $('cashReviewCenter').classList.remove('hidden'); await loadCashReviews(); }
@@ -296,17 +302,42 @@
     const scrollTo=id=>{const el=$(id);if(el){el.scrollIntoView({behavior:'smooth',block:'start'});}};
     if(action==='attendance'){scrollTo('attendance');return;}
     if(action==='history'){showAttendanceHistory();return;}
-    if(action==='leave'){$('requestPicker').classList.add('hidden');switchRequestForm('leave');scrollTo('requestCenter');return;}
-    if(action==='cash'){$('requestPicker').classList.add('hidden');switchRequestForm('cash');scrollTo('requestCenter');return;}
-    if(action==='requests'){showRequestPicker();return;}
+    if(action==='leave'){$('requestCenter').classList.remove('hidden');$('requestPicker').classList.add('hidden');switchRequestForm('leave');scrollTo('requestCenter');return;}
+    if(action==='cash'){$('requestCenter').classList.remove('hidden');$('requestPicker').classList.add('hidden');switchRequestForm('cash');scrollTo('requestCenter');return;}
+    if(action==='requests'){$('requestCenter').classList.remove('hidden');showRequestPicker();return;}
     if(action==='settlement'){showList('cash');return;}
-    if(action==='complaint-new'){$('requestPicker').classList.add('hidden');switchRequestForm('complaint');scrollTo('requestCenter');return;}
+    if(action==='complaint-new'){$('requestCenter').classList.remove('hidden');$('requestPicker').classList.add('hidden');switchRequestForm('complaint');scrollTo('requestCenter');return;}
     if(action==='complaint-list'){showList('complaints');return;}
     if(action==='deductions'){showList('deductions');return;}
-    if(action==='rewards'){loadFinanceSummary();scrollTo('financeCenter');return;}
+    if(action==='rewards'){$('financeCenter').classList.remove('hidden');loadFinanceSummary();scrollTo('financeCenter');return;}
     if(action==='monthly'){loadMonthlySummary();return;}
     if(action==='devices'){showList('devices');return;}
+    if(action==='device-register'){openDeviceRegistration();return;}
   }
+  async function openDeviceRegistration(){
+    const panel=$('deviceRegisterPanel');
+    panel.classList.remove('hidden');
+    $('deviceRegisterMessage').classList.add('hidden');
+    $('deviceTechnician').innerHTML='<option value="">جاري تحميل الفنيين...</option>';
+    panel.scrollIntoView({behavior:'smooth',block:'start'});
+    try{
+      const data=await api('device_registration_options');
+      if(!data.allowed){$('registerDeviceCard').classList.add('hidden');$('deviceRegisterMessage').textContent='تسجيل الأجهزة متاح لمسؤول الاستلام أو الإدارة فقط.';$('deviceRegisterMessage').classList.remove('hidden');return;}
+      $('deviceTechnician').innerHTML='<option value="">اختر الفني المسؤول</option>'+(data.technicians||[]).map(e=>`<option value="${escapeHtml(e.id)}">${escapeHtml(e.name)}${e.job?` — ${escapeHtml(e.job)}`:''}</option>`).join('');
+    }catch(e){$('deviceRegisterMessage').textContent=e.message;$('deviceRegisterMessage').classList.remove('hidden');}
+  }
+  async function submitDeviceRegistration(){
+    const b=$('submitDeviceRegister');b.disabled=true;$('deviceRegisterMessage').classList.add('hidden');
+    try{
+      const result=await api('device_register',{orderId:$('deviceOrderId').value,technicianId:$('deviceTechnician').value});
+      $('deviceOrderId').value='';$('deviceTechnician').value='';
+      $('deviceRegisterMessage').textContent=`تم تسجيل الطلب ${result.orderId} وإسناده إلى ${result.technicianName}.`;
+      $('deviceRegisterMessage').classList.remove('hidden');
+      await showList('devices');
+    }catch(e){$('deviceRegisterMessage').textContent=e.message;$('deviceRegisterMessage').classList.remove('hidden');}
+    finally{b.disabled=false;}
+  }
+
   async function loadMonthlySummary(){
     $('results').classList.remove('hidden');$('resultTitle').textContent='ملخص الشهر';$('resultBody').textContent='جاري تحميل التقرير...';
     try{
@@ -480,18 +511,20 @@
     return String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
-  $('newLeaveTab').addEventListener('click',()=>switchRequestForm('leave'));
-  $('newCashTab').addEventListener('click',()=>switchRequestForm('cash'));
+  $('newLeaveTab').addEventListener('click',()=>{$('requestCenter').classList.remove('hidden');switchRequestForm('leave');});
+  $('newCashTab').addEventListener('click',()=>{$('requestCenter').classList.remove('hidden');switchRequestForm('cash');});
   $('myRequestsTab').addEventListener('click',()=>{
+    $('requestCenter').classList.remove('hidden');
     $('leaveForm').classList.add('hidden');$('cashForm').classList.add('hidden');
     $('newLeaveTab').classList.remove('active');$('newCashTab').classList.remove('active');
     $('myRequestsTab').classList.add('active');$('requestMessage').classList.add('hidden');
     showRequestPicker();
   });
   $('submitCash').addEventListener('click',submitCash);
+  $('submitDeviceRegister').addEventListener('click',submitDeviceRegistration);
   document.querySelectorAll('[data-request-entity]').forEach(b=>b.addEventListener('click',()=>showList(b.dataset.requestEntity)));
   document.querySelectorAll('[data-home-action]').forEach(b=>b.addEventListener('click',()=>openHomeAction(b.dataset.homeAction)));
-  $('myFinanceTab').addEventListener('click',loadFinanceSummary);
+  $('myFinanceTab').addEventListener('click',()=>{$('financeCenter').classList.remove('hidden');loadFinanceSummary();});
   $('deductionAdminTab').addEventListener('click',async()=>{switchFinance('deductions');try{await loadFinanceEmployees();await loadPendingDeductions();}catch(e){financeMessage(e.message,true);}});
   $('rewardAdminTab').addEventListener('click',async()=>{switchFinance('rewards');try{await loadFinanceEmployees();}catch(e){financeMessage(e.message,true);}});
   $('submitDeduction').addEventListener('click',submitDeduction);
@@ -499,8 +532,8 @@
   $('submitBonus').addEventListener('click',submitBonus);
   $('hygieneDate').value=new Date().toISOString().slice(0,10);
   $('submitComplaint').addEventListener('click',submitComplaint);
-  $('complaintsTab').addEventListener('click',()=>{switchRequestForm('complaint');$('complaintForm').classList.remove('hidden');$('leaveForm').classList.add('hidden');$('cashForm').classList.add('hidden');$('complaintThread').classList.add('hidden');$('requestPicker').classList.add('hidden');$('complaintsTab').classList.add('active');$('complaintHistoryTab').classList.remove('active');});
-  $('complaintHistoryTab').addEventListener('click',()=>{ $('requestPicker').classList.add('hidden'); $('complaintForm').classList.add('hidden'); showList('complaints'); });
+  $('complaintsTab').addEventListener('click',()=>{$('requestCenter').classList.remove('hidden');switchRequestForm('complaint');$('complaintForm').classList.remove('hidden');$('leaveForm').classList.add('hidden');$('cashForm').classList.add('hidden');$('complaintThread').classList.add('hidden');$('requestPicker').classList.add('hidden');$('complaintsTab').classList.add('active');$('complaintHistoryTab').classList.remove('active');});
+  $('complaintHistoryTab').addEventListener('click',()=>{ $('requestCenter').classList.remove('hidden');$('requestPicker').classList.add('hidden'); $('complaintForm').classList.add('hidden'); showList('complaints'); });
   $('leaveType').addEventListener('change',syncLeaveFields);
   $('submitLeave').addEventListener('click',submitLeave);
   $('refreshReviews').addEventListener('click',loadReviews);

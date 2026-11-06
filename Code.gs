@@ -164,6 +164,14 @@ function doPost(e) {
         data = activeEmployeesMini_(profile);
         break;
 
+      case 'device_registration_options':
+        data = deviceRegistrationOptions_(profile);
+        break;
+
+      case 'device_register':
+        data = registerDeviceMini_(profile, body);
+        break;
+
       case 'complaint_create':
         data = createComplaint_(profile, body);
         break;
@@ -479,10 +487,60 @@ function listData_(profile, entity) {
   const visibleRows = canViewAll
     ? rows
     : rows.filter(function(row) {
+        if (entity === 'devices') return String(row['الموظف المسؤول Chat ID'] || '').trim() === profile.chatId || String(row['مسؤول الاستلام Chat ID'] || '').trim() === profile.chatId;
         return String(row[definition.owner]).trim() === profile.chatId;
       });
 
   return visibleRows.slice(-100).reverse();
+}
+
+/* DEVICE INTAKE + ASSIGNMENT — V1.9
+ * Mirrors the existing V40 intake policy and sheet layout.
+ */
+const MH_DEVICE = Object.freeze({
+  DEVICE_HEADERS: ['رقم الطلب','تاريخ الاستلام','اسم الجهاز','اسم العميل','المشكلة المسجلة','مسؤول الاستلام Chat ID','مسؤول الاستلام','الموظف المسؤول Chat ID','الموظف المسؤول','القسم','حالة الجهاز','مكان الجهاز','آخر تحديث'],
+  MOVEMENT_HEADERS: ['التاريخ والوقت','رقم الطلب','نوع الحركة','من Chat ID','من الموظف','إلى Chat ID','إلى الموظف','الحالة','المكان','ملاحظات','منفذ الحركة Chat ID','منفذ الحركة']
+});
+function deviceIntakeAllowed_(profile) {
+  if (['super_admin','admin','supervisor'].includes(profile.role)) return true;
+  const rows = rowsAsObjects_(spreadsheet_(), MH.SHEETS.employees);
+  const employee = rows.find(r => String(r['Chat ID']).trim() === profile.chatId && String(r['الحالة']).trim() === 'نشط' && String(r['حالة الحساب'] || 'نشط').trim() === 'نشط');
+  return !!employee && /استلام|مدير|مشرف/i.test(String(employee['الوظيفة'] || ''));
+}
+function deviceRegistrationOptions_(profile) {
+  if (!deviceIntakeAllowed_(profile)) return {allowed:false,technicians:[]};
+  const employees = rowsAsObjects_(spreadsheet_(), MH.SHEETS.employees).filter(r => {
+    const job = String(r['الوظيفة'] || '');
+    return String(r['Chat ID'] || '').trim() && String(r['الحالة'] || '').trim() === 'نشط' && String(r['حالة الحساب'] || 'نشط').trim() === 'نشط' && !/استلام/i.test(job);
+  });
+  return {allowed:true,technicians:employees.slice(0,100).map(r=>({id:String(r['Chat ID']).trim(),name:String(r['اسم الموظف']||''),job:String(r['الوظيفة']||'')}))};
+}
+function registerDeviceMini_(profile, body) {
+  if (!deviceIntakeAllowed_(profile)) throw new Error('FORBIDDEN');
+  const orderId = String(body.orderId || '').trim();
+  const technicianId = String(body.technicianId || '').trim();
+  if (!/^[A-Za-z0-9_#-]{3,60}$/.test(orderId)) throw new Error('INVALID_DEVICE_ORDER');
+  if (!technicianId) throw new Error('INVALID_DEVICE_TECHNICIAN');
+  const ss = spreadsheet_(), sh = ss.getSheetByName(MH.SHEETS.devices), movement = ss.getSheetByName('سجل حركة الأجهزة');
+  if (!sh || !movement) throw new Error('DEVICE_SHEETS_MISSING');
+  mhAssertHeaders_(sh, MH_DEVICE.DEVICE_HEADERS);
+  mhAssertHeaders_(movement, MH_DEVICE.MOVEMENT_HEADERS);
+  const employees = rowsAsObjects_(ss, MH.SHEETS.employees);
+  const intake = employees.find(r=>String(r['Chat ID']).trim()===profile.chatId && String(r['الحالة']).trim()==='نشط' && String(r['حالة الحساب']||'نشط').trim()==='نشط');
+  const technician = employees.find(r=>String(r['Chat ID']).trim()===technicianId && String(r['الحالة']).trim()==='نشط' && String(r['حالة الحساب']||'نشط').trim()==='نشط');
+  const isManager = ['super_admin','admin','supervisor'].includes(profile.role);
+  if (!technician) throw new Error('INVALID_DEVICE_TECHNICIAN');
+  if (/استلام/i.test(String(technician['الوظيفة']||''))) throw new Error('INVALID_DEVICE_TECHNICIAN');
+  const lock=LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    const existing = rowsAsObjects_(ss, MH.SHEETS.devices).some(r=>String(r['رقم الطلب']).trim()===orderId);
+    if (existing) throw new Error('DEVICE_ORDER_EXISTS');
+    const now=mhNow_();
+    const intakeName = intake ? String(intake['اسم الموظف']||profile.name) : profile.name;
+    sh.appendRow([orderId,now,'','','',profile.chatId,intakeName,technicianId,String(technician['اسم الموظف']||''),String(technician['الوظيفة']||''),'تم الاستلام','قسم الاستلام',now]);
+    movement.appendRow([now,orderId,'استلام وإسناد الجهاز','', '',technicianId,String(technician['اسم الموظف']||''),'تم الاستلام','قسم الاستلام','تم التسجيل برقم الطلب فقط',profile.chatId,intakeName]);
+  } finally { lock.releaseLock(); }
+  return {registered:true,orderId,technicianName:String(technician['اسم الموظف']||'')};
 }
 
 /**
