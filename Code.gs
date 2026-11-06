@@ -10,7 +10,7 @@
  */
 
 const MH = Object.freeze({
-  VERSION: '1.9.3',
+  VERSION: '1.9.4',
   TZ: 'Africa/Cairo',
   AUTH_MAX_AGE_SECONDS: 300,
   SHEETS: {
@@ -80,7 +80,7 @@ function doPost(e) {
       });
     }
 
-    const profile = resolveProfile_(String(telegramUser.id));
+    const profile = resolveProfile_(String(telegramUser.id), String(body.workspaceRole || ''));
 
     if (!profile || profile.status !== 'نشط') {
       return json_({
@@ -343,41 +343,60 @@ function constantTimeEqual_(a, b) {
 }
 
 /**
- * Resolve the Telegram user against the TEST workbook.
- * Manager records take precedence over employee records.
+ * Resolve the Telegram user against the workbook.
+ * A Telegram account may have both an active employee record and an active
+ * manager record. The requested workspace is always revalidated server-side.
+ *
+ * workspaceRole: "employee" or "manager". If omitted, manager takes
+ * precedence for backwards compatibility with the original Mini App.
  */
-function resolveProfile_(chatId) {
+function resolveProfile_(chatId, requestedWorkspace) {
   const ss = spreadsheet_();
-
   const managerRows = rowsAsObjects_(ss, MH.SHEETS.managers);
+  const employeeRows = rowsAsObjects_(ss, MH.SHEETS.employees);
+
   const manager = managerRows.find(function(row) {
     return String(row['Chat ID']).trim() === chatId &&
       String(row['الحالة']).trim() === 'نشط';
   });
-
-  if (manager) {
-    return {
-      chatId: chatId,
-      name: String(manager['اسم المدير'] || ''),
-      role: normalizeRole_(String(manager['الصلاحية'] || 'Admin')),
-      status: 'نشط'
-    };
-  }
-
-  const employeeRows = rowsAsObjects_(ss, MH.SHEETS.employees);
   const employee = employeeRows.find(function(row) {
     return String(row['Chat ID']).trim() === chatId &&
       String(row['الحالة']).trim() === 'نشط' &&
       String(row['حالة الحساب'] || 'نشط').trim() === 'نشط';
   });
 
-  if (!employee) return null;
+  const availableWorkspaces = [];
+  if (employee) availableWorkspaces.push('employee');
+  if (manager) availableWorkspaces.push('manager');
+  if (!availableWorkspaces.length) return null;
+
+  let workspace = String(requestedWorkspace || '').trim().toLowerCase();
+  if (!workspace) workspace = manager ? 'manager' : 'employee';
+  if (workspace !== 'employee' && workspace !== 'manager') {
+    throw new Error('INVALID_WORKSPACE');
+  }
+  if (availableWorkspaces.indexOf(workspace) < 0) {
+    throw new Error('WORKSPACE_NOT_ALLOWED');
+  }
+
+  if (workspace === 'manager') {
+    return {
+      chatId: chatId,
+      name: String(manager['اسم المدير'] || ''),
+      role: normalizeRole_(String(manager['الصلاحية'] || 'Admin')),
+      status: 'نشط',
+      workspace: 'manager',
+      availableWorkspaces: availableWorkspaces
+    };
+  }
 
   return {
     chatId: chatId,
     name: String(employee['اسم الموظف'] || ''),
-    role: normalizeRole_(String(employee['الوظيفة'] || 'Employee')),
-    status: 'نشط'
+    role: 'employee',
+    status: 'نشط',
+    workspace: 'employee',
+    availableWorkspaces: availableWorkspaces
   };
 }
 

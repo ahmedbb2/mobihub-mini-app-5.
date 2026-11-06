@@ -8,6 +8,9 @@
   let currentAttendance = null;
   let pendingUniform = false;
   let currentRole = 'employee';
+  let workspaceRole = '';
+  let availableWorkspaces = [];
+  let switchingWorkspace = false;
   let modalRestore = null;
 
   function openModal(title, element) {
@@ -100,7 +103,7 @@
     const response = await fetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ initData, action, ...extra })
+      body: JSON.stringify({ initData, workspaceRole, action, ...extra })
     });
     const result = await response.json();
     if (!response.ok || !result.ok) {
@@ -232,7 +235,8 @@
     if(isManager) {
       $('welcomeEyebrow').textContent = 'لوحة الإدارة والتشغيل';
       manager.classList.remove('hidden'); employee.classList.add('hidden');
-      mount(manager, ['stats','attendance','reviewCenter','cashReviewCenter','financeCenter','deviceRegisterPanel','results','management']);
+      mount(manager, ['stats','reviewCenter','cashReviewCenter','financeCenter','deviceRegisterPanel','results','management']);
+      $('attendance').classList.add('hidden');
       $('homeActions').classList.add('hidden');
       $('financeCenter').classList.add('hidden');
       $('deviceRegisterPanel').classList.add('hidden');
@@ -248,7 +252,7 @@
       if(!permissions.finance) $('cashReviewCenter').classList.add('hidden');
       if(role==='finance') $('attendance').classList.add('hidden');
       nav.innerHTML = [
-        ['stats','نظرة عامة','▦'],['attendance','الحضور','◷'],['reviewCenter','مراجعة الطلبات','✓'],
+        ['stats','نظرة عامة','▦'],['reviewCenter','مراجعة الطلبات','✓'],
         ['cashReviewCenter','السلف والعهد','ج.م'],['financeCenter','الخصومات والمكافآت','★']
       ].filter(([id])=>{const n=$(id);return n&&!n.classList.contains('hidden')}).map(([id,label,icon])=>`<button type="button" data-nav-target="${id}"><span>${icon}</span>${label}</button>`).join('');
     } else {
@@ -275,6 +279,64 @@
       }));
     }
   }
+  function applyWorkspaceProfile(data) {
+    currentRole = data.profile.role || 'employee';
+    workspaceRole = data.profile.workspace || (MANAGER_ROLES.includes(currentRole) ? 'manager' : 'employee');
+    availableWorkspaces = Array.isArray(data.profile.availableWorkspaces)
+      ? data.profile.availableWorkspaces : [workspaceRole];
+
+    $('userName').textContent = data.profile.name;
+    const roleNames = { employee: 'مهندس', supervisor: 'مشرف', admin: 'مدير', finance: 'مالية', super_admin: 'مدير النظام' };
+    $('userRole').textContent = roleNames[currentRole] || currentRole;
+    $('workspaceSwitch').classList.toggle('hidden', !(availableWorkspaces.includes('employee') && availableWorkspaces.includes('manager')));
+    $('workspaceSwitch').textContent = workspaceRole === 'manager' ? 'لوحة المهندس' : 'لوحة المدير';
+    $('workspaceSwitch').setAttribute('aria-label', workspaceRole === 'manager' ? 'التحويل إلى لوحة المهندس' : 'التحويل إلى لوحة المدير');
+
+    renderStats(data.summary || {});
+    buildWorkspace(currentRole, data.permissions || {});
+    $('management').classList.toggle('hidden', !data.permissions?.viewManagement);
+    $('reviewCenter').classList.toggle('hidden', !data.permissions?.reviewRequests);
+    $('cashReviewCenter').classList.toggle('hidden', !data.permissions?.finance);
+  }
+
+  async function switchWorkspace() {
+    if (switchingWorkspace || availableWorkspaces.length < 2) return;
+    const previousWorkspace = workspaceRole;
+    const nextWorkspace = previousWorkspace === 'manager' ? 'employee' : 'manager';
+    if (!availableWorkspaces.includes(nextWorkspace)) return;
+
+    switchingWorkspace = true;
+    $('workspaceSwitch').disabled = true;
+    $('workspaceSwitch').textContent = 'جارٍ التحويل...';
+    try {
+      workspaceRole = nextWorkspace;
+      const data = await api('bootstrap');
+      applyWorkspaceProfile(data);
+
+      if (workspaceRole === 'manager') {
+        if (data.permissions?.reviewRequests) await loadReviews();
+        if (data.permissions?.finance) await loadCashReviews();
+        $('attendance').classList.add('hidden');
+      } else {
+        try { await refreshAttendance(); } catch (e) { showAttendanceMessage(e.message, true); }
+        $('attendance').classList.add('hidden');
+        $('requestCenter').classList.add('hidden');
+        $('financeCenter').classList.add('hidden');
+        $('deviceRegisterPanel').classList.add('hidden');
+      }
+      $('connection').textContent = 'متصل';
+      if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (e) {
+      workspaceRole = previousWorkspace;
+      $('workspaceSwitch').textContent = previousWorkspace === 'manager' ? 'لوحة المهندس' : 'لوحة المدير';
+      fail(e.message);
+    } finally {
+      switchingWorkspace = false;
+      $('workspaceSwitch').disabled = false;
+    }
+  }
+
   async function start() {
     if (!tg) return fail('افتح التطبيق من زر Mini App داخل بوت MobiHub.');
     tg.ready(); tg.expand();
@@ -282,18 +344,17 @@
     if (!initData) return fail('بيانات Telegram غير متاحة. افتح التطبيق من داخل Telegram.');
     try {
       const data = await api('bootstrap');
-      currentRole = data.profile.role || 'employee';
-      $('userName').textContent = data.profile.name;
-      const roleNames = { employee: 'مهندس', supervisor: 'مشرف', admin: 'مدير', finance: 'مالية', super_admin: 'مدير النظام' };
-      $('userRole').textContent = roleNames[data.profile.role] || data.profile.role;
-      renderStats(data.summary);
-      buildWorkspace(currentRole, data.permissions);
+      applyWorkspaceProfile(data);
       try { const deviceOptions=await api('device_registration_options'); if(deviceOptions.allowed) $('registerDeviceCard').classList.remove('hidden'); } catch (_) { /* hide intake action when not authorized */ }
-      if (data.permissions.viewManagement) $('management').classList.remove('hidden');
-      if (data.permissions.reviewRequests) { $('reviewCenter').classList.remove('hidden'); await loadReviews(); }
-      if (data.permissions.finance) { $('cashReviewCenter').classList.remove('hidden'); await loadCashReviews(); }
+      if (data.permissions.reviewRequests) await loadReviews();
+      if (data.permissions.finance) await loadCashReviews();
       $('connection').textContent = 'متصل'; $('connection').style.color = '#8be0aa';
-      try { await refreshAttendance(); if (!MANAGER_ROLES.includes(currentRole)) $('attendance').classList.add('hidden'); } catch (e) { if (MANAGER_ROLES.includes(currentRole)) $('attendance').classList.remove('hidden'); showAttendanceMessage(e.message, true); }
+      if (workspaceRole === 'employee') {
+        try { await refreshAttendance(); $('attendance').classList.add('hidden'); }
+        catch (e) { $('attendance').classList.add('hidden'); showAttendanceMessage(e.message, true); }
+      } else {
+        $('attendance').classList.add('hidden');
+      }
     } catch (e) { fail(e.message); }
   }
 
@@ -585,6 +646,7 @@
     return String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
+  $('workspaceSwitch').addEventListener('click', switchWorkspace);
   $('modalClose').addEventListener('click',closeModal);
   $('appModal').querySelectorAll('[data-modal-close]').forEach(el=>el.addEventListener('click',closeModal));
   document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('appModal').classList.contains('hidden'))closeModal();});
