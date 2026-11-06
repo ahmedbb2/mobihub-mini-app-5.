@@ -26,7 +26,7 @@
     INVALID_LEAVE_DATE: 'اختر تاريخ اليوم أو تاريخًا قادمًا صحيحًا.', DUPLICATE_LEAVE_OVERLAP: 'لديك طلب إذن معلق أو معتمد يتعارض مع هذه الفترة.',
     NO_ACTIVE_SHIFT_ASSIGNED: 'لا توجد وردية نشطة لك في هذا التاريخ.', LEAVE_OUTSIDE_SHIFT: 'وقت أو مدة الإذن خارج حدود ورديتك.',
     LEAVE_START_NOT_FUTURE: 'بداية الإذن يجب أن تكون في وقت قادم.', FULL_DAY_LEAVE_AFTER_SHIFT_START: 'لا يمكن طلب إذن يوم كامل بعد بداية الوردية.',
-    LEAVE_CONFLICT_CONFIRMED_ABSENCE: 'لا يمكن اعتماد الإذن بعد تأكيد الغياب لهذا التاريخ.', REQUEST_ALREADY_REVIEWED: 'تمت مراجعة الطلب بالفعل.', LEAVE_ALREADY_REVIEWED: 'تمت مراجعة الإذن بالفعل.', INVALID_REQUEST_TYPE: 'نوع الطلب غير صحيح.', INVALID_LEAVE_TYPE: 'نوع الإذن غير صحيح.', INVALID_LEAVE_DAYS: 'عدد الأيام غير متاح.', INVALID_LEAVE_HOURS: 'مدة الإذن غير متاحة.', INVALID_LEAVE_TIME: 'وقت الإذن غير صحيح.', REQUEST_NOT_FOUND: 'الطلب غير موجود.', LEAVE_NOT_FOUND: 'طلب الإذن غير موجود.', INVALID_DECISION: 'القرار أو رقم السجل غير صحيح.', SHEET_SCHEMA_MISMATCH: 'أعمدة الشيت لا تطابق النسخة المطلوبة. أوقف الاختبار وراجع الأعمدة.'
+    LEAVE_CONFLICT_CONFIRMED_ABSENCE: 'لا يمكن اعتماد الإذن بعد تأكيد الغياب لهذا التاريخ.', REQUEST_ALREADY_REVIEWED: 'تمت مراجعة الطلب بالفعل.', LEAVE_ALREADY_REVIEWED: 'تمت مراجعة الإذن بالفعل.', INVALID_REQUEST_TYPE: 'نوع الطلب غير صحيح.', INVALID_LEAVE_TYPE: 'نوع الإذن غير صحيح.', INVALID_LEAVE_DAYS: 'عدد الأيام غير متاح.', INVALID_LEAVE_HOURS: 'مدة الإذن غير متاحة.', INVALID_LEAVE_TIME: 'وقت الإذن غير صحيح.', REQUEST_NOT_FOUND: 'الطلب غير موجود.', LEAVE_NOT_FOUND: 'طلب الإذن غير موجود.', INVALID_DECISION: 'القرار أو رقم السجل غير صحيح.', INVALID_CASH_AMOUNT: 'اكتب مبلغًا موجبًا صحيحًا بالجنيه.', INVALID_CASH_PURPOSE: 'اكتب الغرض من السلفة بوضوح (3 أحرف على الأقل).', CASH_ALREADY_REVIEWED: 'تمت مراجعة طلب السلفة بالفعل.', CASH_PAYOUT_NOT_ALLOWED: 'لا يمكن تسجيل الصرف قبل الموافقة أو تم تسجيل الصرف بالفعل.', CASH_REQUEST_NOT_FOUND: 'طلب السلفة غير موجود.', OPEN_CASH_CUSTODY: 'لا يمكن تسجيل الانصراف قبل إغلاق العهدة المفتوحة وتسوية المبلغ المتبقي.', SHEET_SCHEMA_MISMATCH: 'أعمدة الشيت لا تطابق النسخة المطلوبة. أوقف الاختبار وراجع الأعمدة.'
   };
 
   function fail(message) {
@@ -164,6 +164,7 @@
       renderStats(data.summary);
       if (data.permissions.viewManagement) $('management').classList.remove('hidden');
       if (data.permissions.reviewRequests) { $('reviewCenter').classList.remove('hidden'); await loadReviews(); }
+      if (data.permissions.finance) { $('cashReviewCenter').classList.remove('hidden'); await loadCashReviews(); }
       $('connection').textContent = 'متصل'; $('connection').style.color = '#8be0aa';
       try { await refreshAttendance(); } catch (e) { $('attendance').classList.remove('hidden'); showAttendanceMessage(e.message, true); }
     } catch (e) { fail(e.message); }
@@ -178,18 +179,21 @@
       if (!rows.length) { $('resultBody').textContent = 'لا توجد سجلات.'; return; }
       $('resultBody').innerHTML = rows.map(row => {
         const title = row['رقم الطلب'] || row['رقم الشكوى'] || row['نوع الطلب'] || row['نوع الإذن'] || 'سجل';
-        const status = row['الحالة'] || row['القرار'] || '';
+        const status = row['حالة العهدة'] || row['حالة التسوية'] || row['حالة الصرف'] || row['الحالة'] || row['القرار'] || '';
         const date = row['التاريخ والوقت'] || row['تاريخ الإرسال'] || '';
-        return `<article class="record"><strong>${escapeHtml(title)}</strong><small>${escapeHtml(status)} · ${escapeHtml(date)}</small></article>`;
+        const canSettle = entity === 'cash' && row['حالة الصرف'] === 'تم الصرف' && ['عهدة مفتوحة','مرفوضة - تحتاج مراجعة'].includes(String(row['حالة العهدة']||''));
+        const settlement = canSettle ? `<div class="cash-settlement"><strong>تسوية العهدة</strong><label>إجمالي المصروف الفعلي بالجنيه<input type="number" min="0" step="0.01" id="spent-${Number(row.__row)}" placeholder="مثال: 650"></label><label>تفاصيل المصروفات<textarea id="settle-note-${Number(row.__row)}" rows="2" maxlength="1500" placeholder="اكتب تفاصيل المصروفات"></textarea></label><button class="primary-btn" data-settle-row="${Number(row.__row)}">إرسال التسوية</button></div>` : '';
+        return `<article class="record"><strong>${escapeHtml(title)}</strong><small class="record-meta">${escapeHtml(status)} · ${escapeHtml(date)}</small><small class="record-meta">المبلغ: ${escapeHtml(row['المبلغ المعتمد بالجنيه'] || row['المبلغ المطلوب بالجنيه'] || '—')} جنيه · المصروف: ${escapeHtml(row['المصروف الفعلي بالجنيه'] || 'لم يسجل')} · المطلوب إرجاعه: ${escapeHtml(row['المبلغ المطلوب إرجاعه بالجنيه'] || '—')}</small>${settlement}</article>`;
       }).join('');
+      $('resultBody').querySelectorAll('[data-settle-row]').forEach(b => b.addEventListener('click', async () => {
+        const row=Number(b.dataset.settleRow), spent=$(`spent-${row}`).value, notes=$(`settle-note-${row}`).value;
+        b.disabled=true;
+        try { const r=await api('cash_settlement_submit',{row,actualSpent:spent,notes}); messageRequest(`تم إرسال التسوية. المتبقي المطلوب إرجاعه: ${r.amountToReturn} جنيه.`); await showList('cash'); }
+        catch(e){messageRequest(e.message,true);b.disabled=false;}
+      }));
     } catch (e) { $('resultBody').textContent = e.message; }
   }
 
-  async function submitRequest() {
-    const b=$('submitRequest'); b.disabled=true; $('requestMessage').classList.add('hidden');
-    try { const result=await api('request_create',{requestType:$('requestType').value,details:$('requestDetails').value}); $('requestDetails').value=''; messageRequest(result.message||'تم إرسال الطلب بنجاح'); await showList('requests'); }
-    catch(e){messageRequest(e.message,true);} finally{b.disabled=false;}
-  }
   async function submitLeave() {
     const b=$('submitLeave'); b.disabled=true; $('requestMessage').classList.add('hidden');
     const type=$('leaveType').value, payload={leaveType:type,date:$('leaveDate').value,reason:$('leaveReason').value};
@@ -197,8 +201,49 @@
     try { const result=await api('leave_create',payload); $('leaveReason').value=''; messageRequest(`${result.message} · رقم الطلب ${result.requestId}`); await showList('leaves'); }
     catch(e){messageRequest(e.message,true);} finally{b.disabled=false;}
   }
+  async function submitCash(){
+    const b=$('submitCash'); b.disabled=true; $('requestMessage').classList.add('hidden');
+    try { const result=await api('cash_create',{amount:$('cashAmount').value,purpose:$('cashPurpose').value}); $('cashAmount').value=''; $('cashPurpose').value=''; messageRequest(`${result.message} رقم الطلب: ${result.requestId}`); await showList('cash'); }
+    catch(e){messageRequest(e.message,true);} finally{b.disabled=false;}
+  }
+  async function loadCashReviews(){
+    const box=$('cashReviewBody'); box.textContent='جاري تحميل طلبات السلف والتسويات...';
+    try {
+      const rows=await api('list',{entity:'cash'});
+      const cards=[];
+      rows.forEach(r=>{
+        const status=String(r['الحالة']||'');
+        const payout=String(r['حالة الصرف']||'');
+        const custody=String(r['حالة العهدة']||'');
+        const settlement=String(r['حالة التسوية']||'');
+        const base=`<p>${escapeHtml(r['اسم الموظف']||'')} · ${escapeHtml(r['المبلغ المطلوب بالجنيه']||'—')} جنيه<br>${escapeHtml(r['الغرض']||'')}<br>${escapeHtml(r['التاريخ والوقت']||'')}</p>`;
+        if(status==='قيد المراجعة') cards.push(`<article class="review-item"><strong>${escapeHtml(r['رقم الطلب']||'طلب سلفة')} · طلب جديد</strong>${base}<div class="review-actions"><button class="primary-btn" data-cash-row="${r.__row}" data-cash-decision="مقبول">موافقة</button><button class="secondary-btn" data-cash-row="${r.__row}" data-cash-decision="مرفوض">رفض</button></div></article>`);
+        if(status==='تمت الموافقة' && payout!=='تم الصرف') cards.push(`<article class="review-item"><strong>${escapeHtml(r['رقم الطلب']||'طلب سلفة')} · بانتظار الصرف</strong>${base}<div class="review-actions"><button class="primary-btn" data-cash-row="${r.__row}" data-cash-decision="تم الصرف">تأكيد صرف العهدة</button></div></article>`);
+        if(settlement==='بانتظار مراجعة التسوية') cards.push(`<article class="review-item"><strong>${escapeHtml(r['رقم الطلب']||'عهدة')} · مراجعة التسوية</strong><p>${escapeHtml(r['اسم الموظف']||'')}<br>المعتمد: ${escapeHtml(r['المبلغ المعتمد بالجنيه']||'—')} جنيه<br>المصروف: ${escapeHtml(r['المصروف الفعلي بالجنيه']||'—')} جنيه<br>المطلوب إرجاعه: ${escapeHtml(r['المبلغ المطلوب إرجاعه بالجنيه']||'—')} جنيه<br>ملاحظات: ${escapeHtml(r['ملاحظات التسوية']||'—')}</p><div class="review-actions"><button class="primary-btn" data-settle-review="${r.__row}" data-settle-decision="مقبول">اعتماد التسوية</button><button class="secondary-btn" data-settle-review="${r.__row}" data-settle-decision="مرفوض">إرجاع للتصحيح</button></div></article>`);
+        if(custody==='بانتظار تأكيد استلام المتبقي') cards.push(`<article class="review-item"><strong>${escapeHtml(r['رقم الطلب']||'عهدة')} · استلام المتبقي</strong><p>${escapeHtml(r['اسم الموظف']||'')}<br>المبلغ المطلوب استلامه: ${escapeHtml(r['المبلغ المطلوب إرجاعه بالجنيه']||'—')} جنيه</p><div class="review-actions"><button class="primary-btn" data-return-confirm="${r.__row}">تأكيد استلام المبلغ</button></div></article>`);
+      });
+      box.innerHTML=cards.length?cards.join(''):'لا توجد طلبات سلف أو تسويات معلقة.';
+      box.querySelectorAll('[data-cash-row]').forEach(b=>b.addEventListener('click',()=>decideCash(b.dataset.cashRow,b.dataset.cashDecision)));
+      box.querySelectorAll('[data-settle-review]').forEach(b=>b.addEventListener('click',()=>reviewCashSettlement(b.dataset.settleReview,b.dataset.settleDecision)));
+      box.querySelectorAll('[data-return-confirm]').forEach(b=>b.addEventListener('click',()=>confirmCashReturn(b.dataset.returnConfirm)));
+    } catch(e){box.textContent=e.message;}
+  }
+  async function reviewCashSettlement(row,decision){
+    const note=prompt(decision==='مقبول'?'ملاحظات اعتماد التسوية (اختياري):':'سبب إرجاع التسوية للتصحيح:')||'';
+    if(decision==='مرفوض'&&!note.trim()){messageRequest('اكتب سبب إرجاع التسوية للتصحيح.',true);return;}
+    if(!confirm(`تأكيد ${decision==='مقبول'?'اعتماد':'إرجاع'} التسوية؟`))return;
+    try{await api('cash_settlement_decide',{row:Number(row),decision,note});await loadCashReviews();messageRequest('تم تحديث التسوية.');}
+    catch(e){messageRequest(e.message,true);}
+  }
+  async function confirmCashReturn(row){
+    if(!confirm('هل تم استلام المبلغ المتبقي فعليًا؟'))return;
+    try{await api('cash_return_confirm',{row:Number(row)});await loadCashReviews();messageRequest('تم إغلاق العهدة.');}
+    catch(e){messageRequest(e.message,true);}
+  }
+  async function decideCash(row,decision){ const note=decision==='مرفوض'?prompt('سبب الرفض (اختياري):')||'':''; if(!confirm(`تأكيد إجراء «${decision}»؟`))return; try{await api('cash_decide',{row:Number(row),decision,note});await loadCashReviews();messageRequest('تم تحديث طلب السلفة.');}catch(e){messageRequest(e.message,true);} }
+
   function messageRequest(text,isError=false){const el=$('requestMessage');el.textContent=text;el.classList.toggle('is-error',isError);el.classList.remove('hidden');}
-  function switchRequestForm(which){$('requestForm').classList.toggle('hidden',which!=='request');$('leaveForm').classList.toggle('hidden',which!=='leave');}
+  function switchRequestForm(which){$('leaveForm').classList.toggle('hidden',which!=='leave');$('cashForm').classList.toggle('hidden',which!=='cash');$('requestMessage').classList.add('hidden');}
   function syncLeaveFields(){const hourly=$('leaveType').value==='بالساعات';$('leaveDaysWrap').classList.toggle('hidden',hourly);$('leaveHoursWrap').classList.toggle('hidden',!hourly);}
   async function loadReviews(){
     const box=$('reviewBody'); box.textContent='جاري تحميل الطلبات المعلقة...';
@@ -218,12 +263,14 @@
     return String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
-  $('newRequestTab').addEventListener('click',()=>switchRequestForm('request'));
   $('newLeaveTab').addEventListener('click',()=>switchRequestForm('leave'));
+  $('newCashTab').addEventListener('click',()=>switchRequestForm('cash'));
+  $('myRequestsTab').addEventListener('click',()=>showList('requests'));
+  $('submitCash').addEventListener('click',submitCash);
   $('leaveType').addEventListener('change',syncLeaveFields);
-  $('submitRequest').addEventListener('click',submitRequest);
   $('submitLeave').addEventListener('click',submitLeave);
   $('refreshReviews').addEventListener('click',loadReviews);
+  $('refreshCashReviews').addEventListener('click',loadCashReviews);
   $('checkinBtn').addEventListener('click', () => withLocation('attendance_checkin', $('checkinBtn')));
   $('checkoutBtn').addEventListener('click', () => withLocation('attendance_checkout', $('checkoutBtn')));
   $('historyBtn').addEventListener('click', showAttendanceHistory);

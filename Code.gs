@@ -10,7 +10,7 @@
  */
 
 const MH = Object.freeze({
-  VERSION: '1.3.0',
+  VERSION: '1.5.0',
   TZ: 'Africa/Cairo',
   AUTH_MAX_AGE_SECONDS: 300,
   SHEETS: {
@@ -133,6 +133,25 @@ function doPost(e) {
 
       case 'leave_decide':
         data = decideLeaveRequest_(profile, body);
+        break;
+
+      case 'cash_create':
+        data = createCashRequest_(profile, body);
+        break;
+
+      case 'cash_decide':
+        data = decideCashRequest_(profile, body);
+        break;
+      case 'cash_settlement_submit':
+        data = submitCashSettlement_(profile, body);
+        break;
+
+      case 'cash_settlement_decide':
+        data = decideCashSettlement_(profile, body);
+        break;
+
+      case 'cash_return_confirm':
+        data = confirmCashReturn_(profile, body);
         break;
 
       default:
@@ -522,6 +541,12 @@ function attendanceCheckout_(profile, location) {
     const rows = mhRows_(ss, MH.SHEETS.attendance).filter(r => String(r['Chat ID']).trim() === profile.chatId);
     const open = mhFindOpenAttendance_(rows);
     if (!open) throw new Error('NO_OPEN_ATTENDANCE');
+    const openCustody = mhRows_(ss, MH.SHEETS.cash).some(r =>
+      String(r['Chat ID']).trim() === profile.chatId &&
+      String(r['حالة الصرف']).trim() === 'تم الصرف' &&
+      ['عهدة مفتوحة','بانتظار مراجعة التسوية','بانتظار تأكيد استلام المتبقي','بانتظار صرف التعويض'].includes(String(r['حالة العهدة'] || '').trim())
+    );
+    if (openCustody) throw new Error('OPEN_CASH_CUSTODY');
     const date = mhToday_();
     const time = mhNow_('HH:mm:ss');
     sheet.appendRow([date, time, profile.chatId, profile.name, 'انصراف', Math.round(gps.distance), gps.accuracy, gps.lat, gps.lon, 'تم تسجيل الانصراف', 0, open.shiftId || '', '']);
@@ -857,6 +882,142 @@ function mhRowsObjects_(sh) {
   });
 }
 function mhManagerName_(profile) { return profile.name || profile.chatId; }
+
+/* CASH ADVANCE / CUSTODY MODULE — V1.4 */
+const MH_CASH = Object.freeze({
+  HEADERS: ['رقم الطلب','التاريخ والوقت','Chat ID','اسم الموظف','المبلغ المطلوب بالجنيه','الغرض','الحالة','المبلغ المعتمد بالجنيه','حالة الصرف','المسؤول عن الصرف','تاريخ الصرف','حالة العهدة','ملاحظات المدير','تاريخ آخر تحديث','المصروف الفعلي بالجنيه','المبلغ المطلوب إرجاعه بالجنيه','المبلغ الإضافي المستحق للموظف بالجنيه','حالة التسوية','تاريخ تقديم التسوية','تاريخ تأكيد استلام المتبقي','المسؤول عن استلام المتبقي','حالة التعويض','تاريخ اعتماد التعويض','تاريخ صرف التعويض','ملاحظات التسوية','Chat ID آخر مدير قرار','اسم آخر مدير قرار'],
+  REVIEW_ROLES: ['super_admin','admin','finance']
+});
+function createCashRequest_(profile, body) {
+  if (profile.role !== 'employee') throw new Error('EMPLOYEE_ONLY');
+  const amountRaw = String(body.amount ?? '').replace(/[٬,]/g, '').trim();
+  const amount = Number(amountRaw), purpose = String(body.purpose || '').trim();
+  if (!/^\d+(?:\.\d{1,2})?$/.test(amountRaw) || !Number.isFinite(amount) || amount <= 0 || amount > 1000000) throw new Error('INVALID_CASH_AMOUNT');
+  if (purpose.length < 3 || purpose.length > 1000) throw new Error('INVALID_CASH_PURPOSE');
+  const sh = mhSheet_(MH.SHEETS.cash); mhAssertHeaders_(sh, MH_CASH.HEADERS);
+  const lock = LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    const id = 'CASH-' + Utilities.formatDate(new Date(), MH.TZ, 'yyyyMMdd-HHmmss') + '-' + String(profile.chatId).slice(-4);
+    const row = new Array(MH_CASH.HEADERS.length).fill('');
+    const set = (h,v) => row[MH_CASH.HEADERS.indexOf(h)] = v;
+    set('رقم الطلب',id); set('التاريخ والوقت',mhNow_()); set('Chat ID',profile.chatId); set('اسم الموظف',profile.name);
+    set('المبلغ المطلوب بالجنيه',amount); set('الغرض',purpose); set('الحالة','قيد المراجعة'); set('حالة الصرف','لم يصرف');
+    set('حالة العهدة','غير مطلوبة بعد'); set('تاريخ آخر تحديث',mhNow_()); sh.appendRow(row);
+    return {submitted:true,requestId:id,status:'قيد المراجعة',message:'تم إرسال طلب السلفة/العهدة إلى الإدارة للمراجعة.'};
+  } finally { lock.releaseLock(); }
+}
+function decideCashRequest_(profile, body) {
+  mhRequireRole_(profile, MH_CASH.REVIEW_ROLES);
+  const rowNum=Number(body.row), decision=String(body.decision||'').trim(), note=String(body.note||'').trim();
+  if (!Number.isInteger(rowNum)||rowNum<2||!['مقبول','مرفوض','تم الصرف'].includes(decision)) throw new Error('INVALID_DECISION');
+  const sh=mhSheet_(MH.SHEETS.cash), map=mhAssertHeaders_(sh,MH_CASH.HEADERS);
+  if(rowNum>sh.getLastRow()) throw new Error('CASH_REQUEST_NOT_FOUND');
+  const lock=LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    const current=String(sh.getRange(rowNum,map['الحالة']).getDisplayValue()).trim();
+    const payout=String(sh.getRange(rowNum,map['حالة الصرف']).getDisplayValue()).trim();
+    if(decision==='تم الصرف') {
+      if(current!=='تمت الموافقة'||payout==='تم الصرف') throw new Error('CASH_PAYOUT_NOT_ALLOWED');
+      sh.getRange(rowNum,map['حالة الصرف']).setValue('تم الصرف'); sh.getRange(rowNum,map['تاريخ الصرف']).setValue(mhNow_());
+      sh.getRange(rowNum,map['المسؤول عن الصرف']).setValue(mhManagerName_(profile)); sh.getRange(rowNum,map['حالة العهدة']).setValue('عهدة مفتوحة');
+    } else {
+      if(current!=='قيد المراجعة') throw new Error('CASH_ALREADY_REVIEWED');
+      sh.getRange(rowNum,map['الحالة']).setValue(decision==='مقبول'?'تمت الموافقة':'مرفوض');
+      if(decision==='مقبول') {
+        const requested=Number(sh.getRange(rowNum,map['المبلغ المطلوب بالجنيه']).getValue())||0;
+        sh.getRange(rowNum,map['المبلغ المعتمد بالجنيه']).setValue(requested);
+        sh.getRange(rowNum,map['حالة الصرف']).setValue('بانتظار الصرف'); sh.getRange(rowNum,map['حالة العهدة']).setValue('بانتظار صرف العهدة');
+      }
+    }
+    if(note&&map['ملاحظات المدير']) sh.getRange(rowNum,map['ملاحظات المدير']).setValue(note);
+    if(map['تاريخ آخر تحديث']) sh.getRange(rowNum,map['تاريخ آخر تحديث']).setValue(mhNow_());
+    if(map['Chat ID آخر مدير قرار']) sh.getRange(rowNum,map['Chat ID آخر مدير قرار']).setValue(profile.chatId);
+    if(map['اسم آخر مدير قرار']) sh.getRange(rowNum,map['اسم آخر مدير قرار']).setValue(mhManagerName_(profile));
+    return {decided:true,status:decision};
+  } finally { lock.releaseLock(); }
+}
+
+function submitCashSettlement_(profile, body) {
+  if (profile.role !== 'employee') throw new Error('EMPLOYEE_ONLY');
+  const rowNum = Number(body.row);
+  const spentRaw = String(body.actualSpent ?? '').replace(/[٬,]/g, '').trim();
+  const spent = Number(spentRaw);
+  const notes = String(body.notes || '').trim();
+  if (!Number.isInteger(rowNum) || rowNum < 2) throw new Error('CASH_REQUEST_NOT_FOUND');
+  if (!/^\d+(?:\.\d{1,2})?$/.test(spentRaw) || !Number.isFinite(spent) || spent < 0 || spent > 1000000) throw new Error('INVALID_CASH_AMOUNT');
+  if (notes.length > 1500) throw new Error('INVALID_REQUEST_DETAILS');
+  const sh = mhSheet_(MH.SHEETS.cash), map = mhAssertHeaders_(sh, MH_CASH.HEADERS);
+  if (rowNum > sh.getLastRow()) throw new Error('CASH_REQUEST_NOT_FOUND');
+  const lock = LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    const values = sh.getRange(rowNum,1,1,sh.getLastColumn()).getValues()[0];
+    const get = h => values[map[h]-1];
+    if (String(get('Chat ID')).trim() !== profile.chatId) throw new Error('FORBIDDEN');
+    if (String(get('حالة الصرف')).trim() !== 'تم الصرف') throw new Error('CASH_PAYOUT_NOT_ALLOWED');
+    if (String(get('حالة التسوية') || '').trim() === 'بانتظار مراجعة التسوية' ||
+        String(get('حالة التسوية') || '').trim() === 'تم اعتماد التسوية') throw new Error('CASH_ALREADY_REVIEWED');
+    const approved = Number(get('المبلغ المعتمد بالجنيه') || get('المبلغ المطلوب بالجنيه')) || 0;
+    if (spent > 1000000) throw new Error('INVALID_CASH_AMOUNT');
+    const returned = Math.max(0, approved - spent);
+    const extra = Math.max(0, spent - approved);
+    sh.getRange(rowNum,map['المصروف الفعلي بالجنيه']).setValue(spent);
+    sh.getRange(rowNum,map['المبلغ المطلوب إرجاعه بالجنيه']).setValue(returned);
+    sh.getRange(rowNum,map['المبلغ الإضافي المستحق للموظف بالجنيه']).setValue(extra);
+    sh.getRange(rowNum,map['حالة التسوية']).setValue('بانتظار مراجعة التسوية');
+    sh.getRange(rowNum,map['تاريخ تقديم التسوية']).setValue(mhNow_());
+    sh.getRange(rowNum,map['ملاحظات التسوية']).setValue(notes);
+    sh.getRange(rowNum,map['حالة العهدة']).setValue('بانتظار مراجعة التسوية');
+    sh.getRange(rowNum,map['تاريخ آخر تحديث']).setValue(mhNow_());
+    return {submitted:true, approvedAmount:approved, actualSpent:spent, amountToReturn:returned, extraDue:extra, status:'بانتظار مراجعة التسوية'};
+  } finally { lock.releaseLock(); }
+}
+
+function decideCashSettlement_(profile, body) {
+  mhRequireRole_(profile, MH_CASH.REVIEW_ROLES);
+  const rowNum = Number(body.row), decision = String(body.decision || '').trim(), note = String(body.note || '').trim();
+  if (!Number.isInteger(rowNum) || rowNum < 2 || !['مقبول','مرفوض'].includes(decision)) throw new Error('INVALID_DECISION');
+  const sh = mhSheet_(MH.SHEETS.cash), map = mhAssertHeaders_(sh, MH_CASH.HEADERS);
+  if (rowNum > sh.getLastRow()) throw new Error('CASH_REQUEST_NOT_FOUND');
+  const lock = LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    const get = h => sh.getRange(rowNum,map[h]).getDisplayValue().trim();
+    if (get('حالة التسوية') !== 'بانتظار مراجعة التسوية') throw new Error('CASH_ALREADY_REVIEWED');
+    if (decision === 'مرفوض') {
+      sh.getRange(rowNum,map['حالة التسوية']).setValue('مرفوضة - تحتاج مراجعة');
+      sh.getRange(rowNum,map['حالة العهدة']).setValue('عهدة مفتوحة');
+    } else {
+      const returned = Number(sh.getRange(rowNum,map['المبلغ المطلوب إرجاعه بالجنيه']).getValue()) || 0;
+      const extra = Number(sh.getRange(rowNum,map['المبلغ الإضافي المستحق للموظف بالجنيه']).getValue()) || 0;
+      sh.getRange(rowNum,map['حالة التسوية']).setValue('تم اعتماد التسوية');
+      if (returned > 0) sh.getRange(rowNum,map['حالة العهدة']).setValue('بانتظار تأكيد استلام المتبقي');
+      else if (extra > 0) sh.getRange(rowNum,map['حالة العهدة']).setValue('بانتظار صرف التعويض');
+      else sh.getRange(rowNum,map['حالة العهدة']).setValue('مغلقة');
+    }
+    if (map['ملاحظات المدير']) sh.getRange(rowNum,map['ملاحظات المدير']).setValue(note);
+    if (map['تاريخ آخر تحديث']) sh.getRange(rowNum,map['تاريخ آخر تحديث']).setValue(mhNow_());
+    if (map['Chat ID آخر مدير قرار']) sh.getRange(rowNum,map['Chat ID آخر مدير قرار']).setValue(profile.chatId);
+    if (map['اسم آخر مدير قرار']) sh.getRange(rowNum,map['اسم آخر مدير قرار']).setValue(mhManagerName_(profile));
+    return {decided:true,status:decision};
+  } finally { lock.releaseLock(); }
+}
+
+function confirmCashReturn_(profile, body) {
+  mhRequireRole_(profile, MH_CASH.REVIEW_ROLES);
+  const rowNum = Number(body.row);
+  if (!Number.isInteger(rowNum) || rowNum < 2) throw new Error('CASH_REQUEST_NOT_FOUND');
+  const sh = mhSheet_(MH.SHEETS.cash), map = mhAssertHeaders_(sh, MH_CASH.HEADERS);
+  if (rowNum > sh.getLastRow()) throw new Error('CASH_REQUEST_NOT_FOUND');
+  const lock = LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    if (sh.getRange(rowNum,map['حالة العهدة']).getDisplayValue().trim() !== 'بانتظار تأكيد استلام المتبقي') throw new Error('CASH_ALREADY_REVIEWED');
+    sh.getRange(rowNum,map['تاريخ تأكيد استلام المتبقي']).setValue(mhNow_());
+    sh.getRange(rowNum,map['المسؤول عن استلام المتبقي']).setValue(mhManagerName_(profile));
+    sh.getRange(rowNum,map['حالة العهدة']).setValue('مغلقة');
+    sh.getRange(rowNum,map['تاريخ آخر تحديث']).setValue(mhNow_());
+    return {confirmed:true,status:'مغلقة'};
+  } finally { lock.releaseLock(); }
+}
+
 function createEmployeeRequest_(profile, body) {
   if (profile.role !== 'employee') throw new Error('EMPLOYEE_ONLY');
   const type = String(body.requestType || '').trim();
