@@ -259,6 +259,9 @@
       $('welcomeEyebrow').textContent = 'مساحة المهندس';
       employee.classList.remove('hidden'); manager.classList.add('hidden');
       mount(employee, ['stats','homeActions','attendance','requestCenter','financeCenter','deviceRegisterPanel','results']);
+      // The manager workspace hides this card grid. Always restore it when returning
+      // to the engineer workspace (especially for dual-role Telegram accounts).
+      $('homeActions').classList.remove('hidden');
       $('requestCenter').classList.add('hidden');
       $('financeCenter').classList.add('hidden');
       $('deviceRegisterPanel').classList.add('hidden');
@@ -308,21 +311,19 @@
     switchingWorkspace = true;
     $('workspaceSwitch').disabled = true;
     $('workspaceSwitch').textContent = 'جارٍ التحويل...';
+    $('connection').textContent = 'جارٍ التحويل';
     try {
       workspaceRole = nextWorkspace;
       const data = await api('bootstrap');
       applyWorkspaceProfile(data);
 
+      // Load only the manager's review queues, in parallel. Attendance status is
+      // fetched lazily when the engineer opens attendance, not during a workspace switch.
       if (workspaceRole === 'manager') {
-        if (data.permissions?.reviewRequests) await loadReviews();
-        if (data.permissions?.finance) await loadCashReviews();
-        $('attendance').classList.add('hidden');
-      } else {
-        try { await refreshAttendance(); } catch (e) { showAttendanceMessage(e.message, true); }
-        $('attendance').classList.add('hidden');
-        $('requestCenter').classList.add('hidden');
-        $('financeCenter').classList.add('hidden');
-        $('deviceRegisterPanel').classList.add('hidden');
+        const jobs = [];
+        if (data.permissions?.reviewRequests) jobs.push(loadReviews());
+        if (data.permissions?.finance) jobs.push(loadCashReviews());
+        await Promise.allSettled(jobs);
       }
       $('connection').textContent = 'متصل';
       if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
@@ -330,6 +331,7 @@
     } catch (e) {
       workspaceRole = previousWorkspace;
       $('workspaceSwitch').textContent = previousWorkspace === 'manager' ? 'لوحة المهندس' : 'لوحة المدير';
+      $('connection').textContent = 'تعذر التحويل';
       fail(e.message);
     } finally {
       switchingWorkspace = false;
@@ -345,16 +347,26 @@
     try {
       const data = await api('bootstrap');
       applyWorkspaceProfile(data);
-      try { const deviceOptions=await api('device_registration_options'); if(deviceOptions.allowed) $('registerDeviceCard').classList.remove('hidden'); } catch (_) { /* hide intake action when not authorized */ }
-      if (data.permissions.reviewRequests) await loadReviews();
-      if (data.permissions.finance) await loadCashReviews();
       $('connection').textContent = 'متصل'; $('connection').style.color = '#8be0aa';
-      if (workspaceRole === 'employee') {
-        try { await refreshAttendance(); $('attendance').classList.add('hidden'); }
-        catch (e) { $('attendance').classList.add('hidden'); showAttendanceMessage(e.message, true); }
-      } else {
-        $('attendance').classList.add('hidden');
+
+      // Secondary data is non-blocking: the dashboard appears as soon as bootstrap
+      // completes, while permitted review queues and device options load in background.
+      const backgroundJobs = [];
+      backgroundJobs.push((async () => {
+        try {
+          const deviceOptions = await api('device_registration_options');
+          $('registerDeviceCard').classList.toggle('hidden', !deviceOptions.allowed);
+        } catch (_) {
+          $('registerDeviceCard').classList.add('hidden');
+        }
+      })());
+      if (workspaceRole === 'manager') {
+        if (data.permissions?.reviewRequests) backgroundJobs.push(loadReviews());
+        if (data.permissions?.finance) backgroundJobs.push(loadCashReviews());
       }
+      Promise.allSettled(backgroundJobs);
+      // Attendance is deliberately lazy-loaded when the engineer opens the attendance action.
+      $('attendance').classList.add('hidden');
     } catch (e) { fail(e.message); }
   }
 
@@ -405,9 +417,24 @@
     $('results').classList.add('hidden');
     openModal('طلباتي', $('requestPicker'));
   }
-  function openHomeAction(action){
-    if(action==='attendance'){ $('attendance').classList.remove('hidden'); openModal('تسجيل حضور', $('attendance')); if(!$('checkinBtn').disabled) $('checkinBtn').click(); return; }
-    if(action==='checkout'){ $('attendance').classList.remove('hidden'); openModal('تسجيل انصراف', $('attendance')); if(!$('checkoutBtn').disabled) $('checkoutBtn').click(); return; }
+  async function openHomeAction(action){
+    if(action==='attendance' || action==='checkout'){
+      const title = action === 'attendance' ? 'تسجيل حضور' : 'تسجيل انصراف';
+      const card = document.querySelector(`[data-home-action="${action}"]`);
+      if (card) { card.disabled = true; card.dataset.previousText = card.innerHTML; card.innerHTML = '<span class="home-icon">…</span><b>جاري التحميل</b>'; }
+      try {
+        await refreshAttendance();
+        openModal(title, $('attendance'));
+        if(action==='attendance' && !$('checkinBtn').disabled) $('checkinBtn').click();
+        if(action==='checkout' && !$('checkoutBtn').disabled) $('checkoutBtn').click();
+      } catch (e) {
+        if (tg && typeof tg.showAlert === 'function') tg.showAlert(e.message);
+        else fail(e.message);
+      } finally {
+        if (card) { card.disabled = false; if (card.dataset.previousText) card.innerHTML = card.dataset.previousText; delete card.dataset.previousText; }
+      }
+      return;
+    }
     if(action==='history'){showAttendanceHistory();return;}
     if(action==='leave'){openRequestForm('leave');return;}
     if(action==='cash'){openRequestForm('cash');return;}
@@ -417,20 +444,21 @@
     if(action==='complaint-new'){openRequestForm('complaint');return;}
     if(action==='complaint-list'){showList('complaints');return;}
     if(action==='deductions'){showList('deductions');return;}
-    if(action==='rewards'){ $('financeCenter').classList.remove('hidden'); openModal('مكافآتي', $('financeCenter')); loadFinanceSummary(); return; }
+    if(action==='rewards'){ $('financeCenter').classList.remove('hidden'); openModal('مكافآتي', $('financeCenter')); loadFinanceSummary(); return;}
     if(action==='monthly'){loadMonthlySummary();return;}
     if(action==='devices'){showList('devices');return;}
     if(action==='device-register'){openDeviceRegistration();return;}
     if(action==='refresh'){refreshEmployeeWorkspace();return;}
   }
+
   async function refreshEmployeeWorkspace(){
     const btn=document.querySelector('[data-home-action="refresh"]');
     if(btn){btn.disabled=true;}
     try{
       const data=await api('bootstrap');
       renderStats(data.summary||{});
-      await refreshAttendance();
-      if(!MANAGER_ROLES.includes(currentRole)) $('attendance').classList.add('hidden');
+      if (currentRole === 'employee' && currentAttendance) await refreshAttendance();
+      $('attendance').classList.add('hidden');
       if(tg&&typeof tg.showAlert==='function') tg.showAlert('تم تحديث لوحة المهندس بنجاح.');
     }catch(e){if(tg&&typeof tg.showAlert==='function') tg.showAlert(e.message);else fail(e.message);}
     finally{if(btn)btn.disabled=false;}

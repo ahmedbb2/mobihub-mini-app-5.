@@ -25,3 +25,13 @@ JavaScript and Apps Script syntax checks passed. Role-resolution logic was teste
 
 ## Important scope
 This release implements dual-role workspace switching and removes the employee attendance panel from the manager workspace. It does not claim that all 233 legacy bot functions, the full manager dashboard, or the full notification system have been migrated.
+
+
+## V1.9.5 — Workspace return and loading fix
+- Restores the engineer home action grid after switching back from manager workspace.
+- Defers attendance status loading until the engineer opens attendance or checkout.
+- Makes device options and manager review queues non-blocking after bootstrap.
+- Loads manager review queues concurrently.
+- No Google Sheets schema or Apps Script API contract changes.
+
+The Apps Script backend remains V1.9.4 because this release changes frontend workspace rendering and request timing only.
