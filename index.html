@@ -45,6 +45,30 @@
         <p id="attendanceMessage" class="inline-message hidden" aria-live="polite"></p>
       </section>
 
+
+      <section id="requestCenter" class="request-panel">
+        <div class="section-head"><h2>الطلبات والأذونات</h2><span class="muted">تقديم ومتابعة</span></div>
+        <div class="request-tabs"><button class="primary-btn" id="newRequestTab">طلب جديد</button><button class="secondary-btn" id="newLeaveTab">طلب إذن</button></div>
+        <div id="requestForm" class="request-form">
+          <label>نوع الطلب<select id="requestType"><option>طلب إداري</option><option>طلب تغيير وردية</option><option>طلب مراجعة</option><option>طلب آخر</option></select></label>
+          <label>التفاصيل<textarea id="requestDetails" rows="3" maxlength="1500" placeholder="اكتب تفاصيل طلبك (5 أحرف على الأقل)"></textarea></label>
+          <button id="submitRequest" class="primary-btn">إرسال الطلب</button>
+        </div>
+        <div id="leaveForm" class="request-form hidden">
+          <label>نوع الإذن<select id="leaveType"><option value="يوم كامل">إذن يوم كامل</option><option value="بالساعات">إذن بالساعات</option></select></label>
+          <label>تاريخ الإذن<input id="leaveDate" type="date"></label>
+          <div id="leaveDaysWrap"><label>عدد الأيام<select id="leaveDays"><option value="1">يوم واحد</option><option value="2">يومان</option><option value="3">3 أيام</option></select></label></div>
+          <div id="leaveHoursWrap" class="hidden"><label>بداية الإذن<input id="leaveFrom" type="time"></label><label>المدة<select id="leaveHours"><option value="1">ساعة واحدة</option><option value="2">ساعتان</option><option value="3">3 ساعات</option></select></label></div>
+          <label>سبب الإذن<textarea id="leaveReason" rows="3" maxlength="1000" placeholder="اكتب سبب الإذن (5 أحرف على الأقل)"></textarea></label>
+          <button id="submitLeave" class="primary-btn">إرسال طلب الإذن</button>
+        </div>
+        <p id="requestMessage" class="inline-message hidden" aria-live="polite"></p>
+      </section>
+      <section id="reviewCenter" class="management hidden">
+        <div class="section-head"><h2>مراجعة الطلبات والأذونات</h2><button id="refreshReviews" class="text-btn">تحديث</button></div>
+        <div id="reviewBody" class="review-list">اضغط تحديث لعرض الطلبات المعلقة.</div>
+      </section>
+
       <section id="stats" class="stats"></section>
       <section>
         <div class="section-head"><h2>الخدمات</h2><span class="muted">المرحلة الأولى</span></div>

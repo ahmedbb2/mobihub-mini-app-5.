@@ -1,16 +1,16 @@
 /**
- * MobiHub Mini App API — V1.2 attendance migration build
+ * MobiHub Mini App API — V1.3 attendance + requests + leave migration build
  * Separate Apps Script project for the TEST spreadsheet.
  *
  * Required Script Properties:
  *   BOT_TOKEN       = Telegram bot token (never expose to browser)
  *   SPREADSHEET_ID  = ID of the TEST Google Spreadsheet
  *
- * This API is read-only. It does not modify the spreadsheet.
+ * This TEST API reads dashboard data and writes only approved Mini App actions.
  */
 
 const MH = Object.freeze({
-  VERSION: '1.2.0',
+  VERSION: '1.3.0',
   TZ: 'Africa/Cairo',
   AUTH_MAX_AGE_SECONDS: 300,
   SHEETS: {
@@ -119,6 +119,22 @@ function doPost(e) {
         data = attendanceCheckout_(profile, body.location || {});
         break;
 
+      case 'request_create':
+        data = createEmployeeRequest_(profile, body);
+        break;
+
+      case 'leave_create':
+        data = createLeaveRequest_(profile, body);
+        break;
+
+      case 'request_decide':
+        data = decideEmployeeRequest_(profile, body);
+        break;
+
+      case 'leave_decide':
+        data = decideLeaveRequest_(profile, body);
+        break;
+
       default:
         return json_({
           ok: false,
@@ -136,9 +152,11 @@ function doPost(e) {
   } catch (err) {
     logApiError_('MINI_APP_API_ERROR', err, requestId);
 
+    const safeMessage = err && err.message ? String(err.message) : '';
+    const safeCode = /^[A-Z][A-Z0-9_:-]{2,120}$/.test(safeMessage) ? safeMessage : 'INTERNAL_ERROR';
     return json_({
       ok: false,
-      error: 'INTERNAL_ERROR',
+      error: safeCode,
       requestId: requestId
     });
   }
@@ -391,7 +409,7 @@ function listData_(profile, entity) {
     canViewAll = canReviewGeneral;
   }
 
-  const rows = rowsAsObjects_(spreadsheet_(), definition.sheet);
+  const rows = rowsAsObjects_(spreadsheet_(), definition.sheet).map(function(row, index) { row.__row = index + 2; return row; });
 
   const visibleRows = canViewAll
     ? rows
@@ -777,4 +795,176 @@ function json_(object) {
   return ContentService
     .createTextOutput(JSON.stringify(object))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+
+/* =========================================
+ * REQUESTS + LEAVE MODULE — V1.3
+ * Mirrors V40 sheet schemas and decision rules.
+ * All authorization is enforced here, never by UI visibility alone.
+ * ========================================= */
+const MH_REQUESTS = Object.freeze({
+  REQUEST_HEADERS: ['التاريخ والوقت','Chat ID','اسم الموظف','نوع الطلب','التفاصيل','القرار','مبلغ السلفة بالجنيه','سبب السلفة','نوع مدة الإذن','عدد الأيام','عدد الساعات','سبب الإذن'],
+  LEAVE_HEADERS: ['رقم الطلب','تاريخ الإرسال','Chat ID','اسم الموظف','نوع الإذن','تاريخ الإذن','من الساعة','إلى الساعة','السبب','الحالة','قرار المدير','تاريخ القرار','ملاحظات المدير','عدد الأيام','تاريخ نهاية الإذن','Chat ID المدير','اسم المدير'],
+  PENDING_REQUEST: 'قيد الانتظار',
+  PENDING_LEAVE: 'بانتظار مراجعة المدير'
+});
+
+function mhRequireRole_(profile, allowed) {
+  if (allowed.indexOf(profile.role) < 0) throw new Error('FORBIDDEN');
+}
+function mhSheet_(name) {
+  const sh = spreadsheet_().getSheetByName(name);
+  if (!sh) throw new Error('SHEET_NOT_FOUND:' + name);
+  return sh;
+}
+function mhHeaderMap_(sh) {
+  const headers = sh.getRange(1,1,1,sh.getLastColumn()).getDisplayValues()[0];
+  const map = {};
+  headers.forEach((h,i) => { if (h) map[String(h).trim()] = i+1; });
+  return map;
+}
+function mhAssertHeaders_(sh, expected) {
+  const map = mhHeaderMap_(sh);
+  const missing = expected.filter(h => !map[h]);
+  if (missing.length) throw new Error('SHEET_SCHEMA_MISMATCH:' + sh.getName() + ':' + missing.join(','));
+  return map;
+}
+function mhNow_() { return Utilities.formatDate(new Date(), MH.TZ, 'yyyy-MM-dd HH:mm:ss'); }
+function mhToday_() { return Utilities.formatDate(new Date(), MH.TZ, 'yyyy-MM-dd'); }
+function mhIsoDate_(value) {
+  const s = String(value || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return '';
+  const d = new Date(s + 'T12:00:00Z');
+  return !isNaN(d.getTime()) && Utilities.formatDate(d,'UTC','yyyy-MM-dd') === s ? s : '';
+}
+function mhAddDays_(iso, n) {
+  const p = iso.split('-').map(Number);
+  const d = new Date(Date.UTC(p[0],p[1]-1,p[2]+n,12));
+  return Utilities.formatDate(d,'UTC','yyyy-MM-dd');
+}
+function mhTimeMinutes_(s) {
+  const m = String(s || '').match(/^(\d{1,2}):(\d{2})$/);
+  if (!m || +m[1] > 23 || +m[2] > 59) return -1;
+  return +m[1]*60 + +m[2];
+}
+function mhRowsObjects_(sh) {
+  const values = sh.getDataRange().getDisplayValues();
+  if (values.length < 2) return [];
+  const headers = values[0].map(x => String(x).trim());
+  return values.slice(1).map((row,i) => {
+    const o = {__row:i+2}; headers.forEach((h,j) => { if(h) o[h]=row[j]; }); return o;
+  });
+}
+function mhManagerName_(profile) { return profile.name || profile.chatId; }
+function createEmployeeRequest_(profile, body) {
+  if (profile.role !== 'employee') throw new Error('EMPLOYEE_ONLY');
+  const type = String(body.requestType || '').trim();
+  const details = String(body.details || '').trim();
+  const allowed = ['طلب إداري','طلب تغيير وردية','طلب مراجعة','طلب آخر'];
+  if (allowed.indexOf(type) < 0) throw new Error('INVALID_REQUEST_TYPE');
+  if (details.length < 5 || details.length > 1500) throw new Error('INVALID_REQUEST_DETAILS');
+  const sh = mhSheet_(MH.SHEETS.requests);
+  mhAssertHeaders_(sh, MH_REQUESTS.REQUEST_HEADERS);
+  const lock = LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    const id = sh.getLastRow();
+    sh.appendRow([mhNow_(),profile.chatId,profile.name,type,details,MH_REQUESTS.PENDING_REQUEST,'','','','','','']);
+    return {submitted:true, row:id+1, status:MH_REQUESTS.PENDING_REQUEST, message:'تم إرسال طلبك للإدارة'};
+  } finally { lock.releaseLock(); }
+}
+function mhGetAssignment_(chatId, date) {
+  const sh = mhSheet_(MH.SHEETS.assignments); const rows = mhRowsObjects_(sh);
+  const row = rows.find(r => String(r['Chat ID']).trim()===String(chatId) && String(r['الحالة']).trim()==='نشط' &&
+    mhIsoDate_(r['تاريخ البداية']) <= date && (!mhIsoDate_(r['تاريخ النهاية']) || mhIsoDate_(r['تاريخ النهاية']) >= date) &&
+    String(r['أيام العمل'] || '0,1,2,3,4,6').split(/[،,]/).map(x=>x.trim()).includes(String(new Date(date+'T12:00:00Z').getUTCDay())));
+  if (!row) return null;
+  const shifts = mhRowsObjects_(mhSheet_(MH.SHEETS.shifts));
+  const shift = shifts.find(s => String(s['Shift ID']).trim()===String(row['Shift ID']).trim() && String(s['الحالة']).trim()==='نشط');
+  return shift ? {assignment:row, shift:shift} : null;
+}
+function createLeaveRequest_(profile, body) {
+  if (profile.role !== 'employee') throw new Error('EMPLOYEE_ONLY');
+  const type = String(body.leaveType || '').trim();
+  const date = mhIsoDate_(body.date);
+  const reason = String(body.reason || '').trim();
+  if (['يوم كامل','بالساعات'].indexOf(type)<0) throw new Error('INVALID_LEAVE_TYPE');
+  if (!date || date < mhToday_()) throw new Error('INVALID_LEAVE_DATE');
+  if (reason.length < 5 || reason.length > 1000) throw new Error('INVALID_LEAVE_REASON');
+  let from='',to='',days=0,endDate=date;
+  if (type==='يوم كامل') {
+    days = Number(body.days || 1);
+    if (![1,2,3].includes(days)) throw new Error('INVALID_LEAVE_DAYS');
+    endDate = mhAddDays_(date,days-1);
+    if (date===mhToday_()) {
+      const ass=mhGetAssignment_(profile.chatId,date);
+      if (ass && mhTimeMinutes_(Utilities.formatDate(new Date(),MH.TZ,'HH:mm')) > mhTimeMinutes_(ass.shift['موعد الحضور'])) throw new Error('FULL_DAY_LEAVE_AFTER_SHIFT_START');
+    }
+  } else {
+    const ass=mhGetAssignment_(profile.chatId,date);
+    if (!ass) throw new Error('NO_ACTIVE_SHIFT_ASSIGNED');
+    from=String(body.from || '').trim();
+    const hours=Number(body.hours);
+    if (![1,2,3].includes(hours)) throw new Error('INVALID_LEAVE_HOURS');
+    const start=mhTimeMinutes_(from), shiftStart=mhTimeMinutes_(ass.shift['موعد الحضور']), shiftEnd0=mhTimeMinutes_(ass.shift['موعد الانصراف']);
+    if (start<0 || shiftStart<0 || shiftEnd0<0) throw new Error('INVALID_LEAVE_TIME');
+    let end=shiftEnd0; if(end<=shiftStart) end+=1440;
+    let actualStart=start; if(actualStart<shiftStart) actualStart+=1440;
+    if (actualStart < shiftStart || actualStart + hours*60 > end) throw new Error('LEAVE_OUTSIDE_SHIFT');
+    if (date===mhToday_() && start <= mhTimeMinutes_(Utilities.formatDate(new Date(),MH.TZ,'HH:mm'))) throw new Error('LEAVE_START_NOT_FUTURE');
+    to=('0'+Math.floor((start+hours*60)%1440/60)).slice(-2)+':'+('0'+((start+hours*60)%60)).slice(-2);
+  }
+  const sh=mhSheet_(MH.SHEETS.leaves); mhAssertHeaders_(sh,MH_REQUESTS.LEAVE_HEADERS);
+  const rows=mhRowsObjects_(sh);
+  const overlap=rows.some(r=>String(r['Chat ID']).trim()===profile.chatId && [MH_REQUESTS.PENDING_LEAVE,'مقبول'].includes(String(r['الحالة'])) &&
+    date <= (mhIsoDate_(r['تاريخ نهاية الإذن']) || mhIsoDate_(r['تاريخ الإذن'])) && endDate >= mhIsoDate_(r['تاريخ الإذن']));
+  if(overlap) throw new Error('DUPLICATE_LEAVE_OVERLAP');
+  const id='LV-'+Utilities.getUuid().substring(0,8).toUpperCase();
+  const lock=LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    sh.appendRow([id,mhNow_(),profile.chatId,profile.name,type,date,from,to,reason,MH_REQUESTS.PENDING_LEAVE,'','','',days,endDate,'','']);
+  } finally { lock.releaseLock(); }
+  return {submitted:true, requestId:id, status:MH_REQUESTS.PENDING_LEAVE, message:'تم إرسال طلب الإذن. لا يعتبر معتمدًا قبل موافقة الإدارة.'};
+}
+function decideEmployeeRequest_(profile, body) {
+  mhRequireRole_(profile,['super_admin','admin','supervisor']);
+  const rowNum=Number(body.row), decision=String(body.decision || '');
+  if (!Number.isInteger(rowNum)||rowNum<2||!['مقبول','مرفوض'].includes(decision)) throw new Error('INVALID_DECISION');
+  const sh=mhSheet_(MH.SHEETS.requests); const map=mhAssertHeaders_(sh,MH_REQUESTS.REQUEST_HEADERS);
+  if(rowNum>sh.getLastRow()) throw new Error('REQUEST_NOT_FOUND');
+  const current=String(sh.getRange(rowNum,map['القرار']).getDisplayValue());
+  if(current!==MH_REQUESTS.PENDING_REQUEST) throw new Error('REQUEST_ALREADY_REVIEWED');
+  const lock=LockService.getScriptLock(); lock.waitLock(15000);
+  try { sh.getRange(rowNum,map['القرار']).setValue(decision); } finally { lock.releaseLock(); }
+  return {decided:true,status:decision};
+}
+function decideLeaveRequest_(profile, body) {
+  mhRequireRole_(profile,['super_admin','admin','supervisor']);
+  const rowNum=Number(body.row), decision=String(body.decision || ''), note=String(body.note || '').trim();
+  if(!Number.isInteger(rowNum)||rowNum<2||!['مقبول','مرفوض'].includes(decision)) throw new Error('INVALID_DECISION');
+  const sh=mhSheet_(MH.SHEETS.leaves); const map=mhAssertHeaders_(sh,MH_REQUESTS.LEAVE_HEADERS);
+  if(rowNum>sh.getLastRow()) throw new Error('LEAVE_NOT_FOUND');
+  const vals=sh.getRange(rowNum,1,1,sh.getLastColumn()).getDisplayValues()[0];
+  const get=h=>vals[map[h]-1] || '';
+  if(get('الحالة')!==MH_REQUESTS.PENDING_LEAVE) throw new Error('LEAVE_ALREADY_REVIEWED');
+  if(decision==='مقبول' && get('نوع الإذن')==='يوم كامل') {
+    const abs=mhRowsObjects_(mhSheet_(MH.SHEETS.absences));
+    const start=mhIsoDate_(get('تاريخ الإذن')), end=mhIsoDate_(get('تاريخ نهاية الإذن'))||start;
+    const confirmed=abs.some(a=>String(a['Chat ID']).trim()===String(get('Chat ID')).trim() && mhIsoDate_(a['التاريخ'])>=start && mhIsoDate_(a['التاريخ'])<=end && (String(a['الحالة'])==='غياب مؤكد'||String(a['قرار المدير'])==='تأكيد الغياب'));
+    if(confirmed) throw new Error('LEAVE_CONFLICT_CONFIRMED_ABSENCE');
+  }
+  const lock=LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    sh.getRange(rowNum,map['الحالة']).setValue(decision);
+    sh.getRange(rowNum,map['قرار المدير']).setValue(decision==='مقبول'?'موافقة':'رفض');
+    sh.getRange(rowNum,map['تاريخ القرار']).setValue(mhNow_());
+    if(map['ملاحظات المدير']) sh.getRange(rowNum,map['ملاحظات المدير']).setValue(note);
+    if(map['Chat ID المدير']) sh.getRange(rowNum,map['Chat ID المدير']).setValue(profile.chatId);
+    if(map['اسم المدير']) sh.getRange(rowNum,map['اسم المدير']).setValue(mhManagerName_(profile));
+    if(decision==='مقبول' && get('نوع الإذن')==='يوم كامل') {
+      const absSh=mhSheet_(MH.SHEETS.absences), absMap=mhHeaderMap_(absSh), absRows=mhRowsObjects_(absSh);
+      absRows.forEach(a=>{const d=mhIsoDate_(a['التاريخ']); if(String(a['Chat ID']).trim()===String(get('Chat ID')).trim() && d>=mhIsoDate_(get('تاريخ الإذن')) && d<=(mhIsoDate_(get('تاريخ نهاية الإذن'))||mhIsoDate_(get('تاريخ الإذن'))) && String(a['الحالة'])==='بانتظار مراجعة المدير') { if(absMap['الحالة']) absSh.getRange(a.__row,absMap['الحالة']).setValue('مغلق - إذن معتمد'); if(absMap['قرار المدير']) absSh.getRange(a.__row,absMap['قرار المدير']).setValue('إذن يوم كامل معتمد'); if(absMap['تاريخ القرار']) absSh.getRange(a.__row,absMap['تاريخ القرار']).setValue(mhNow_()); }});
+    }
+  } finally { lock.releaseLock(); }
+  return {decided:true,status:decision,requestId:get('رقم الطلب')};
 }
