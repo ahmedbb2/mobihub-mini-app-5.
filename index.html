@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+  <meta name="theme-color" content="#101820">
+  <title>MobiHub | لوحة العمل</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand-mark">M</div>
+      <div><strong>MobiHub</strong><small>لوحة إدارة العمل</small></div>
+      <span id="connection" class="status">جاري الاتصال</span>
+    </header>
+    <main>
+      <section class="welcome">
+        <p class="eyebrow">أهلاً بيك</p>
+        <h1 id="userName">جاري تحميل حسابك...</h1>
+        <p id="userRole" class="muted">يتم التحقق من حساب Telegram</p>
+      </section>
+      <section id="stats" class="stats"></section>
+      <section>
+        <div class="section-head"><h2>الخدمات</h2><span class="muted">المرحلة الأولى</span></div>
+        <div class="tiles">
+          <button class="tile" data-entity="requests"><span>📋</span><b>طلباتي</b><small>الطلبات المسجلة</small></button>
+          <button class="tile" data-entity="leaves"><span>🕒</span><b>الأذونات</b><small>طلبات الإذن</small></button>
+          <button class="tile" data-entity="complaints"><span>💬</span><b>الشكاوى</b><small>المتابعة والردود</small></button>
+          <button class="tile" data-entity="cash"><span>💰</span><b>العهد والسلف</b><small>عرض السجلات</small></button>
+        </div>
+      </section>
+      <section id="management" class="management hidden">
+        <div class="section-head"><h2>الإدارة</h2><span class="muted">حسب صلاحيتك</span></div>
+        <p class="muted">سيتم تفعيل لوحات المراجعة والإجراءات في المرحلة التالية بعد اعتماد ربط البيانات.</p>
+      </section>
+      <section id="results" class="results hidden">
+        <div class="section-head"><h2 id="resultTitle">السجلات</h2><button id="backBtn" class="text-btn">رجوع</button></div>
+        <div id="resultBody"></div>
+      </section>
+      <p id="error" class="error hidden"></p>
+    </main>
+    <footer>نظام MobiHub الداخلي · إصدار تجريبي</footer>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

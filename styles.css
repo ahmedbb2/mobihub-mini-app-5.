@@ -1,0 +1,23 @@
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap');
+:root{font-family:'Cairo',sans-serif;color:#f5f7fa;background:#0d141b;font-synthesis:none}
+*{box-sizing:border-box}body{margin:0;background:linear-gradient(160deg,#17232e,#0d141b 55%);min-height:100vh}
+.app-shell{max-width:760px;margin:auto;padding:16px 16px 32px}
+.topbar{display:flex;align-items:center;gap:12px;padding:10px 2px 22px;border-bottom:1px solid #ffffff16}
+.brand-mark{width:42px;height:42px;border-radius:13px;background:#ff8a24;color:#171717;display:grid;place-items:center;font-size:24px;font-weight:800}
+.topbar strong,.topbar small{display:block}.topbar small{color:#9cabb8;font-size:11px}
+.status{margin-right:auto;color:#f5b96c;font-size:11px;background:#ff9b2518;padding:6px 10px;border-radius:20px}
+.welcome{padding:28px 4px 18px}.eyebrow{color:#ff9b38;font-size:12px;margin:0}
+h1{font-size:25px;margin:4px 0}h2{font-size:17px;margin:0}.muted{color:#9cabb8;font-size:12px}
+.stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:8px 0 26px}
+.stat{background:#1c2935;border:1px solid #ffffff12;border-radius:15px;padding:14px}
+.stat b{display:block;font-size:23px}.stat span{color:#aebbc6;font-size:11px}
+.section-head{display:flex;align-items:center;justify-content:space-between;margin:22px 2px 12px}
+.tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.tile{border:1px solid #ffffff14;background:#1a2732;color:#f5f7fa;border-radius:16px;text-align:right;padding:16px;min-height:112px;font:inherit;cursor:pointer}
+.tile span{display:block;font-size:22px;margin-bottom:7px}.tile b,.tile small{display:block}.tile b{font-size:14px}.tile small{font-size:11px;color:#9cabb8}
+.results{margin-top:25px}.record{padding:13px;background:#1b2934;border:1px solid #ffffff12;border-radius:12px;margin-bottom:8px}
+.record strong{display:block;font-size:13px}.record small{color:#aebbc6;font-size:11px}
+.text-btn{border:0;background:none;color:#ffab55;font:inherit;cursor:pointer}
+.error{background:#4a2020;color:#ffb9b9;padding:12px;border-radius:10px}
+footer{text-align:center;color:#647482;font-size:10px;padding:35px 0 5px}
+.hidden{display:none!important}
