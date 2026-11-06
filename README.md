@@ -1,53 +1,27 @@
-# MobiHub Mini App V1.8 — Deductions & Rewards
+# MobiHub Mini App V1.9 — Workspace UX refresh
 
-This release uses the user's latest uploaded V1.7 files as its base.
+## Included
+- Reorganized employee workspace into clear domains: attendance, requests, complaints, rewards/deductions, reports, and device status.
+- Added a dedicated My Requests category picker (general requests, leave, cash/custody).
+- Split complaint creation from complaint history.
+- Added a dedicated monthly employee report endpoint based on V40 attendance/absence calculations.
+- Added device status list support scoped to the assigned employee Chat ID (manager visibility follows existing role policy).
+- Improved record cards and Liquid Glass styling with readable selected states and mobile layouts.
+- Fixed escaped digit regexes in finance month and amount validation that caused valid YYYY-MM values to fail.
 
-## Added
-- Employee monthly reward/deduction summary.
-- Manager/Finance manual deduction entry with pending approval.
-- Manager/Finance approval or rejection of pending deductions.
-- Manager/Supervisor hygiene evaluation for an employee and date.
-- Manager/Finance additional reward entry (saved as approved, matching the existing V40 reward-bonus workflow).
-- Server-side role enforcement for all write actions and employee-list access.
+## API actions/entities added
+- `monthly_summary`
+- `devices` list entity
 
-## Existing business rules retained from V40
-- Monthly base reward: EGP 500.
-- Two points per scheduled shift: one punctuality+uniform point and one hygiene point.
-- Approved full-day leave excludes the shift; approved hourly leave excludes only when it covers the shift start.
-- Pending hygiene evaluations are excluded from the scored denominator.
-- Additional approved rewards are added to the monthly reward total.
-- Deduction settings remain in the existing `إعدادات الخصومات` sheet and are not changed by this release.
-
-## Sheets and headers
-- `سجل الخصومات`: exact 15-column V40 headers.
-- `إعدادات الخصومات`: `الإعداد`, `القيمة`, `الوصف`.
-- `المكافآت الإضافية`: exact 9-column headers.
-- `تقييم نظافة المكافآت`: exact 7-column headers.
-- Existing sheets: `الموظفين`, `الحضور والانصراف`, `طلبات الأذونات`, `جدول الورديات`, `الورديات`.
-
-The backend validates the expected headers before writing. It does not create, rename, or reorder sheets.
-
-## Important scope note
-This release does NOT yet migrate automatic attendance-generated deductions (late/attendance/uniform) or overtime request/approval/checkout calculation. Those are the next dedicated phase because they must be integrated with attendance lifecycle and tested carefully.
+## Important
+- This is a TEST package. Do not deploy to production before validation.
+- Device registration, device movement writes, withdrawal request flow, and some legacy bot actions still require dedicated migration; this UI refresh does not claim those workflows are complete.
+- Existing attendance, leave, cash, complaint, finance and reward API behavior is preserved.
+- Backend authorization and row ownership remain server-side.
 
 ## Deploy
-1. Back up the latest V1.7 files and Apps Script project.
-2. Upload `index.html`, `styles.css`, `app.js`, `_headers` to the same GitHub branch used by Cloudflare Pages.
-3. Replace `Code.gs` in the TEST Apps Script project only, then deploy a new version.
-4. Do not modify the API Proxy Worker.
-5. Do not touch production bot or production spreadsheet.
-
-## Validation status
-- JavaScript syntax checked.
-- Apps Script syntax checked with Node parser (syntax only).
-- Not tested against live Google Sheets, Telegram, or real role accounts.
-- Test using employee, supervisor, admin and finance accounts before any production rollout.
-
-
-## UI refresh V1.8.1
-- Split the authenticated DOM into separate employee and management workspace roots.
-- Employee role sees attendance, employee requests, and personal rewards/deductions only.
-- Manager roles see review/operations sections according to server-provided permissions.
-- Finance role does not see attendance controls.
-- Rebuilt navigation, spacing, icon tiles, cards, and glass-like visual styling.
-- This is a front-end organization pass; it does not change API business logic.
+1. Back up the current test UI and Apps Script project.
+2. Upload `index.html`, `styles.css`, `app.js`, `_headers` to the existing Mini App UI hosting branch.
+3. Deploy `Code.gs` as a new version in the TEST Apps Script project only.
+4. Keep the Cloudflare API proxy Worker unchanged.
+5. Test with employee, supervisor, admin, super-admin and finance accounts before production.

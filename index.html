@@ -57,7 +57,15 @@
           <button class="service-action" id="newCashTab" type="button"><span class="service-icon">ج.م</span><b>طلب سلفة</b><small>طلب عهدة مالية</small></button>
           <button class="service-action" id="myRequestsTab" type="button"><span class="service-icon">▤</span><b>طلباتي</b><small>متابعة الحالة</small></button>
         </div>
-        <button class="service-action" id="complaintsTab" type="button"><span class="service-icon">✉</span><b>الشكاوى</b><small>تقديم ومتابعة والرد</small></button>
+        <div class="request-shortcuts"><button class="service-action" id="complaintsTab" type="button"><span class="service-icon">✉</span><b>تقديم شكوى</b><small>إرسال شكوى جديدة</small></button><button class="service-action" id="complaintHistoryTab" type="button"><span class="service-icon">☷</span><b>شكاوي</b><small>متابعة الشكاوى والردود</small></button></div>
+        <div id="requestPicker" class="request-picker hidden">
+          <div class="picker-heading"><b>اختار نوع الطلب</b><small>اعرض سجلات القسم المطلوب</small></div>
+          <div class="picker-grid">
+            <button class="picker-card" data-request-entity="requests"><span>📋</span><b>الطلبات العامة</b><small>الطلبات الإدارية</small></button>
+            <button class="picker-card" data-request-entity="leaves"><span>🕒</span><b>الأذونات</b><small>طلبات الإذن وقراراتها</small></button>
+            <button class="picker-card" data-request-entity="cash"><span>ج.م</span><b>السلف والعهد</b><small>الصرف والتسويات</small></button>
+          </div>
+        </div>
         <div class="form-divider"></div>
         <div id="complaintForm" class="request-form hidden">
           <div class="form-title"><span class="form-title-icon">✉</span><div><h3>تقديم شكوى</h3><p>اكتب تفاصيل الشكوى وسيتم إرسالها للإدارة بسرية</p></div></div>
@@ -130,11 +138,44 @@
       </section>
 
       <section id="stats" class="stats"></section>
-      <section>
-        <div class="section-head"><h2>الخدمات</h2><span class="muted">الخدمات المتاحة</span></div>
-        <div class="tiles">
-          
-          <button class="tile" data-entity="cash"><span>💰</span><b>سجلات العهد</b><small>متابعة الصرف والتسويات</small></button>
+      <section id="homeActions" class="home-actions">
+        <div class="section-head"><div><h2>مساحة العمل</h2><p class="muted">كل خدماتك في مكان واحد</p></div><span class="section-icon">✦</span></div>
+        <div class="home-group">
+          <div class="home-group-head"><b>الحضور والعمل</b><small>التسجيل والمتابعة اليومية</small></div>
+          <div class="home-grid">
+            <button class="home-card" data-home-action="attendance"><span class="home-icon">◷</span><b>الحضور والانصراف</b><small>تسجيل ومراجعة الحضور</small></button>
+            <button class="home-card" data-home-action="history"><span class="home-icon">▤</span><b>سجل الحضور</b><small>آخر تسجيلاتك</small></button>
+          </div>
+        </div>
+        <div class="home-group">
+          <div class="home-group-head"><b>الخدمات والطلبات</b><small>إنشاء الطلبات ومتابعتها</small></div>
+          <div class="home-grid">
+            <button class="home-card" data-home-action="leave"><span class="home-icon">◷</span><b>طلب إذن</b><small>بالساعات أو الأيام</small></button>
+            <button class="home-card" data-home-action="cash"><span class="home-icon">ج.م</span><b>طلب سلفة</b><small>طلب عهدة مالية</small></button>
+            <button class="home-card" data-home-action="requests"><span class="home-icon">▤</span><b>طلباتي</b><small>اختيار القسم ومتابعة الحالة</small></button>
+            <button class="home-card" data-home-action="settlement"><span class="home-icon">↩</span><b>تسوية عهدة</b><small>متابعة الصرف والتسوية</small></button>
+          </div>
+        </div>
+        <div class="home-group">
+          <div class="home-group-head"><b>الشكاوى</b><small>تقديم شكوى ومتابعة الردود</small></div>
+          <div class="home-grid">
+            <button class="home-card" data-home-action="complaint-new"><span class="home-icon">✉</span><b>تقديم شكوى</b><small>إرسال شكوى بسرية</small></button>
+            <button class="home-card" data-home-action="complaint-list"><span class="home-icon">☷</span><b>شكاوي</b><small>متابعة الشكاوى والردود</small></button>
+          </div>
+        </div>
+        <div class="home-group">
+          <div class="home-group-head"><b>المكافآت والخصومات</b><small>تفاصيل الاستحقاقات والنقاط</small></div>
+          <div class="home-grid">
+            <button class="home-card" data-home-action="deductions"><span class="home-icon">−</span><b>خصوماتي</b><small>سجل الخصومات والتفاصيل</small></button>
+            <button class="home-card" data-home-action="rewards"><span class="home-icon">★</span><b>مكافآتي</b><small>تقرير النقاط والمكافآت</small></button>
+          </div>
+        </div>
+        <div class="home-group">
+          <div class="home-group-head"><b>التقارير والأجهزة</b><small>ملخص الشهر ومتابعة الأجهزة</small></div>
+          <div class="home-grid">
+            <button class="home-card" data-home-action="monthly"><span class="home-icon">▥</span><b>ملخص الشهر</b><small>تقرير عام عن الشهر</small></button>
+            <button class="home-card" data-home-action="devices"><span class="home-icon">▣</span><b>حالة الجهاز</b><small>متابعة الأجهزة المسجلة</small></button>
+          </div>
         </div>
       </section>
       <section id="management" class="management hidden">

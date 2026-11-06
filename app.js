@@ -3,7 +3,7 @@
   const tg = window.Telegram?.WebApp;
   const API_URL = 'https://mobihub-telegram-proxy.ahmedmtarek20.workers.dev/';
   const $ = (id) => document.getElementById(id);
-  const titles = { requests: 'طلباتي', leaves: 'طلبات الأذونات', complaints: 'الشكاوى', cash: 'العهد والسلف', attendance: 'سجل الحضور والانصراف' };
+  const titles = { requests: 'الطلبات العامة', leaves: 'طلبات الأذونات', complaints: 'شكاوي', cash: 'السلف والعهد', deductions: 'خصوماتي', devices: 'حالة الأجهزة', attendance: 'سجل الحضور والانصراف' };
   let initData = '';
   let currentAttendance = null;
   let pendingUniform = false;
@@ -191,7 +191,7 @@
     if(isManager) {
       $('welcomeEyebrow').textContent = 'لوحة الإدارة والتشغيل';
       manager.classList.remove('hidden'); employee.classList.add('hidden');
-      mount(manager, ['stats','attendance','reviewCenter','cashReviewCenter','financeCenter','results','management']);
+      mount(manager, ['stats','homeActions','attendance','reviewCenter','cashReviewCenter','financeCenter','results','management']);
       $('requestCenter').classList.add('hidden');
       if(role==='supervisor') {
         $('deductionAdminTab').classList.add('hidden');
@@ -210,7 +210,7 @@
     } else {
       $('welcomeEyebrow').textContent = 'مساحة الموظف';
       employee.classList.remove('hidden'); manager.classList.add('hidden');
-      mount(employee, ['stats','attendance','requestCenter','financeCenter','results']);
+      mount(employee, ['stats','homeActions','attendance','requestCenter','financeCenter','results']);
       $('reviewCenter').classList.add('hidden'); $('cashReviewCenter').classList.add('hidden'); $('management').classList.add('hidden');
       $('financeCenter').classList.remove('hidden');
       $('deductionAdminTab').classList.add('hidden'); $('rewardAdminTab').classList.add('hidden');
@@ -259,12 +259,22 @@
         return;
       }
       $('resultBody').innerHTML = rows.map(row => {
-        const title = row['رقم الطلب'] || row['رقم الشكوى'] || row['نوع الطلب'] || row['نوع الإذن'] || 'سجل';
-        const status = row['حالة العهدة'] || row['حالة التسوية'] || row['حالة الصرف'] || row['الحالة'] || row['القرار'] || '';
-        const date = row['التاريخ والوقت'] || row['تاريخ الإرسال'] || '';
+        const title = row['رقم الطلب'] || row['رقم الخصم'] || row['رقم الشكوى'] || row['نوع الطلب'] || row['نوع الإذن'] || row['اسم الجهاز'] || 'سجل';
+        const status = row['حالة العهدة'] || row['حالة التسوية'] || row['حالة الصرف'] || row['الحالة'] || row['القرار'] || 'قيد المراجعة';
+        const date = row['التاريخ والوقت'] || row['تاريخ الإرسال'] || row['تاريخ الواقعة'] || row['تاريخ الإذن'] || row['تاريخ الاستلام'] || '';
+        const amount = row['المبلغ المعتمد بالجنيه'] || row['المبلغ المطلوب بالجنيه'] || row['المبلغ بالجنيه'];
+        const details = row['التفاصيل'] || row['السبب'] || row['الغرض'] || row['تفاصيل الشكوى'] || row['المشكلة المسجلة'] || '';
         const canSettle = entity === 'cash' && row['حالة الصرف'] === 'تم الصرف' && ['عهدة مفتوحة','مرفوضة - تحتاج مراجعة'].includes(String(row['حالة العهدة']||''));
         const settlement = canSettle ? `<div class="cash-settlement"><strong>تسوية العهدة</strong><label>إجمالي المصروف الفعلي بالجنيه<input type="number" min="0" step="0.01" id="spent-${Number(row.__row)}" placeholder="مثال: 650"></label><label>تفاصيل المصروفات<textarea id="settle-note-${Number(row.__row)}" rows="2" maxlength="1500" placeholder="اكتب تفاصيل المصروفات"></textarea></label><button class="primary-btn" data-settle-row="${Number(row.__row)}">إرسال التسوية</button></div>` : '';
-        return `<article class="record"><strong>${escapeHtml(title)}</strong><small class="record-meta">${escapeHtml(status)} · ${escapeHtml(date)}</small><small class="record-meta">المبلغ: ${escapeHtml(row['المبلغ المعتمد بالجنيه'] || row['المبلغ المطلوب بالجنيه'] || '—')} جنيه · المصروف: ${escapeHtml(row['المصروف الفعلي بالجنيه'] || 'لم يسجل')} · المطلوب إرجاعه: ${escapeHtml(row['المبلغ المطلوب إرجاعه بالجنيه'] || '—')}</small>${settlement}</article>`;
+        const fields = [];
+        if(date) fields.push(['التاريخ',date]);
+        if(amount!==undefined && amount!=='') fields.push(['المبلغ',`${amount} جنيه`]);
+        if(row['المصروف الفعلي بالجنيه']!==undefined) fields.push(['المصروف الفعلي',`${row['المصروف الفعلي بالجنيه']||'—'} جنيه`]);
+        if(row['المبلغ المطلوب إرجاعه بالجنيه']!==undefined) fields.push(['المطلوب إرجاعه',`${row['المبلغ المطلوب إرجاعه بالجنيه']||'—'} جنيه`]);
+        if(row['نوع الإذن']) fields.push(['نوع الإذن',row['نوع الإذن']]);
+        if(row['نوع الخصم']) fields.push(['نوع الخصم',row['نوع الخصم']]);
+        if(row['حالة الجهاز']) fields.push(['حالة الجهاز',row['حالة الجهاز']]);
+        return `<article class="record record-rich"><div class="record-top"><strong>${escapeHtml(title)}</strong><span class="status-pill">${escapeHtml(status)}</span></div>${fields.length?`<div class="record-grid">${fields.map(([k,v])=>`<div class="record-field"><small>${escapeHtml(k)}</small><b>${escapeHtml(v)}</b></div>`).join('')}</div>`:''}${details?`<div class="record-details"><small>التفاصيل</small><p>${escapeHtml(details)}</p></div>`:''}${settlement}</article>`;
       }).join('');
       $('resultBody').querySelectorAll('[data-settle-row]').forEach(b => b.addEventListener('click', async () => {
         const row=Number(b.dataset.settleRow), spent=$(`spent-${row}`).value, notes=$(`settle-note-${row}`).value;
@@ -273,6 +283,44 @@
         catch(e){messageRequest(e.message,true);b.disabled=false;}
       }));
     } catch (e) { $('resultBody').textContent = e.message; }
+  }
+
+  function showRequestPicker(){
+    $('requestPicker').classList.remove('hidden');
+    ['leaveForm','cashForm','complaintForm','complaintThread'].forEach(id=>$(id).classList.add('hidden'));
+    $('requestMessage').classList.add('hidden');
+    $('results').classList.add('hidden');
+    $('requestPicker').scrollIntoView({behavior:'smooth',block:'center'});
+  }
+  function openHomeAction(action){
+    const scrollTo=id=>{const el=$(id);if(el){el.scrollIntoView({behavior:'smooth',block:'start'});}};
+    if(action==='attendance'){scrollTo('attendance');return;}
+    if(action==='history'){showAttendanceHistory();return;}
+    if(action==='leave'){$('requestPicker').classList.add('hidden');switchRequestForm('leave');scrollTo('requestCenter');return;}
+    if(action==='cash'){$('requestPicker').classList.add('hidden');switchRequestForm('cash');scrollTo('requestCenter');return;}
+    if(action==='requests'){showRequestPicker();return;}
+    if(action==='settlement'){showList('cash');return;}
+    if(action==='complaint-new'){$('requestPicker').classList.add('hidden');switchRequestForm('complaint');scrollTo('requestCenter');return;}
+    if(action==='complaint-list'){showList('complaints');return;}
+    if(action==='deductions'){showList('deductions');return;}
+    if(action==='rewards'){loadFinanceSummary();scrollTo('financeCenter');return;}
+    if(action==='monthly'){loadMonthlySummary();return;}
+    if(action==='devices'){showList('devices');return;}
+  }
+  async function loadMonthlySummary(){
+    $('results').classList.remove('hidden');$('resultTitle').textContent='ملخص الشهر';$('resultBody').textContent='جاري تحميل التقرير...';
+    try{
+      const d=await api('monthly_summary');
+      $('resultBody').innerHTML=`<div class="monthly-report"><div class="report-month">تقرير شهر <b>${escapeHtml(d.month)}</b></div><div class="report-grid">
+        <div class="report-stat"><b>${Number(d.checkins)||0}</b><small>مرات تسجيل الحضور</small></div>
+        <div class="report-stat"><b>${Number(d.checkouts)||0}</b><small>مرات تسجيل الانصراف</small></div>
+        <div class="report-stat"><b>${Number(d.lateDays)||0}</b><small>أيام بها تأخير</small></div>
+        <div class="report-stat"><b>${Number(d.lateMinutes)||0}</b><small>إجمالي دقائق التأخير</small></div>
+        <div class="report-stat"><b>${Number(d.confirmedAbsences)||0}</b><small>حالات غياب مؤكدة</small></div>
+        <div class="report-stat"><b>${Number(d.pendingAbsences)||0}</b><small>غياب تحت المراجعة</small></div>
+        <div class="report-stat"><b>${Number(d.leaveCount)||0}</b><small>طلبات أذونات هذا الشهر</small></div>
+      </div><p class="report-note">الأرقام تعكس السجلات والقرارات الموجودة حاليًا في النظام.</p></div>`;
+    }catch(e){$('resultBody').textContent=e.message;}
   }
 
   async function submitLeave() {
@@ -346,6 +394,7 @@
   }
   function messageRequest(text,isError=false){const el=$('requestMessage');el.textContent=text;el.classList.toggle('is-error',isError);el.classList.remove('hidden');}
   function switchRequestForm(which){
+    $('requestPicker').classList.add('hidden');
     $('leaveForm').classList.toggle('hidden',which!=='leave');
     $('cashForm').classList.toggle('hidden',which!=='cash');
     $('complaintForm').classList.toggle('hidden',which!=='complaint');
@@ -437,9 +486,11 @@
     $('leaveForm').classList.add('hidden');$('cashForm').classList.add('hidden');
     $('newLeaveTab').classList.remove('active');$('newCashTab').classList.remove('active');
     $('myRequestsTab').classList.add('active');$('requestMessage').classList.add('hidden');
-    showList('requests');
+    showRequestPicker();
   });
   $('submitCash').addEventListener('click',submitCash);
+  document.querySelectorAll('[data-request-entity]').forEach(b=>b.addEventListener('click',()=>showList(b.dataset.requestEntity)));
+  document.querySelectorAll('[data-home-action]').forEach(b=>b.addEventListener('click',()=>openHomeAction(b.dataset.homeAction)));
   $('myFinanceTab').addEventListener('click',loadFinanceSummary);
   $('deductionAdminTab').addEventListener('click',async()=>{switchFinance('deductions');try{await loadFinanceEmployees();await loadPendingDeductions();}catch(e){financeMessage(e.message,true);}});
   $('rewardAdminTab').addEventListener('click',async()=>{switchFinance('rewards');try{await loadFinanceEmployees();}catch(e){financeMessage(e.message,true);}});
@@ -448,7 +499,8 @@
   $('submitBonus').addEventListener('click',submitBonus);
   $('hygieneDate').value=new Date().toISOString().slice(0,10);
   $('submitComplaint').addEventListener('click',submitComplaint);
-  $('complaintsTab').addEventListener('click',()=>{switchRequestForm('complaint');$('complaintForm').classList.remove('hidden');$('leaveForm').classList.add('hidden');$('cashForm').classList.add('hidden');$('complaintsTab').classList.add('active');showList('complaints');});
+  $('complaintsTab').addEventListener('click',()=>{switchRequestForm('complaint');$('complaintForm').classList.remove('hidden');$('leaveForm').classList.add('hidden');$('cashForm').classList.add('hidden');$('complaintThread').classList.add('hidden');$('requestPicker').classList.add('hidden');$('complaintsTab').classList.add('active');$('complaintHistoryTab').classList.remove('active');});
+  $('complaintHistoryTab').addEventListener('click',()=>{ $('requestPicker').classList.add('hidden'); $('complaintForm').classList.add('hidden'); showList('complaints'); });
   $('leaveType').addEventListener('change',syncLeaveFields);
   $('submitLeave').addEventListener('click',submitLeave);
   $('refreshReviews').addEventListener('click',loadReviews);
@@ -458,6 +510,6 @@
   $('historyBtn').addEventListener('click', showAttendanceHistory);
   document.querySelectorAll('[data-uniform]').forEach(btn => btn.addEventListener('click', () => confirmUniform(btn.dataset.uniform)));
   document.querySelectorAll('[data-entity]').forEach(btn => btn.addEventListener('click', () => showList(btn.dataset.entity)));
-  $('backBtn').addEventListener('click', () => $('results').classList.add('hidden'));
+  $('backBtn').addEventListener('click', () => { $('results').classList.add('hidden'); if($('resultTitle').textContent==='الطلبات العامة'||$('resultTitle').textContent==='طلبات الأذونات'||$('resultTitle').textContent==='السلف والعهد') showRequestPicker(); });
   start();
 })();

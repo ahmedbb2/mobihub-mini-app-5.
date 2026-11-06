@@ -10,7 +10,7 @@
  */
 
 const MH = Object.freeze({
-  VERSION: '1.8.0',
+  VERSION: '1.9.0',
   TZ: 'Africa/Cairo',
   AUTH_MAX_AGE_SECONDS: 300,
   SHEETS: {
@@ -155,6 +155,10 @@ function doPost(e) {
         break;
       case 'reward_summary':
         data = rewardSummary_(profile, body);
+        break;
+
+      case 'monthly_summary':
+        data = monthlySummary_(profile);
         break;
       case 'active_employees':
         data = activeEmployeesMini_(profile);
@@ -440,6 +444,7 @@ function listData_(profile, entity) {
     cash: { sheet: MH.SHEETS.cash, owner: 'Chat ID' },
     deductions: { sheet: MH.SHEETS.deductions, owner: 'Chat ID' },
     overtime: { sheet: MH.SHEETS.overtime, owner: 'Chat ID' },
+    devices: { sheet: MH.SHEETS.devices, owner: 'الموظف المسؤول Chat ID' },
     rewards: { sheet: MH.SHEETS.rewardBonus, owner: 'Chat ID' },
     employees: { sheet: MH.SHEETS.employees, owner: 'Chat ID' }
   };
@@ -1265,13 +1270,13 @@ function financeEmployee_(chatId) {
 }
 function financeMonth_(value) {
   const m = String(value || mhToday_().slice(0,7));
-  if (!/^\\d{4}-\\d{2}$/.test(m)) throw new Error('INVALID_MONTH');
+  if (!/^\d{4}-\d{2}$/.test(m)) throw new Error('INVALID_MONTH');
   return m;
 }
 function financeNumber_(value, max) {
   const raw=String(value ?? '').replace(/[٬,]/g,'').trim();
   const n=Number(raw);
-  if (!/^\\d+(?:\\.\\d{1,2})?$/.test(raw) || !Number.isFinite(n) || n<=0 || n>(max||1000000)) throw new Error('INVALID_AMOUNT');
+  if (!/^\d+(?:\.\d{1,2})?$/.test(raw) || !Number.isFinite(n) || n<=0 || n>(max||1000000)) throw new Error('INVALID_AMOUNT');
   return Math.round(n*100)/100;
 }
 function createManualDeduction_(profile, body) {
@@ -1342,6 +1347,30 @@ function rewardIsApprovedLeaveMini_(chatId,date) {
     return !!(start===date&&shift&&!shift.isFlexible&&mhTimeMinutes_(r['من الساعة'])<=mhTimeMinutes_(shift.startTime));
   });
 }
+
+function monthlySummary_(profile) {
+  const ss = spreadsheet_();
+  const month = mhToday_().slice(0, 7);
+  const chatId = String(profile.chatId);
+  const attendance = rowsAsObjects_(ss, MH.SHEETS.attendance).filter(r =>
+    String(r['Chat ID']).trim() === chatId && mhDate_(r['التاريخ']).indexOf(month) === 0
+  );
+  const checkins = attendance.filter(r => String(r['النوع']).trim() === 'حضور');
+  const checkouts = attendance.filter(r => String(r['النوع']).trim() === 'انصراف');
+  const lateRows = checkins.filter(r => Number(r['دقائق التأخير'] || 0) > 0);
+  const lateMinutes = lateRows.reduce((sum, r) => sum + Number(r['دقائق التأخير'] || 0), 0);
+  const absences = rowsAsObjects_(ss, MH.SHEETS.absences).filter(r =>
+    String(r['Chat ID']).trim() === chatId && mhDate_(r['التاريخ']).indexOf(month) === 0
+  );
+  const confirmedAbsences = absences.filter(r => /مؤكد|غياب/.test(String(r['قرار المدير'] || r['الحالة'] || ''))).length;
+  const pendingAbsences = absences.filter(r => /انتظار|مراجعة/.test(String(r['الحالة'] || ''))).length;
+  const leaveCount = rowsAsObjects_(ss, MH.SHEETS.leaves).filter(r =>
+    String(r['Chat ID']).trim() === chatId && mhDate_(r['تاريخ الإذن']).indexOf(month) === 0
+  ).length;
+  return { month, checkins: checkins.length, checkouts: checkouts.length, lateDays: lateRows.length,
+    lateMinutes, confirmedAbsences, pendingAbsences, leaveCount };
+}
+
 function rewardSummary_(profile, body) {
   const month=financeMonth_(body.month);
   const employeeId=String(body.employeeId||profile.chatId);
