@@ -1,5 +1,5 @@
 /**
- * MobiHub Mini App API — V1.3 attendance + requests + leave migration build
+ * MobiHub Mini App API — V1.10.0 Manager Workspace
  * Separate Apps Script project for the TEST spreadsheet.
  *
  * Required Script Properties:
@@ -10,7 +10,7 @@
  */
 
 const MH = Object.freeze({
-  VERSION: '1.9.4',
+  VERSION: '1.10.0',
   TZ: 'Africa/Cairo',
   AUTH_MAX_AGE_SECONDS: 300,
   SHEETS: {
@@ -96,6 +96,26 @@ function doPost(e) {
     switch (action) {
       case 'bootstrap':
         data = bootstrap_(profile);
+        break;
+
+      case 'manager_dashboard':
+        data = managerDashboard_(profile);
+        break;
+
+      case 'employee_create':
+        data = managerCreateEmployee_(profile, body);
+        break;
+
+      case 'employee_update':
+        data = managerUpdateEmployee_(profile, body);
+        break;
+
+      case 'employee_status':
+        data = managerSetEmployeeStatus_(profile, body);
+        break;
+
+      case 'shift_assign':
+        data = managerAssignShift_(profile, body);
         break;
 
       case 'list':
@@ -439,13 +459,14 @@ function bootstrap_(profile) {
 
   return {
     profile: profile,
+    managerDashboard: isManagement ? managerDashboard_(profile) : null,
     permissions: {
       viewManagement: isManagement,
       reviewRequests: [
         'super_admin', 'admin', 'supervisor'
       ].indexOf(profile.role) >= 0,
       finance: [
-        'super_admin', 'admin', 'finance'
+        'super_admin', 'finance'
       ].indexOf(profile.role) >= 0
     },
     summary: {
@@ -477,7 +498,14 @@ function listData_(profile, entity) {
     overtime: { sheet: MH.SHEETS.overtime, owner: 'Chat ID' },
     devices: { sheet: MH.SHEETS.devices, owner: 'الموظف المسؤول Chat ID' },
     rewards: { sheet: MH.SHEETS.rewardBonus, owner: 'Chat ID' },
-    employees: { sheet: MH.SHEETS.employees, owner: 'Chat ID' }
+    employees: { sheet: MH.SHEETS.employees, owner: 'Chat ID' },
+    attendance: { sheet: MH.SHEETS.attendance, owner: 'Chat ID' },
+    absences: { sheet: MH.SHEETS.absences, owner: 'Chat ID' },
+    shifts: { sheet: MH.SHEETS.shifts, owner: 'Shift ID' },
+    assignments: { sheet: MH.SHEETS.assignments, owner: 'Chat ID' },
+    deviceMovements: { sheet: 'سجل حركة الأجهزة', owner: 'منفذ الحركة Chat ID' },
+    notifications: { sheet: 'سجل الإشعارات', owner: 'المستلم' },
+    notificationSettings: { sheet: 'إعدادات الإشعارات', owner: 'الإعداد' }
   };
 
   const definition = definitions[entity];
@@ -486,7 +514,12 @@ function listData_(profile, entity) {
   }
 
   const role = profile.role;
-  if (entity === 'employees' && ['super_admin','admin','finance'].indexOf(role) < 0) throw new Error('FORBIDDEN');
+  const staffAdminEntities = ['employees','shifts','assignments','deviceMovements'];
+  const dailySupervisorEntities = ['attendance','absences'];
+  if (staffAdminEntities.indexOf(entity) >= 0 && ['super_admin','admin'].indexOf(role) < 0) throw new Error('FORBIDDEN');
+  if (dailySupervisorEntities.indexOf(entity) >= 0 && ['super_admin','admin','supervisor'].indexOf(role) < 0) throw new Error('FORBIDDEN');
+  if (entity === 'devices' && ['super_admin','admin'].indexOf(role) < 0) throw new Error('FORBIDDEN');
+  if (['notifications','notificationSettings','complaints'].indexOf(entity) >= 0 && ['super_admin','admin','supervisor'].indexOf(role) < 0) throw new Error('FORBIDDEN');
   const canReviewGeneral = [
     'super_admin', 'admin', 'supervisor'
   ].indexOf(role) >= 0;
@@ -497,7 +530,7 @@ function listData_(profile, entity) {
 
   let canViewAll = false;
 
-  if (entity === 'employees') {
+  if (staffAdminEntities.indexOf(entity) >= 0 || dailySupervisorEntities.indexOf(entity) >= 0 || entity === 'devices' || ['notifications','notificationSettings'].indexOf(entity) >= 0) {
     canViewAll = true;
   } else if (entity === 'cash' || entity === 'deductions' || entity === 'overtime' || entity === 'rewards') {
     canViewAll = canReviewCash;
@@ -515,6 +548,169 @@ function listData_(profile, entity) {
       });
 
   return visibleRows.slice(-100).reverse();
+}
+
+/**
+ * Manager dashboard aggregates. Reads only the V40 operational sheets and
+ * returns counts + compact recent lists; every call is role-checked server-side.
+ */
+function managerDashboard_(profile) {
+  const role = String(profile.role || '');
+  mhRequireRole_(profile, ['super_admin','admin','finance','supervisor']);
+  const ss = spreadsheet_();
+  const today = mhToday_();
+  const month = today.slice(0,7);
+  const modules = {
+    daily: ['super_admin','admin','supervisor'].includes(role),
+    staff: ['super_admin','admin'].includes(role),
+    devices: ['super_admin','admin'].includes(role),
+    requests: ['super_admin','admin','supervisor'].includes(role),
+    finance: ['super_admin','finance'].includes(role),
+    system: ['super_admin','admin'].includes(role),
+    notifications: ['super_admin','admin','supervisor'].includes(role)
+  };
+  const dataWarnings = [];
+  const safeRows = function(name, enabled) {
+    if (!enabled) return [];
+    try { return rowsAsObjects_(ss, name); }
+    catch (e) { dataWarnings.push(name + ': ' + String(e.message||e)); return []; }
+  };
+  const employees = safeRows(MH.SHEETS.employees, modules.staff).filter(r =>
+    String(r['Chat ID'] || '').trim() && String(r['الحالة'] || 'نشط').trim() === 'نشط' &&
+    String(r['حالة الحساب'] || 'نشط').trim() === 'نشط'
+  );
+  const attendanceRows = safeRows(MH.SHEETS.attendance, modules.daily);
+  const attendance = attendanceRows.filter(r => mhDate_(r['التاريخ']) === today);
+  const monthAttendance = attendanceRows.filter(r => mhDate_(r['التاريخ']).indexOf(month) === 0);
+  const latest = {};
+  attendance.forEach(r => { const id=String(r['Chat ID']||'').trim(); if(id) latest[id]=r; });
+  const presentNow = Object.keys(latest).filter(id => String(latest[id]['النوع']||'').trim() === 'حضور').length;
+  const requests = safeRows(MH.SHEETS.requests, modules.requests);
+  const leaves = safeRows(MH.SHEETS.leaves, modules.requests || modules.daily);
+  const cash = safeRows(MH.SHEETS.cash, modules.finance);
+  const complaints = safeRows(MH.SHEETS.complaints, modules.requests);
+  const devices = safeRows(MH.SHEETS.devices, modules.devices);
+  const absences = safeRows(MH.SHEETS.absences, modules.daily);
+  const pendingRequests = requests.filter(r => String(r['القرار']||'').trim() === 'قيد الانتظار').length;
+  const pendingLeaves = leaves.filter(r => ['بانتظار مراجعة المدير','قيد الانتظار','معلق'].includes(String(r['الحالة']||'').trim()) && String(r['قرار المدير']||'').trim() !== 'مقبول').length;
+  const pendingCash = cash.filter(r => ['قيد المراجعة','طلب جديد','بانتظار مراجعة المدير','بانتظار الصرف','بانتظار مراجعة التسوية','بانتظار تأكيد استلام المتبقي'].includes(String(r['الحالة']||r['حالة التسوية']||'').trim()) || ['بانتظار الصرف','بانتظار مراجعة التسوية','بانتظار تأكيد استلام المتبقي'].includes(String(r['حالة الصرف']||r['حالة التسوية']||'').trim())).length;
+  const openComplaints = complaints.filter(r => !['مغلقة','تم الحل'].includes(String(r['الحالة']||'').trim()));
+  const activeDevices = devices.filter(r => String(r['حالة الجهاز']||'').trim() !== 'تم التسليم');
+  const pendingAbsences = absences.filter(r => /انتظار|مراجعة|معلق/.test(String(r['الحالة']||r['قرار المدير']||'')));
+  const monthCheckins=monthAttendance.filter(r=>String(r['النوع']||'').trim()==='حضور');
+  const monthCheckouts=monthAttendance.filter(r=>String(r['النوع']||'').trim()==='انصراف');
+  const lateRows=monthCheckins.filter(r=>Number(r['دقائق التأخير']||0)>0);
+  const monthlyReport=modules.system?{
+    month:month,checkins:monthCheckins.length,checkouts:monthCheckouts.length,lateDays:lateRows.length,
+    lateMinutes:lateRows.reduce((sum,r)=>sum+(Number(r['دقائق التأخير'])||0),0),
+    confirmedAbsences:absences.filter(r=>mhDate_(r['التاريخ']).indexOf(month)===0&&/مؤكد|تأكيد الغياب/.test(String(r['الحالة']||r['قرار المدير']||''))).length,
+    pendingAbsences:pendingAbsences.filter(r=>mhDate_(r['التاريخ']).indexOf(month)===0).length,
+    leaveCount:leaves.filter(r=>mhDate_(r['تاريخ الإذن']).indexOf(month)===0).length
+  }:null;
+  const recentComplaints = modules.requests ? openComplaints.slice(-5).reverse().map(r => ({
+    id:String(r['رقم الشكوى']||''), employee:String(r['اسم الموظف']||''),
+    type:String(r['نوع الشكوى']||''), status:String(r['الحالة']||''),
+    date:String(r['التاريخ والوقت']||''), details:String(r['تفاصيل الشكوى']||'').slice(0,180)
+  })) : [];
+  const todayRows = modules.daily ? Object.keys(latest).map(id => ({
+    chatId:id, name:String(latest[id]['اسم الموظف']||''),
+    state:String(latest[id]['النوع']||''), time:String(latest[id]['الوقت']||''),
+    attendanceStatus:String(latest[id]['حالة الحضور']||'')
+  })) : [];
+  return {
+    date:today, month:month, role:role, modules:modules,
+    metrics:{
+      activeEmployees:modules.staff?employees.length:null,
+      presentNow:modules.daily?presentNow:null,
+      checkedInToday:modules.daily?Object.keys(latest).length:null,
+      pendingRequests:modules.requests?pendingRequests:null,
+      pendingLeaves:(modules.requests||modules.daily)?pendingLeaves:null,
+      pendingCash:modules.finance?pendingCash:null,
+      openComplaints:modules.requests?openComplaints.length:null,
+      activeDevices:modules.devices?activeDevices.length:null,
+      pendingAbsences:modules.daily?pendingAbsences.length:null
+    },
+    todayAttendance:todayRows.slice(0,30), recentComplaints:recentComplaints, monthlyReport:monthlyReport,
+    dataWarnings:dataWarnings
+  };
+}
+
+/* MANAGER STAFF OPERATIONS — V1.10 */
+const MH_MANAGER_STAFF = Object.freeze({
+  EMPLOYEE_HEADERS:['Chat ID','اسم الموظف','الوظيفة','رقم الهاتف','الحالة','حالة الحساب'],
+  SHIFT_HEADERS:['Shift ID','اسم الوردية','موعد الحضور','موعد الانصراف','فترة السماح بالدقائق','الحالة'],
+  ASSIGNMENT_HEADERS:['Chat ID','Shift ID','تاريخ البداية','تاريخ النهاية','أيام العمل','الحالة']
+});
+function managerCreateEmployee_(profile, body) {
+  mhRequireRole_(profile,['super_admin','admin']);
+  const id=String(body.chatId||'').trim(), name=String(body.name||'').trim();
+  const job=String(body.job||'مهندس').trim(), phone=String(body.phone||'').trim();
+  if(!/^\d{5,20}$/.test(id)||name.length<2||name.length>80||job.length<2||job.length>80||phone.length>30) throw new Error('INVALID_EMPLOYEE_DATA');
+  const sh=mhSheet_(MH.SHEETS.employees); mhAssertHeaders_(sh,MH_MANAGER_STAFF.EMPLOYEE_HEADERS);
+  const rows=mhRowsObjects_(sh);
+  if(rows.some(r=>String(r['Chat ID']||'').trim()===id)) throw new Error('EMPLOYEE_ALREADY_EXISTS');
+  const lock=LockService.getScriptLock();lock.waitLock(15000);
+  try { sh.appendRow([id,name,job,phone,'نشط','نشط']); return {created:true,chatId:id,name:name}; }
+  finally {lock.releaseLock();}
+}
+function managerFindEmployeeRow_(chatId) {
+  const sh=mhSheet_(MH.SHEETS.employees);mhAssertHeaders_(sh,MH_MANAGER_STAFF.EMPLOYEE_HEADERS);
+  const values=sh.getDataRange().getDisplayValues(), headers=values[0].map(x=>String(x).trim()), idx=headers.indexOf('Chat ID');
+  if(idx<0) throw new Error('SHEET_SCHEMA_MISMATCH');
+  for(let i=1;i<values.length;i++) if(String(values[i][idx]).trim()===String(chatId)) return {sheet:sh,row:i+1,headers:headers,values:values[i]};
+  throw new Error('EMPLOYEE_NOT_FOUND');
+}
+function managerUpdateEmployee_(profile, body) {
+  mhRequireRole_(profile,['super_admin','admin']);
+  const id=String(body.employeeId||'').trim(), name=String(body.name||'').trim(), job=String(body.job||'').trim(), phone=String(body.phone||'').trim();
+  if(!/^\d{5,20}$/.test(id)||name.length<2||name.length>80||job.length<2||job.length>80||phone.length>30) throw new Error('INVALID_EMPLOYEE_DATA');
+  const lock=LockService.getScriptLock();lock.waitLock(15000);
+  try { const found=managerFindEmployeeRow_(id); const map={};found.headers.forEach((h,i)=>map[h]=i+1);
+    found.sheet.getRange(found.row,map['اسم الموظف']).setValue(name);
+    found.sheet.getRange(found.row,map['الوظيفة']).setValue(job);
+    found.sheet.getRange(found.row,map['رقم الهاتف']).setValue(phone);
+    return {updated:true,chatId:id,name:name};
+  } finally {lock.releaseLock();}
+}
+function managerSetEmployeeStatus_(profile, body) {
+  mhRequireRole_(profile,['super_admin','admin']);
+  const id=String(body.employeeId||'').trim(), status=String(body.status||'').trim();
+  if(!/^\d{5,20}$/.test(id)||!['نشط','موقوف'].includes(status)) throw new Error('INVALID_EMPLOYEE_STATUS');
+  const lock=LockService.getScriptLock();lock.waitLock(15000);
+  try { const found=managerFindEmployeeRow_(id); const map={};found.headers.forEach((h,i)=>map[h]=i+1);
+    found.sheet.getRange(found.row,map['الحالة']).setValue(status);
+    found.sheet.getRange(found.row,map['حالة الحساب']).setValue(status);
+    return {updated:true,status:status,chatId:id};
+  } finally {lock.releaseLock();}
+}
+function managerAssignShift_(profile, body) {
+  mhRequireRole_(profile,['super_admin','admin']);
+  const employeeId=String(body.employeeId||'').trim(), shiftId=String(body.shiftId||'').trim();
+  const startRaw=String(body.startDate||'').trim(), endRaw=String(body.endDate||'').trim();
+  const start=startRaw?mhIsoDate_(startRaw):mhToday_(), end=endRaw?mhIsoDate_(endRaw):'';
+  const days=String(body.days||'0,1,2,3,4,6').split(',').map(x=>Number(x.trim()));
+  if(!/^\d{5,20}$/.test(employeeId)||!shiftId||!/^\d{4}-\d{2}-\d{2}$/.test(start)|| (startRaw&&!mhIsoDate_(startRaw)) || (endRaw&&!end) || (end&&!/^\d{4}-\d{2}-\d{2}$/.test(end)) || (end&&end<start)) throw new Error('INVALID_SHIFT_ASSIGNMENT');
+  if(!days.length||days.some(d=>!Number.isInteger(d)||d<0||d>6)||new Set(days).size!==days.length) throw new Error('INVALID_SHIFT_DAYS');
+  const employeeRow=managerFindEmployeeRow_(employeeId);
+  const employeeMap={};employeeRow.headers.forEach((h,i)=>employeeMap[h]=i);
+  if(String(employeeRow.values[employeeMap['الحالة']]||'نشط')!=='نشط'||String(employeeRow.values[employeeMap['حالة الحساب']]||'نشط')!=='نشط') throw new Error('ACCOUNT_INACTIVE');
+  const ss=spreadsheet_(), shiftRows=rowsAsObjects_(ss,MH.SHEETS.shifts);
+  const shift=shiftRows.find(r=>String(r['Shift ID']||'').trim()===shiftId&&String(r['الحالة']||'نشط').trim()==='نشط');
+  if(!shift) throw new Error('SHIFT_NOT_FOUND');
+  const isFlexible=shiftId==='FLEX_NO_FIXED_TIME';
+  if(!isFlexible&&days.includes(5)) throw new Error('FRIDAY_FIXED_SHIFT_NOT_ALLOWED');
+  const sh=mhSheet_(MH.SHEETS.assignments);mhAssertHeaders_(sh,MH_MANAGER_STAFF.ASSIGNMENT_HEADERS);
+  const lock=LockService.getScriptLock();lock.waitLock(15000);
+  try {
+    const values=sh.getDataRange().getDisplayValues();
+    for(let i=1;i<values.length;i++) {
+      const r=values[i]; if(String(r[0]).trim()!==employeeId||String(r[5]||'نشط').trim()!=='نشط') continue;
+      const oldStart=mhIsoDate_(r[2])||'0000-01-01',oldEnd=mhIsoDate_(r[3])||'9999-12-31',newEnd=end||'9999-12-31';
+      if(oldStart<=newEnd&&start<=oldEnd) sh.getRange(i+1,6).setValue('غير نشط');
+    }
+    sh.appendRow([employeeId,shiftId,start,end,days.join(','),'نشط']);
+    return {assigned:true,employeeId:employeeId,shiftId:shiftId,startDate:start,endDate:end,days:days};
+  } finally {lock.releaseLock();}
 }
 
 /* DEVICE INTAKE + ASSIGNMENT — V1.9

@@ -235,12 +235,18 @@
     if(isManager) {
       $('welcomeEyebrow').textContent = 'لوحة الإدارة والتشغيل';
       manager.classList.remove('hidden'); employee.classList.add('hidden');
-      mount(manager, ['stats','reviewCenter','cashReviewCenter','financeCenter','deviceRegisterPanel','results','management']);
+      mount(manager, ['reviewCenter','cashReviewCenter','financeCenter','deviceRegisterPanel','results','management']);
+      $('stats').classList.add('hidden');
+      $('managerDashboard').classList.remove('hidden');
       $('attendance').classList.add('hidden');
       $('homeActions').classList.add('hidden');
       $('financeCenter').classList.add('hidden');
       $('deviceRegisterPanel').classList.add('hidden');
       $('requestCenter').classList.add('hidden');
+      $('reviewCenter').classList.add('hidden');
+      $('cashReviewCenter').classList.add('hidden');
+      $('management').classList.add('hidden');
+      $('results').classList.add('hidden');
       if(role==='supervisor') {
         $('deductionAdminTab').classList.add('hidden');
         $('rewardAdminTab').classList.remove('hidden');
@@ -259,6 +265,7 @@
       $('welcomeEyebrow').textContent = 'مساحة المهندس';
       employee.classList.remove('hidden'); manager.classList.add('hidden');
       mount(employee, ['stats','homeActions','attendance','requestCenter','financeCenter','deviceRegisterPanel','results']);
+      $('managerDashboard').classList.add('hidden');
       // The manager workspace hides this card grid. Always restore it when returning
       // to the engineer workspace (especially for dual-role Telegram accounts).
       $('homeActions').classList.remove('hidden');
@@ -275,11 +282,10 @@
       $('attendance').classList.add('hidden');
     }
     if (isManager) {
-      nav.classList.remove('hidden');
-      nav.querySelectorAll('[data-nav-target]').forEach(btn=>btn.addEventListener('click',()=>{
-        const target=$(btn.dataset.navTarget); if(target){target.classList.remove('hidden');target.scrollIntoView({behavior:'smooth',block:'start'});}
-        nav.querySelectorAll('button').forEach(b=>b.classList.toggle('active',b===btn));
-      }));
+      // The manager dashboard is the only default landing surface. Operational
+      // panels open on demand in the modal sheet, never below the dashboard.
+      nav.innerHTML = '';
+      nav.classList.add('hidden');
     }
   }
   function applyWorkspaceProfile(data) {
@@ -297,9 +303,123 @@
 
     renderStats(data.summary || {});
     buildWorkspace(currentRole, data.permissions || {});
-    $('management').classList.toggle('hidden', !data.permissions?.viewManagement);
-    $('reviewCenter').classList.toggle('hidden', !data.permissions?.reviewRequests);
-    $('cashReviewCenter').classList.toggle('hidden', !data.permissions?.finance);
+    // Manager panels stay hidden on the landing page and are moved into a modal only when opened.
+    if (workspaceRole === 'manager') {
+      if (data.managerDashboard) renderManagerDashboard(data.managerDashboard);
+      else loadManagerDashboard();
+    }
+  }
+
+  const managerModuleTitles = {
+    daily:'المتابعة اليومية', staff:'شؤون المهندسين', requests:'طلبات المهندسين والتواصل',
+    finance:'الإدارة المالية', devices:'الأجهزة والصيانة', system:'التقارير والنظام', notifications:'مركز الإشعارات'
+  };
+  let managerDashboardCache = null;
+  function renderManagerDashboard(data) {
+    managerDashboardCache = data;
+    $('managerDashboardDate').textContent = `اليوم ${data.date || ''} · تقرير الشهر ${data.month || ''}`;
+    const m = data.metrics || {};
+    const tiles = [
+      ['المهندسون النشطون',m.activeEmployees,'users','staff'],['الموجودون الآن',m.presentNow,'user-check','daily'],
+      ['طلبات معلقة',m.pendingRequests + m.pendingLeaves,'inbox','requests'],['طلبات مالية معلقة',m.pendingCash,'wallet','finance'],
+      ['شكاوى مفتوحة',m.openComplaints,'message-circle','requests'],['أجهزة تحت المتابعة',m.activeDevices,'smartphone','devices']
+    ].filter(item => data.modules?.[item[3]] === true);
+    $('managerMetrics').innerHTML = tiles.map(([label,value,ico])=>`<article class="manager-metric"><span class="manager-metric-icon">${({users:'♙','user-check':'✓',inbox:'▤',wallet:'ج.م','message-circle':'✉',smartphone:'▣'})[ico]}</span><b>${Number(value)||0}</b><small>${label}</small></article>`).join('');
+    const allowed = data.modules || {};
+    $('managerModules').querySelectorAll('[data-manager-module]').forEach(btn=>{
+      btn.classList.toggle('hidden', allowed[btn.dataset.managerModule] !== true);
+    });
+    const complaints = data.recentComplaints || [];
+    $('managerComplaintSection').classList.toggle('hidden', data.modules?.requests !== true);
+    const warningBox=$('managerDashboardMessage');
+    if(Array.isArray(data.dataWarnings)&&data.dataWarnings.length){warningBox.textContent='تنبيه: تعذر قراءة بعض أوراق البيانات: '+data.dataWarnings.join('، ');warningBox.classList.remove('hidden');}else{warningBox.classList.add('hidden');}
+    $('managerRecentComplaints').innerHTML = complaints.length ? complaints.map(c=>`<article class="manager-complaint"><div><b>${escapeHtml(c.id || 'شكوى')} · ${escapeHtml(c.type || 'شكوى')}</b><small>${escapeHtml(c.employee || 'مهندس')} · ${escapeHtml(c.date || '')}</small></div><span class="status-pill">${escapeHtml(c.status || 'جديدة')}</span><p>${escapeHtml(c.details || '')}</p><button type="button" class="secondary-btn" data-manager-complaint="${escapeHtml(c.id)}">فتح الشكوى</button></article>`).join('') : '<p class="muted">لا توجد شكاوى مفتوحة حاليًا.</p>';
+    $('managerRecentComplaints').querySelectorAll('[data-manager-complaint]').forEach(b=>b.addEventListener('click',()=>{ $('results').classList.remove('hidden'); $('resultTitle').textContent='محادثة الشكوى'; openModal('محادثة الشكوى',$('results')); openComplaint(b.dataset.managerComplaint); }));
+  }
+  async function loadManagerDashboard() {
+    if (workspaceRole !== 'manager') return;
+    const box=$('managerMetrics'); if(box) box.innerHTML='<div class="manager-loading">جاري تحديث مؤشرات الإدارة...</div>';
+    try { const data=await api('manager_dashboard'); renderManagerDashboard(data); }
+    catch(e) { if(box) box.innerHTML=`<div class="manager-load-error">${escapeHtml(e.message)}</div>`; }
+  }
+  function managerPanel(title, html) {
+    const panel=document.createElement('section'); panel.className='manager-module-panel';
+    panel.innerHTML=`<div class="manager-module-heading"><div><small>MOBIHUB MANAGEMENT</small><h3>${escapeHtml(title)}</h3></div><button type="button" class="modal-close" data-manager-panel-close aria-label="إغلاق">×</button></div><div class="manager-module-content">${html}</div>`;
+    panel.querySelector('[data-manager-panel-close]').addEventListener('click',closeModal);
+    document.body.appendChild(panel); openModal(title,panel); return panel;
+  }
+  async function openManagerModule(module) {
+    const permitted=managerDashboardCache?.modules?.[module];
+    if(!permitted) { if(tg?.showAlert) tg.showAlert('هذه الخدمة غير متاحة حسب صلاحية حسابك.'); return; }
+    const title=managerModuleTitles[module] || 'الإدارة';
+    if(module==='requests') {
+      const panel=managerPanel(title,'<button type="button" class="manager-action-card" id="managerOpenPendingRequests"><b>مراجعة الطلبات والأذونات</b><small>مراجعة الطلبات المقدمة من المهندسين</small></button><button type="button" class="manager-action-card" id="managerOpenComplaints"><b>شكاوى المهندسين</b><small>فتح الشكاوى ومتابعة الردود والحالات</small></button>');
+      panel.querySelector('#managerOpenPendingRequests').addEventListener('click',async()=>{closeModal();openModal('مراجعة الطلبات والأذونات',$('reviewCenter'));await loadReviews();});
+      panel.querySelector('#managerOpenComplaints').addEventListener('click',()=>{closeModal();showList('complaints');});
+      return;
+    }
+    if(module==='finance') {
+      const panel=managerPanel(title,'<button type="button" class="manager-action-card" id="managerOpenCash"><b>السلف والعهد</b><small>الموافقة والصرف ومراجعة التسويات</small></button><button type="button" class="manager-action-card" id="managerOpenFinance"><b>الخصومات والمكافآت</b><small>إضافة ومراجعة الخصومات والمكافآت وتقييم النظافة</small></button>');
+      panel.querySelector('#managerOpenCash').addEventListener('click',async()=>{closeModal();openModal('مراجعة السلف والعهد',$('cashReviewCenter'));await loadCashReviews();});
+      panel.querySelector('#managerOpenFinance').addEventListener('click',async()=>{closeModal();$('financeCenter').classList.remove('hidden');openModal('الخصومات والمكافآت',$('financeCenter'));$('deductionAdminTab').click();});
+      return;
+    }
+    if(module==='notifications') {
+      const panel=managerPanel(title,'<p class="muted">جاري تحميل سجل الإشعارات والإعدادات...</p>'); const content=panel.querySelector('.manager-module-content');
+      try { const [logs,settings]=await Promise.all([api('list',{entity:'notifications'}),api('list',{entity:'notificationSettings'})]);
+        content.innerHTML=`<h4>آخر الإشعارات</h4>${logs.slice(-30).reverse().map(r=>`<article class="manager-row"><b>${escapeHtml(r['نوع الإشعار']||'إشعار')}</b><span>${escapeHtml(r['الحالة']||'')}</span><small>${escapeHtml(r['المستلم']||'')} · ${escapeHtml(r['التاريخ والوقت']||'')}</small></article>`).join('')||'<p class="muted">لا توجد سجلات إشعارات.</p>'}<h4>إعدادات التنبيه الحالية</h4>${settings.map(r=>`<article class="manager-row"><b>${escapeHtml(r['الإعداد']||'')}</b><span>${escapeHtml(r['القيمة']||'')}</span><small>${escapeHtml(r['الوصف']||'')}</small></article>`).join('')||'<p class="muted">لا توجد إعدادات مسجلة.</p>'}<p class="manager-note">العرض حاليًا للقراءة فقط؛ تعديل الإعدادات وإرسال اختبار إشعار سيتم تنفيذهما في مرحلة مركز الإشعارات.</p>`;
+      } catch(e) { content.innerHTML=`<div class="manager-load-error">${escapeHtml(e.message)}</div>`; } return;
+    }
+    const panel=managerPanel(title,'<p class="muted">جاري تحميل البيانات من Google Sheets...</p>');
+    const content=panel.querySelector('.manager-module-content');
+    try {
+      if(module==='daily') {
+        const dash=managerDashboardCache||{}; const [rows,absences]=await Promise.all([api('list',{entity:'attendance'}),api('list',{entity:'absences'})]);
+        const day=dash.date; const today=rows.filter(r=>String(r['التاريخ']||'').slice(0,10)===day).reverse();
+        const latest={}; today.forEach(r=>{const id=String(r['Chat ID']||'');if(id&&!latest[id])latest[id]=r;});
+        const records=Object.values(latest);
+        content.innerHTML=`<div class="manager-mini-kpis"><div><b>${records.filter(r=>String(r['النوع'])==='حضور').length}</b><small>حضور مفتوح حسب آخر حركة</small></div><div><b>${absences.filter(r=>/انتظار|مراجعة|معلق/.test(String(r['الحالة']||r['قرار المدير']||''))).length}</b><small>حالات غياب للمراجعة</small></div></div><h4>حركات اليوم</h4>${records.length?records.map(r=>`<article class="manager-row"><b>${escapeHtml(r['اسم الموظف']||'مهندس')}</b><span>${escapeHtml(r['النوع']||'')}</span><small>${escapeHtml(r['الوقت']||'')} · ${escapeHtml(r['حالة الحضور']||'')}</small></article>`).join(''):'<p class="muted">لا توجد حركات حضور مسجلة اليوم.</p>'}<h4>مراجعة الغياب</h4>${absences.slice(-15).reverse().map(r=>`<article class="manager-row"><b>${escapeHtml(r['اسم الموظف']||'مهندس')}</b><span>${escapeHtml(r['الحالة']||r['قرار المدير']||'غير محدد')}</span><small>${escapeHtml(r['التاريخ']||'')} · ${escapeHtml(r['ملاحظات المدير']||'')}</small></article>`).join('')||'<p class="muted">لا توجد سجلات غياب.</p>'}`;
+      } else if(module==='staff') {
+        const [rows,assignments,shifts]=await Promise.all([api('list',{entity:'employees'}),api('list',{entity:'assignments'}),api('list',{entity:'shifts'})]);
+        const shiftNames=Object.fromEntries(shifts.map(x=>[String(x['Shift ID']||''),String(x['اسم الوردية']||x['اسم الشيفت']||x['الاسم']||'وردية')]));
+        content.innerHTML=`<button type="button" class="primary-btn" id="managerAddEmployee">＋ إضافة مهندس</button><div class="manager-list-head"><b>${rows.length} حساب ظاهر (حتى آخر 100 سجل)</b><input id="managerEmployeeSearch" type="search" placeholder="ابحث بالاسم أو Chat ID"></div><div id="managerEmployeeRows">${rows.map(r=>{const id=String(r['Chat ID']||'');const active=String(r['حالة الحساب']||r['الحالة']||'نشط')==='نشط';const assigned=assignments.filter(a=>String(a['Chat ID']||'')===id&&String(a['الحالة']||'نشط')==='نشط').map(a=>shiftNames[String(a['Shift ID']||'')]||a['Shift ID']).join('، ');return `<article class="manager-row manager-employee-row"><div><b>${escapeHtml(r['اسم الموظف']||'بدون اسم')}</b><small>${escapeHtml(r['الوظيفة']||'مهندس')} · ${escapeHtml(r['رقم الهاتف']||'')}<br>Chat ID: ${escapeHtml(id)}<br>${escapeHtml(assigned||'لا يوجد تعيين وردية ظاهر')}</small></div><span class="status-pill">${active?'نشط':'موقوف'}</span><div class="manager-row-actions"><button type="button" class="secondary-btn" data-edit-employee="${escapeHtml(id)}">تعديل</button><button type="button" class="secondary-btn" data-assign-employee="${escapeHtml(id)}">تعيين وردية</button><button type="button" class="secondary-btn" data-toggle-employee="${escapeHtml(id)}" data-next-status="${active?'موقوف':'نشط'}">${active?'إيقاف':'تفعيل'}</button></div></article>`;}).join('')||'<p class="muted">لا يوجد مهندسون مسجلون.</p>'}</div>`;
+        content.querySelector('#managerAddEmployee').addEventListener('click',()=>openManagerEmployeeForm('create',null,shifts));
+        content.querySelectorAll('[data-edit-employee]').forEach(b=>b.addEventListener('click',()=>openManagerEmployeeForm('edit',rows.find(r=>String(r['Chat ID'])===b.dataset.editEmployee),shifts)));
+        content.querySelectorAll('[data-assign-employee]').forEach(b=>b.addEventListener('click',()=>openManagerEmployeeForm('assign',rows.find(r=>String(r['Chat ID'])===b.dataset.assignEmployee),shifts)));
+        content.querySelectorAll('[data-toggle-employee]').forEach(b=>b.addEventListener('click',async()=>{if(!confirm(`تأكيد ${b.dataset.nextStatus==='موقوف'?'إيقاف':'تفعيل'} حساب المهندس؟`))return;b.disabled=true;try{await api('employee_status',{employeeId:b.dataset.toggleEmployee,status:b.dataset.nextStatus});await loadManagerDashboard();closeModal();openManagerModule('staff');}catch(e){if(tg?.showAlert)tg.showAlert(e.message);b.disabled=false;}}));
+        const search=content.querySelector('#managerEmployeeSearch'); search.addEventListener('input',()=>{const q=search.value.trim().toLowerCase();content.querySelectorAll('.manager-employee-row').forEach(row=>row.classList.toggle('hidden',!row.textContent.toLowerCase().includes(q)));});
+      } else if(module==='devices') {
+        const [rows,movements]=await Promise.all([api('list',{entity:'devices'}),api('list',{entity:'deviceMovements'})]);
+        content.innerHTML=`<div class="manager-mini-kpis"><div><b>${rows.length}</b><small>أجهزة مسجلة</small></div><div><b>${movements.length}</b><small>حركات مسجلة</small></div></div>`+(rows.length?rows.map(r=>`<article class="manager-row"><div><b>${escapeHtml(r['رقم الطلب']||r['اسم الجهاز']||'جهاز')}</b><small>${escapeHtml(r['اسم الجهاز']||'')} · ${escapeHtml(r['اسم العميل']||'')}</small></div><span class="status-pill">${escapeHtml(r['حالة الجهاز']||'غير محدد')}</span><small>المسؤول: ${escapeHtml(r['الموظف المسؤول']||'—')} · المكان: ${escapeHtml(r['مكان الجهاز']||'—')}</small></article>`).join(''):'<p class="muted">لا توجد أجهزة مسجلة.</p>');
+      } else if(module==='system') {
+        const d=managerDashboardCache||await api('manager_dashboard'); const r=d.monthlyReport||{};
+        content.innerHTML=`<div class="manager-mini-kpis"><div><b>${Number(r.checkins)||0}</b><small>مرات تسجيل الحضور</small></div><div><b>${Number(r.checkouts)||0}</b><small>مرات تسجيل الانصراف</small></div><div><b>${Number(r.lateDays)||0}</b><small>أيام بها تأخير</small></div><div><b>${Number(r.lateMinutes)||0}</b><small>دقائق التأخير</small></div><div><b>${Number(r.confirmedAbsences)||0}</b><small>غياب مؤكد</small></div><div><b>${Number(r.pendingAbsences)||0}</b><small>غياب قيد المراجعة</small></div><div><b>${Number(r.leaveCount)||0}</b><small>طلبات أذونات خلال الشهر</small></div></div><p class="manager-note">تقرير تشغيلي عام لشهر ${escapeHtml(r.month||d.month||'')}، مجمع من سجلات الحضور والغياب والأذونات في Google Sheets، وليس تقريرًا فرديًا لمهندس واحد.</p>`;
+      }
+    } catch(e) { content.innerHTML=`<div class="manager-load-error">${escapeHtml(e.message)}</div>`; }
+  }
+
+  function openManagerEmployeeForm(mode, employee, shifts) {
+    const e=employee||{}; const id=String(e['Chat ID']||'');
+    const title=mode==='create'?'إضافة مهندس جديد':mode==='edit'?'تعديل بيانات المهندس':'تعيين وردية للمهندس';
+    let html='';
+    if(mode==='assign') {
+      const activeShifts=shifts.filter(x=>String(x['الحالة']||'نشط')==='نشط');
+      html=`<form id="managerStaffForm" class="manager-staff-form"><label>الوردية<select name="shiftId" required>${activeShifts.map(x=>`<option value="${escapeHtml(x['Shift ID'])}">${escapeHtml(x['اسم الوردية']||x['Shift ID'])} · ${escapeHtml(x['موعد الحضور']||'مرن')} - ${escapeHtml(x['موعد الانصراف']||'')}</option>`).join('')}</select></label><label>تاريخ البداية<input name="startDate" type="date" value="${escapeHtml(managerDashboardCache?.date || new Date().toISOString().slice(0,10))}" required></label><label>تاريخ النهاية (اختياري)<input name="endDate" type="date"></label><label>أيام العمل<input name="days" value="0,1,2,3,4,6" required><small>الأيام بالأرقام: الأحد 0، الاثنين 1، ... السبت 6. افصل بفاصلة.</small></label><button class="primary-btn" type="submit">حفظ تعيين الوردية</button></form>`;
+    } else {
+      html=`<form id="managerStaffForm" class="manager-staff-form">${mode==='create'?'<label>Telegram Chat ID<input name="chatId" inputmode="numeric" pattern="[0-9]{5,20}" required></label>':''}<label>اسم المهندس<input name="name" maxlength="80" value="${escapeHtml(e['اسم الموظف']||'')}" required></label><label>الوظيفة<input name="job" maxlength="80" value="${escapeHtml(e['الوظيفة']||'مهندس')}" required></label><label>رقم الهاتف<input name="phone" maxlength="30" value="${escapeHtml(e['رقم الهاتف']||'')}"></label><button class="primary-btn" type="submit">${mode==='create'?'إضافة الحساب':'حفظ التعديلات'}</button></form>`;
+    }
+    const panel=managerPanel(title,html); const form=panel.querySelector('#managerStaffForm');
+    form.addEventListener('submit',async ev=>{ev.preventDefault();const b=form.querySelector('button[type="submit"]');b.disabled=true;
+      try { const fd=new FormData(form), data=Object.fromEntries(fd.entries());
+        if(mode==='create') await api('employee_create',data);
+        else if(mode==='edit') await api('employee_update',{employeeId:id,...data});
+        else await api('shift_assign',{employeeId:id,...data});
+        closeModal(); if(tg?.HapticFeedback)tg.HapticFeedback.notificationOccurred('success');
+        await loadManagerDashboard();
+        openManagerModule('staff');
+        if(tg?.showAlert)tg.showAlert(mode==='create'?'تمت إضافة المهندس.':mode==='edit'?'تم تحديث بيانات المهندس.':'تم تعيين الوردية بنجاح.');
+      } catch(err) { if(tg?.showAlert)tg.showAlert(err.message); else {let msg=form.querySelector('.manager-form-error');if(!msg){msg=document.createElement('p');msg.className='manager-form-error';form.appendChild(msg);}msg.textContent=err.message;} b.disabled=false; }
+    });
   }
 
   async function switchWorkspace() {
@@ -317,14 +437,7 @@
       const data = await api('bootstrap');
       applyWorkspaceProfile(data);
 
-      // Load only the manager's review queues, in parallel. Attendance status is
-      // fetched lazily when the engineer opens attendance, not during a workspace switch.
-      if (workspaceRole === 'manager') {
-        const jobs = [];
-        if (data.permissions?.reviewRequests) jobs.push(loadReviews());
-        if (data.permissions?.finance) jobs.push(loadCashReviews());
-        await Promise.allSettled(jobs);
-      }
+      // Manager aggregates are included in bootstrap; review queues load only when opened.
       $('connection').textContent = 'متصل';
       if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -352,7 +465,7 @@
       // Secondary data is non-blocking: the dashboard appears as soon as bootstrap
       // completes, while permitted review queues and device options load in background.
       const backgroundJobs = [];
-      backgroundJobs.push((async () => {
+      if (workspaceRole === 'employee') backgroundJobs.push((async () => {
         try {
           const deviceOptions = await api('device_registration_options');
           $('registerDeviceCard').classList.toggle('hidden', !deviceOptions.allowed);
@@ -360,10 +473,6 @@
           $('registerDeviceCard').classList.add('hidden');
         }
       })());
-      if (workspaceRole === 'manager') {
-        if (data.permissions?.reviewRequests) backgroundJobs.push(loadReviews());
-        if (data.permissions?.finance) backgroundJobs.push(loadCashReviews());
-      }
       Promise.allSettled(backgroundJobs);
       // Attendance is deliberately lazy-loaded when the engineer opens the attendance action.
       $('attendance').classList.add('hidden');
@@ -675,6 +784,8 @@
   }
 
   $('workspaceSwitch').addEventListener('click', switchWorkspace);
+  $('refreshManagerDashboard').addEventListener('click',loadManagerDashboard);
+  document.querySelectorAll('[data-manager-module]').forEach(btn=>btn.addEventListener('click',()=>openManagerModule(btn.dataset.managerModule)));
   $('modalClose').addEventListener('click',closeModal);
   $('appModal').querySelectorAll('[data-modal-close]').forEach(el=>el.addEventListener('click',closeModal));
   document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('appModal').classList.contains('hidden'))closeModal();});
