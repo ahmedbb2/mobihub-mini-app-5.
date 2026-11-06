@@ -90,6 +90,44 @@
       </section>
       <section id="cashReviewCenter" class="management hidden"><div class="section-head"><h2>مراجعة السلف والعهد</h2><button id="refreshCashReviews" class="text-btn">تحديث</button></div><div id="cashReviewBody" class="review-list">اضغط تحديث لعرض طلبات السلف.</div></section>
 
+
+      <section id="financeCenter" class="request-panel">
+        <div class="section-head request-heading"><div><h2>الخصومات والمكافآت</h2><p class="muted">ملخصك المالي ومتابعة الاستحقاقات</p></div><span class="section-icon">ج.م</span></div>
+        <div class="request-tabs finance-tabs">
+          <button class="service-action" id="myFinanceTab" type="button"><span class="service-icon">▤</span><b>ملخصي</b><small>مكافآتي وخصوماتي</small></button>
+          <button class="service-action" id="deductionAdminTab" class="service-action hidden" type="button"><span class="service-icon">−</span><b>إدارة الخصومات</b><small>إضافة ومراجعة</small></button>
+          <button class="service-action" id="rewardAdminTab" class="service-action hidden" type="button"><span class="service-icon">★</span><b>إدارة المكافآت</b><small>نظافة ومكافآت إضافية</small></button>
+        </div>
+        <div id="financeEmployeeView" class="request-form hidden">
+          <div class="form-title"><span class="form-title-icon">★</span><div><h3>ملخص المكافآت والخصومات</h3><p id="rewardMonthLabel">الشهر الحالي</p></div></div>
+          <div id="financeSummary" class="finance-summary">اختر «ملخصي» لعرض البيانات.</div>
+          <div id="myDeductionRows"></div>
+        </div>
+        <div id="deductionAdminView" class="request-form hidden">
+          <div class="form-title"><span class="form-title-icon">−</span><div><h3>إضافة خصم لموظف</h3><p>الخصم اليدوي يبدأ بانتظار اعتماد المالية أو الإدارة</p></div></div>
+          <label>الموظف<select id="deductionEmployee"></select></label>
+          <label>نوع الخصم<select id="deductionType"><option>خصم آخر</option><option>التأخير</option><option>عدم الالتزام باليونيفورم</option><option>عدم التسجيل على السيستم</option><option>نظافة المكان</option></select></label>
+          <label>المبلغ بالجنيه<input id="deductionAmount" type="number" min="0.01" step="0.01" placeholder="مثال: 50"></label>
+          <label>السبب<textarea id="deductionReason" rows="2" maxlength="500" placeholder="سبب الخصم بالتفصيل"></textarea></label>
+          <button id="submitDeduction" class="primary-btn submit-action">تسجيل الخصم للمراجعة</button>
+          <div class="form-divider"></div><h3>الخصومات المعلقة</h3><div id="pendingDeductions">جاري التحميل...</div>
+        </div>
+        <div id="rewardAdminView" class="request-form hidden">
+          <div class="form-title"><span class="form-title-icon">★</span><div><h3>إدارة المكافآت</h3><p>تقييم النظافة وإضافة مكافأة مالية مستقلة</p></div></div>
+          <label>الموظف<select id="rewardEmployee"></select></label>
+          <label>تقييم نظافة المكان<select id="hygieneRating"><option value="نظيف">نظيف</option><option value="غير ملتزم">غير ملتزم</option></select></label>
+          <label>التاريخ<input id="hygieneDate" type="date"></label>
+          <label>ملاحظات التقييم (اختياري)<textarea id="hygieneNote" rows="2" maxlength="300"></textarea></label>
+          <button id="saveHygiene" class="secondary-btn">حفظ تقييم النظافة</button>
+          <div class="form-divider"></div>
+          <h3>إضافة مكافأة مالية</h3>
+          <label>المبلغ بالجنيه<input id="bonusAmount" type="number" min="0.01" step="0.01" placeholder="مثال: 200"></label>
+          <label>سبب المكافأة<input id="bonusReason" maxlength="250" placeholder="سبب منح المكافأة"></label>
+          <button id="submitBonus" class="primary-btn submit-action">إضافة المكافأة واعتمادها</button>
+        </div>
+        <p id="financeMessage" class="inline-message hidden" aria-live="polite"></p>
+      </section>
+
       <section id="stats" class="stats"></section>
       <section>
         <div class="section-head"><h2>الخدمات</h2><span class="muted">الخدمات المتاحة</span></div>

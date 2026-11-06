@@ -31,7 +31,23 @@
     INVALID_COMPLAINT: 'راجع تصنيف الشكوى والتفاصيل؛ التفاصيل مطلوبة من 10 إلى 3000 حرف.',
     COMPLAINT_NOT_FOUND: 'الشكوى غير موجودة.',
     COMPLAINT_CLOSED: 'الشكوى مغلقة ولا يمكن إضافة رد جديد.',
-    INVALID_COMPLAINT_MESSAGE: 'اكتب رسالة من حرفين إلى 2000 حرف.'
+    INVALID_COMPLAINT_MESSAGE: 'اكتب رسالة من حرفين إلى 2000 حرف.',
+    INVALID_AMOUNT: 'اكتب مبلغًا صحيحًا أكبر من صفر.',
+    INVALID_DEDUCTION: 'راجع نوع الخصم والسبب والمبلغ.',
+    DEDUCTION_NOT_FOUND: 'الخصم غير موجود.',
+    DEDUCTION_ALREADY_REVIEWED: 'تمت مراجعة الخصم بالفعل.',
+    INVALID_REWARD_REASON: 'اكتب سبب المكافأة من 3 إلى 250 حرفًا.',
+    INVALID_HYGIENE_RATING: 'بيانات تقييم النظافة غير صحيحة.',
+    HYGIENE_ALREADY_RATED: 'تم تسجيل تقييم النظافة لهذا الموظف في هذا اليوم بالفعل.',
+    EMPLOYEE_NOT_FOUND: 'الموظف غير موجود أو حسابه غير نشط.',
+    INVALID_MONTH: 'صيغة الشهر غير صحيحة.',
+    INVALID_DEDUCTION: 'راجع نوع الخصم والسبب والمبلغ.',
+    INVALID_DECISION: 'قرار المراجعة غير صحيح.',
+    DEDUCTION_NOT_FOUND: 'الخصم غير موجود.',
+    DEDUCTION_ALREADY_REVIEWED: 'تمت مراجعة الخصم بالفعل.',
+    INVALID_REWARD_REASON: 'اكتب سبب المكافأة من 3 إلى 250 حرفًا.',
+    INVALID_HYGIENE_RATING: 'بيانات تقييم النظافة غير صحيحة.',
+    HYGIENE_ALREADY_RATED: 'تم تسجيل تقييم النظافة لهذا الموظف في هذا اليوم بالفعل.'
   };
 
   function fail(message) {
@@ -164,6 +180,12 @@
     try {
       const data = await api('bootstrap');
       currentRole = data.profile.role || 'employee';
+      if(['super_admin','admin','finance'].includes(currentRole)){
+        $('deductionAdminTab').classList.remove('hidden');
+      }
+      if(['super_admin','admin','finance','supervisor'].includes(currentRole)){
+        $('rewardAdminTab').classList.remove('hidden');
+      }
       $('userName').textContent = data.profile.name;
       const roleNames = { employee: 'موظف', supervisor: 'مشرف', admin: 'مدير', finance: 'مالية', super_admin: 'مدير النظام' };
       $('userRole').textContent = roleNames[data.profile.role] || data.profile.role;
@@ -300,6 +322,63 @@
   }
   async function decide(action,row,decision){if(!row){messageRequest('تعذر تحديد رقم السجل. حدّث القائمة. ',true);return;} if(!confirm(`تأكيد ${decision}؟`))return;try{await api(action,{row:Number(row),decision});await loadReviews();messageRequest('تم تسجيل القرار.');}catch(e){messageRequest(e.message,true);}}
 
+
+  function financeMessage(text,isError=false){
+    const el=$('financeMessage'); el.textContent=text; el.classList.toggle('is-error',isError); el.classList.remove('hidden');
+  }
+  function switchFinance(which){
+    ['financeEmployeeView','deductionAdminView','rewardAdminView'].forEach(id=>$(id).classList.add('hidden'));
+    ['myFinanceTab','deductionAdminTab','rewardAdminTab'].forEach(id=>$(id).classList.remove('active'));
+    const map={mine:['financeEmployeeView','myFinanceTab'],deductions:['deductionAdminView','deductionAdminTab'],rewards:['rewardAdminView','rewardAdminTab']};
+    if(map[which]){ $(map[which][0]).classList.remove('hidden'); $(map[which][1]).classList.add('active');}
+    $('financeMessage').classList.add('hidden');
+  }
+  async function loadFinanceSummary(){
+    switchFinance('mine');
+    try{
+      const d=await api('reward_summary',{});
+      $('rewardMonthLabel').textContent=`${d.month} · ${d.employeeName}`;
+      $('financeSummary').innerHTML=`<div class="finance-grid">
+        <div class="finance-stat"><b>${Number(d.base).toFixed(2)} ج</b><small>المكافأة الأساسية التقديرية</small></div>
+        <div class="finance-stat"><b>${Number(d.bonus).toFixed(2)} ج</b><small>المكافآت الإضافية المعتمدة</small></div>
+        <div class="finance-stat"><b>${Number(d.total).toFixed(2)} ج</b><small>إجمالي المكافآت التقديري</small></div>
+        <div class="finance-stat"><b>${Number(d.deductionsApproved).toFixed(2)} ج</b><small>الخصومات المعتمدة</small></div>
+        <div class="finance-stat"><b>${Number(d.deductionsPending).toFixed(2)} ج</b><small>خصومات قيد المراجعة</small></div>
+        <div class="finance-stat"><b>${d.earned} / ${d.scoredEligible}</b><small>النقاط المحسومة</small></div>
+      </div><p class="muted">نسبة المكافأة الأساسية: ${Math.round(d.ratio*100)}% · تقييمات النظافة المعلقة: ${d.hygienePending} · الورديات المستبعدة بإذن معتمد: ${d.excluded}</p>`;
+      $('myDeductionRows').innerHTML=(d.deductionRows||[]).length?'<h3>آخر الخصومات</h3>'+d.deductionRows.map(r=>`<article class="record"><strong>${escapeHtml(r['نوع الخصم']||'خصم')} · ${escapeHtml(r['الحالة']||'')}</strong><small class="record-meta">${escapeHtml(r['تاريخ الواقعة']||'')} · ${escapeHtml(r['المبلغ بالجنيه']||0)} جنيه</small><p>${escapeHtml(r['السبب']||'')}</p></article>`).join(''):'<p class="muted">لا توجد خصومات مسجلة هذا الشهر.</p>';
+    }catch(e){financeMessage(e.message,true);}
+  }
+  async function loadFinanceEmployees(){
+    const rows=await api('active_employees',{});
+    const options=rows.map(r=>`<option value="${escapeHtml(r['Chat ID'])}">${escapeHtml(r['اسم الموظف'])}</option>`).join('');
+    $('deductionEmployee').innerHTML=options; $('rewardEmployee').innerHTML=options;
+  }
+  async function loadPendingDeductions(){
+    const box=$('pendingDeductions'); box.textContent='جاري تحميل الخصومات المعلقة...';
+    try{
+      const rows=await api('list',{entity:'deductions'});
+      const pending=rows.filter(r=>String(r['الحالة'])==='بانتظار اعتماد المدير');
+      box.innerHTML=pending.length?pending.map(r=>`<article class="review-item"><strong>${escapeHtml(r['اسم الموظف'])} · ${escapeHtml(r['نوع الخصم'])}</strong><p>${escapeHtml(r['السبب'])}<br>${escapeHtml(r['المبلغ بالجنيه'])} جنيه · ${escapeHtml(r['تاريخ الواقعة'])}</p><div class="review-actions"><button class="primary-btn" data-ded-row="${r.__row}" data-ded-decision="معتمد">اعتماد</button><button class="secondary-btn" data-ded-row="${r.__row}" data-ded-decision="مرفوض">رفض</button></div></article>`).join(''):'لا توجد خصومات معلقة.';
+      box.querySelectorAll('[data-ded-row]').forEach(b=>b.addEventListener('click',async()=>{const note=b.dataset.dedDecision==='مرفوض'?(prompt('سبب الرفض:')||''):'';if(b.dataset.dedDecision==='مرفوض'&&!note.trim())return;try{await api('deduction_decide',{row:Number(b.dataset.dedRow),decision:b.dataset.dedDecision,note});await loadPendingDeductions();}catch(e){financeMessage(e.message,true);}}));
+    }catch(e){box.textContent=e.message;}
+  }
+  async function submitDeduction(){
+    const b=$('submitDeduction');b.disabled=true;
+    try{const r=await api('deduction_create',{employeeId:$('deductionEmployee').value,type:$('deductionType').value,amount:$('deductionAmount').value,reason:$('deductionReason').value});$('deductionAmount').value='';$('deductionReason').value='';financeMessage(`تم تسجيل الخصم ${r.deductionId} وإرساله للمراجعة.`);await loadPendingDeductions();}
+    catch(e){financeMessage(e.message,true);}finally{b.disabled=false;}
+  }
+  async function saveHygiene(){
+    const b=$('saveHygiene');b.disabled=true;
+    try{await api('reward_hygiene_set',{employeeId:$('rewardEmployee').value,date:$('hygieneDate').value,rating:$('hygieneRating').value,note:$('hygieneNote').value});financeMessage('تم حفظ تقييم النظافة.');$('hygieneNote').value='';}
+    catch(e){financeMessage(e.message,true);}finally{b.disabled=false;}
+  }
+  async function submitBonus(){
+    const b=$('submitBonus');b.disabled=true;
+    try{const r=await api('reward_bonus_create',{employeeId:$('rewardEmployee').value,amount:$('bonusAmount').value,reason:$('bonusReason').value});$('bonusAmount').value='';$('bonusReason').value='';financeMessage(`تمت إضافة المكافأة واعتمادها بقيمة ${r.amount} جنيه.`);}
+    catch(e){financeMessage(e.message,true);}finally{b.disabled=false;}
+  }
+
   function escapeHtml(value) {
     return String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
@@ -313,6 +392,13 @@
     showList('requests');
   });
   $('submitCash').addEventListener('click',submitCash);
+  $('myFinanceTab').addEventListener('click',loadFinanceSummary);
+  $('deductionAdminTab').addEventListener('click',async()=>{switchFinance('deductions');try{await loadFinanceEmployees();await loadPendingDeductions();}catch(e){financeMessage(e.message,true);}});
+  $('rewardAdminTab').addEventListener('click',async()=>{switchFinance('rewards');try{await loadFinanceEmployees();}catch(e){financeMessage(e.message,true);}});
+  $('submitDeduction').addEventListener('click',submitDeduction);
+  $('saveHygiene').addEventListener('click',saveHygiene);
+  $('submitBonus').addEventListener('click',submitBonus);
+  $('hygieneDate').value=new Date().toISOString().slice(0,10);
   $('submitComplaint').addEventListener('click',submitComplaint);
   $('complaintsTab').addEventListener('click',()=>{switchRequestForm('complaint');$('complaintForm').classList.remove('hidden');$('leaveForm').classList.add('hidden');$('cashForm').classList.add('hidden');$('complaintsTab').classList.add('active');showList('complaints');});
   $('leaveType').addEventListener('change',syncLeaveFields);

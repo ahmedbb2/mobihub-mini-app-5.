@@ -10,7 +10,7 @@
  */
 
 const MH = Object.freeze({
-  VERSION: '1.7.0',
+  VERSION: '1.8.0',
   TZ: 'Africa/Cairo',
   AUTH_MAX_AGE_SECONDS: 300,
   SHEETS: {
@@ -28,7 +28,10 @@ const MH = Object.freeze({
     absences: 'مراجعة الغياب',
     leaves: 'طلبات الأذونات',
     deductions: 'سجل الخصومات',
-    deductionSettings: 'إعدادات الخصومات'
+    deductionSettings: 'إعدادات الخصومات',
+    rewardBonus: 'المكافآت الإضافية',
+    rewardHygiene: 'تقييم نظافة المكافآت',
+    overtime: 'سجل الأوفر تايم'
   }
 });
 
@@ -138,6 +141,25 @@ function doPost(e) {
       case 'cash_create':
         data = createCashRequest_(profile, body);
         break;
+      case 'deduction_create':
+        data = createManualDeduction_(profile, body);
+        break;
+      case 'deduction_decide':
+        data = decideDeduction_(profile, body);
+        break;
+      case 'reward_bonus_create':
+        data = createRewardBonus_(profile, body);
+        break;
+      case 'reward_hygiene_set':
+        data = setRewardHygiene_(profile, body);
+        break;
+      case 'reward_summary':
+        data = rewardSummary_(profile, body);
+        break;
+      case 'active_employees':
+        data = activeEmployeesMini_(profile);
+        break;
+
       case 'complaint_create':
         data = createComplaint_(profile, body);
         break;
@@ -415,7 +437,11 @@ function listData_(profile, entity) {
     requests: { sheet: MH.SHEETS.requests, owner: 'Chat ID' },
     leaves: { sheet: MH.SHEETS.leaves, owner: 'Chat ID' },
     complaints: { sheet: MH.SHEETS.complaints, owner: 'Chat ID' },
-    cash: { sheet: MH.SHEETS.cash, owner: 'Chat ID' }
+    cash: { sheet: MH.SHEETS.cash, owner: 'Chat ID' },
+    deductions: { sheet: MH.SHEETS.deductions, owner: 'Chat ID' },
+    overtime: { sheet: MH.SHEETS.overtime, owner: 'Chat ID' },
+    rewards: { sheet: MH.SHEETS.rewardBonus, owner: 'Chat ID' },
+    employees: { sheet: MH.SHEETS.employees, owner: 'Chat ID' }
   };
 
   const definition = definitions[entity];
@@ -424,6 +450,7 @@ function listData_(profile, entity) {
   }
 
   const role = profile.role;
+  if (entity === 'employees' && ['super_admin','admin','finance'].indexOf(role) < 0) throw new Error('FORBIDDEN');
   const canReviewGeneral = [
     'super_admin', 'admin', 'supervisor'
   ].indexOf(role) >= 0;
@@ -434,7 +461,9 @@ function listData_(profile, entity) {
 
   let canViewAll = false;
 
-  if (entity === 'cash') {
+  if (entity === 'employees') {
+    canViewAll = true;
+  } else if (entity === 'cash' || entity === 'deductions' || entity === 'overtime' || entity === 'rewards') {
     canViewAll = canReviewCash;
   } else {
     canViewAll = canReviewGeneral;
@@ -1089,7 +1118,7 @@ function createLeaveRequest_(profile, body) {
   const sh=mhSheet_(MH.SHEETS.leaves); mhAssertHeaders_(sh,MH_REQUESTS.LEAVE_HEADERS);
   const rows=mhRowsObjects_(sh);
   const overlap=rows.some(r=>String(r['Chat ID']).trim()===profile.chatId && [MH_REQUESTS.PENDING_LEAVE,'مقبول'].includes(String(r['الحالة'])) &&
-    date <= (mhIsoDate_(r['تاريخ نهاية الإذن']) || mhIsoDate_(r['تاريخ الإذن'])) && endDate >= mhIsoDate_(r['تاريخ الإذن']));
+    date <= (mhDate_(r['تاريخ نهاية الإذن']) || mhDate_(r['تاريخ الإذن'])) && endDate >= mhDate_(r['تاريخ الإذن']));
   if(overlap) throw new Error('DUPLICATE_LEAVE_OVERLAP');
   const id='LV-'+Utilities.getUuid().substring(0,8).toUpperCase();
   const lock=LockService.getScriptLock(); lock.waitLock(15000);
@@ -1209,4 +1238,158 @@ function complaintStatus_(profile, body) {
   if(!allowed.includes(next)||!(transitions[current]||[]).includes(next)) throw new Error('INVALID_COMPLAINT_STATUS');
   const now=mhNow_();c.sheet.getRange(c.row,8).setValue(next);c.sheet.getRange(c.row,9).setValue(note);c.sheet.getRange(c.row,10).setValue(now);
   return {updated:true,status:next};
+}
+
+
+/* =========================================
+ * DEDUCTIONS + REWARDS MODULE — V1.8
+ * Sheet headers are aligned to the supplied TEST workbook and V40.
+ * ========================================= */
+const MH_FINANCE = Object.freeze({
+  DEDUCTION_HEADERS: ['رقم الخصم','تاريخ الواقعة','Chat ID','اسم الموظف','نوع الخصم','السبب','المبلغ بالجنيه','المصدر','الحالة','مرجع الواقعة','تاريخ التسجيل','تاريخ الاعتماد','منفذ الإجراء','ملاحظات','سبب الرفض/الإلغاء'],
+  DEDUCTION_SETTINGS_HEADERS: ['الإعداد','القيمة','الوصف'],
+  REWARD_BONUS_HEADERS: ['رقم المكافأة','التاريخ','الشهر','Chat ID','اسم الموظف','المبلغ بالجنيه','السبب','المسجل بواسطة','الحالة'],
+  REWARD_HYGIENE_HEADERS: ['التاريخ','Chat ID','اسم الموظف','التقييم','ملاحظات','قيّم بواسطة','وقت التقييم'],
+  BASE_REWARD: 500,
+  DAILY_POINTS: 2,
+  REVIEW_ROLES: ['super_admin','admin','finance']
+});
+
+function financeEmployee_(chatId) {
+  const rows = rowsAsObjects_(spreadsheet_(), MH.SHEETS.employees);
+  const e = rows.find(r => String(r['Chat ID']).trim() === String(chatId) &&
+    String(r['الحالة']).trim() === 'نشط' &&
+    String(r['حالة الحساب'] || 'نشط').trim() === 'نشط');
+  if (!e) throw new Error('EMPLOYEE_NOT_FOUND');
+  return {chatId:String(chatId), name:String(e['اسم الموظف'] || '')};
+}
+function financeMonth_(value) {
+  const m = String(value || mhToday_().slice(0,7));
+  if (!/^\\d{4}-\\d{2}$/.test(m)) throw new Error('INVALID_MONTH');
+  return m;
+}
+function financeNumber_(value, max) {
+  const raw=String(value ?? '').replace(/[٬,]/g,'').trim();
+  const n=Number(raw);
+  if (!/^\\d+(?:\\.\\d{1,2})?$/.test(raw) || !Number.isFinite(n) || n<=0 || n>(max||1000000)) throw new Error('INVALID_AMOUNT');
+  return Math.round(n*100)/100;
+}
+function createManualDeduction_(profile, body) {
+  mhRequireRole_(profile, MH_FINANCE.REVIEW_ROLES);
+  const employee=financeEmployee_(String(body.employeeId||''));
+  const type=String(body.type||'خصم آخر').trim();
+  const reason=String(body.reason||'').trim();
+  const amount=financeNumber_(body.amount,1000000);
+  const allowed=['التأخير','عدم الالتزام باليونيفورم','عدم التسجيل على السيستم','خصم آخر','نظافة المكان'];
+  if (!allowed.includes(type) || reason.length<3 || reason.length>500) throw new Error('INVALID_DEDUCTION');
+  const sh=mhSheet_(MH.SHEETS.deductions); mhAssertHeaders_(sh,MH_FINANCE.DEDUCTION_HEADERS);
+  const lock=LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    const now=mhNow_(), id='DD-'+Utilities.getUuid().slice(0,8).toUpperCase();
+    sh.appendRow([id,mhToday_(),employee.chatId,employee.name,type,reason,amount,'يدوي','بانتظار اعتماد المدير','MANUAL|'+id,now,'',profile.chatId,'من Mini App','']);
+    return {created:true,deductionId:id,status:'بانتظار اعتماد المدير',message:'تم تسجيل الخصم وإرساله للمراجعة.'};
+  } finally {lock.releaseLock();}
+}
+function decideDeduction_(profile, body) {
+  mhRequireRole_(profile,MH_FINANCE.REVIEW_ROLES);
+  const rowNum=Number(body.row), decision=String(body.decision||'').trim(), note=String(body.note||'').trim();
+  if (!Number.isInteger(rowNum)||rowNum<2||!['معتمد','مرفوض'].includes(decision)||note.length>500) throw new Error('INVALID_DECISION');
+  const sh=mhSheet_(MH.SHEETS.deductions), map=mhAssertHeaders_(sh,MH_FINANCE.DEDUCTION_HEADERS);
+  if(rowNum>sh.getLastRow()) throw new Error('DEDUCTION_NOT_FOUND');
+  const lock=LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    if(sh.getRange(rowNum,map['الحالة']).getDisplayValue().trim()!=='بانتظار اعتماد المدير') throw new Error('DEDUCTION_ALREADY_REVIEWED');
+    const now=mhNow_();
+    sh.getRange(rowNum,map['الحالة']).setValue(decision);
+    sh.getRange(rowNum,map['تاريخ الاعتماد']).setValue(decision==='معتمد'?now:'');
+    sh.getRange(rowNum,map['منفذ الإجراء']).setValue(profile.chatId);
+    sh.getRange(rowNum,map['ملاحظات']).setValue(note);
+    if(decision==='مرفوض') sh.getRange(rowNum,map['سبب الرفض/الإلغاء']).setValue(note||'مرفوض من الإدارة');
+    return {decided:true,status:decision};
+  } finally {lock.releaseLock();}
+}
+function createRewardBonus_(profile, body) {
+  mhRequireRole_(profile,MH_FINANCE.REVIEW_ROLES);
+  const employee=financeEmployee_(String(body.employeeId||''));
+  const amount=financeNumber_(body.amount,100000);
+  const reason=String(body.reason||'').trim();
+  if(reason.length<3||reason.length>250) throw new Error('INVALID_REWARD_REASON');
+  const sh=mhSheet_(MH.SHEETS.rewardBonus); mhAssertHeaders_(sh,MH_FINANCE.REWARD_BONUS_HEADERS);
+  const id='RB-'+Utilities.getUuid().slice(0,8).toUpperCase(), now=mhToday_();
+  sh.appendRow([id,now,now.slice(0,7),employee.chatId,employee.name,amount,reason,profile.chatId,'معتمد']);
+  return {created:true,rewardId:id,amount:amount,status:'معتمد'};
+}
+function setRewardHygiene_(profile, body) {
+  mhRequireRole_(profile,['super_admin','admin','supervisor']);
+  const employee=financeEmployee_(String(body.employeeId||''));
+  const date=mhIsoDate_(body.date)||mhToday_();
+  const rating=String(body.rating||'').trim(), note=String(body.note||'').trim();
+  if(date>mhToday_()||!['نظيف','غير ملتزم'].includes(rating)||note.length>300) throw new Error('INVALID_HYGIENE_RATING');
+  const sh=mhSheet_(MH.SHEETS.rewardHygiene); mhAssertHeaders_(sh,MH_FINANCE.REWARD_HYGIENE_HEADERS);
+  const rows=mhRowsObjects_(sh);
+  const existing=rows.find(r=>String(r['Chat ID']).trim()===employee.chatId&&mhDate_(r['التاريخ'])===date);
+  if(existing) throw new Error('HYGIENE_ALREADY_RATED');
+  sh.appendRow([date,employee.chatId,employee.name,rating,note,profile.name,mhNow_()]);
+  return {saved:true,rating:rating,date:date};
+}
+function rewardIsApprovedLeaveMini_(chatId,date) {
+  return mhRowsObjects_(mhSheet_(MH.SHEETS.leaves)).some(r=>{
+    if(String(r['Chat ID']).trim()!==String(chatId)||String(r['الحالة']).trim()!=='مقبول') return false;
+    const start=mhDate_(r['تاريخ الإذن']), end=mhDate_(r['تاريخ نهاية الإذن'])||start;
+    if(String(r['نوع الإذن']).trim()==='يوم كامل') return !!start&&date>=start&&date<=end;
+    const ass=mhAssignmentForDate_(spreadsheet_(),chatId,date);
+    const shift=ass?mhShiftById_(spreadsheet_(),ass.shiftId):null;
+    return !!(start===date&&shift&&!shift.isFlexible&&mhTimeMinutes_(r['من الساعة'])<=mhTimeMinutes_(shift.startTime));
+  });
+}
+function rewardSummary_(profile, body) {
+  const month=financeMonth_(body.month);
+  const employeeId=String(body.employeeId||profile.chatId);
+  if(employeeId!==profile.chatId) mhRequireRole_(profile,MH_FINANCE.REVIEW_ROLES);
+  const employee=employeeId===profile.chatId?{chatId:employeeId,name:profile.name}:financeEmployee_(employeeId);
+  const assignments=mhRowsObjects_(mhSheet_(MH.SHEETS.assignments));
+  const attendance=mhRowsObjects_(mhSheet_(MH.SHEETS.attendance));
+  const hygiene=mhRowsObjects_(mhSheet_(MH.SHEETS.rewardHygiene));
+  const bonuses=mhRowsObjects_(mhSheet_(MH.SHEETS.rewardBonus));
+  let eligible=0,elapsedEligible=0,earned=0,commitment=0,hygienePoints=0,excluded=0,shifts=0,hygienePending=0;
+  const daysInMonth=new Date(Number(month.slice(0,4)),Number(month.slice(5,7)),0).getDate(), today=mhToday_();
+  for(let day=1;day<=daysInMonth;day++){
+    const date=month+'-'+String(day).padStart(2,'0');
+    const ass=mhAssignmentForDate_(spreadsheet_(),employeeId,date); if(!ass) continue;
+    const shift=mhShiftById_(spreadsheet_(),ass.shiftId); if(!shift) continue;
+    shifts++;
+    if(rewardIsApprovedLeaveMini_(employeeId,date)){excluded++;continue;}
+    eligible+=MH_FINANCE.DAILY_POINTS;
+    if(date>=today) continue;
+    elapsedEligible+=MH_FINANCE.DAILY_POINTS;
+    const recs=attendance.filter(r=>String(r['Chat ID']).trim()===employeeId&&mhDate_(r['التاريخ'])===date&&String(r['النوع'])==='حضور');
+    const attended=recs.length?recs[recs.length-1]:null;
+    const onTime=!!(attended&&String(attended['حالة الحضور'])==='في الموعد'&&Number(attended['دقائق التأخير']||0)===0);
+    const uniform=!!(attended&&String(attended['اليونيفورم'])==='ملتزم');
+    if(onTime&&uniform){commitment++;earned++;}
+    const hygieneRecord=hygiene.filter(r=>String(r['Chat ID']).trim()===employeeId&&mhDate_(r['التاريخ'])===date).slice(-1)[0];
+    if(hygieneRecord&&String(hygieneRecord['التقييم'])==='نظيف'){hygienePoints++;earned++;}
+    else if(!hygieneRecord||!String(hygieneRecord['التقييم']||'')){hygienePending++;}
+  }
+  const scoredEligible=Math.max(0,elapsedEligible-hygienePending);
+  const ratio=scoredEligible?Math.min(1,earned/scoredEligible):0;
+  const bonus=bonuses.filter(r=>String(r['Chat ID']).trim()===employeeId&&String(r['الشهر'])===month&&String(r['الحالة']||'معتمد')==='معتمد').reduce((s,r)=>s+Number(r['المبلغ بالجنيه']||0),0);
+  const deductionRows=mhRowsObjects_(mhSheet_(MH.SHEETS.deductions)).filter(r=>String(r['Chat ID']).trim()===employeeId&&String(mhDate_(r['تاريخ الواقعة'])).startsWith(month));
+  const approved=deductionRows.filter(r=>String(r['الحالة'])==='معتمد');
+  const pending=deductionRows.filter(r=>String(r['الحالة'])==='بانتظار اعتماد المدير');
+  return {
+    employeeName:employee.name,month,shifts,excluded,eligible,elapsedEligible,scoredEligible,earned,commitment,hygienePoints,hygienePending,
+    ratio,base:Math.round(MH_FINANCE.BASE_REWARD*ratio*100)/100,bonus,total:Math.round((MH_FINANCE.BASE_REWARD*ratio+bonus)*100)/100,
+    deductionsApproved:approved.reduce((s,r)=>s+Number(r['المبلغ بالجنيه']||0),0),
+    deductionsPending:pending.reduce((s,r)=>s+Number(r['المبلغ بالجنيه']||0),0),
+    deductionRows:deductionRows.slice(-30).reverse(),
+    hygieneRows:hygiene.filter(r=>String(r['Chat ID']).trim()===employeeId&&String(mhDate_(r['التاريخ'])).startsWith(month)).slice(-31).reverse()
+  };
+}
+
+function activeEmployeesMini_(profile) {
+  mhRequireRole_(profile,['super_admin','admin','finance','supervisor']);
+  return rowsAsObjects_(spreadsheet_(),MH.SHEETS.employees)
+    .filter(r=>String(r['الحالة']||'').trim()==='نشط'&&String(r['حالة الحساب']||'نشط').trim()==='نشط'&&String(r['Chat ID']||'').trim())
+    .map(r=>({ 'Chat ID':String(r['Chat ID']).trim(), 'اسم الموظف':String(r['اسم الموظف']||'') }));
 }
