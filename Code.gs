@@ -10,7 +10,7 @@
  */
 
 const MH = Object.freeze({
-  VERSION: '1.9.0',
+  VERSION: '1.9.3',
   TZ: 'Africa/Cairo',
   AUTH_MAX_AGE_SECONDS: 300,
   SHEETS: {
@@ -140,6 +140,10 @@ function doPost(e) {
 
       case 'cash_create':
         data = createCashRequest_(profile, body);
+        break;
+
+      case 'cash_withdraw_create':
+        data = createCashWithdrawalMini_(profile, body);
         break;
       case 'deduction_create':
         data = createManualDeduction_(profile, body);
@@ -1479,4 +1483,83 @@ function activeEmployeesMini_(profile) {
   return rowsAsObjects_(spreadsheet_(),MH.SHEETS.employees)
     .filter(r=>String(r['الحالة']||'').trim()==='نشط'&&String(r['حالة الحساب']||'نشط').trim()==='نشط'&&String(r['Chat ID']||'').trim())
     .map(r=>({ 'Chat ID':String(r['Chat ID']).trim(), 'اسم الموظف':String(r['اسم الموظف']||'') }));
+}
+
+
+/* CASH WITHDRAWAL — ported to Mini App using V40 sheet layout and admin callback contract. */
+function createCashWithdrawalMini_(profile, body) {
+  if (profile.role !== 'employee') throw new Error('EMPLOYEE_ONLY');
+  const amountRaw = String(body.amount ?? '').replace(/[٬,]/g, '').trim();
+  const amount = Number(amountRaw);
+  const purpose = String(body.purpose || '').trim();
+  if (!/^\d+(?:\.\d{1,2})?$/.test(amountRaw) || !Number.isFinite(amount) || amount <= 0 || amount > 1000000) throw new Error('INVALID_CASH_AMOUNT');
+  if (purpose.length < 3 || purpose.length > 1000) throw new Error('INVALID_REQUEST_DETAILS');
+  const sh = mhSheet_(MH.SHEETS.cash), map = mhAssertHeaders_(sh, MH_CASH.HEADERS);
+  const lock = LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    const id = 'CASH-' + Utilities.formatDate(new Date(), MH.TZ, 'yyyyMMdd-HHmmss') + '-' + String(profile.chatId).slice(-4);
+    const row = new Array(MH_CASH.HEADERS.length).fill('');
+    const set = (h,v) => row[MH_CASH.HEADERS.indexOf(h)] = v;
+    set('رقم الطلب',id); set('التاريخ والوقت',mhNow_()); set('Chat ID',profile.chatId); set('اسم الموظف',profile.name);
+    set('المبلغ المطلوب بالجنيه',amount); set('الغرض',purpose); set('الحالة','قيد المراجعة'); set('حالة الصرف','لم يصرف');
+    set('حالة العهدة','غير مطلوبة بعد'); set('تاريخ آخر تحديث',mhNow_());
+    sh.appendRow(row);
+    const rowNum = sh.getLastRow();
+    const employeeMessage = '💰 تم تسجيل طلب عهدة مالية\n━━━━━━━━━━━━━━━━━━\n' +
+      '🆔 رقم الطلب: ' + id + '\n👤 الموظف: ' + profile.name + '\n' +
+      '💵 المبلغ المطلوب: ' + mhCashMoneyMini_(amount) + ' جنيه\n📝 الغرض: ' + purpose + '\n' +
+      '━━━━━━━━━━━━━━━━━━\n⏳ الحالة: بانتظار موافقة الإدارة';
+    const employeeKeyboard = {keyboard:[
+      [{text:'✅ تسجيل حضور'},{text:'🚪 تسجيل انصراف'}],
+      [{text:'💵 طلب سلفة'},{text:'⏳ طلب إذن'}],
+      [{text:'💰 طلب سحب مبلغ'},{text:'💰 تسوية عهدة'}],
+      [{text:'📥 تسجيل جهاز'},{text:'📱 حالة الجهاز'}],
+      [{text:'💰 خصوماتي'},{text:'🏆 مكافآتي'}],
+      [{text:'📩 طلباتي'},{text:'📊 ملخص الشهر'}],
+      [{text:'📩 تقديم شكوى'},{text:'🔄 تحديث اللوحة'}],
+      [{text:'📨 شكاوي'}]
+    ],resize_keyboard:true,is_persistent:true,one_time_keyboard:false};
+    let employeeNotified = false;
+    try { mhSendTelegramMini_(profile.chatId, employeeMessage, employeeKeyboard); employeeNotified = true; }
+    catch (notifyError) { console.error('Unable to send V40-style employee confirmation for ' + id + ': ' + notifyError); }
+    const adminMessage = '💰 طلب عهدة مالية جديد\n━━━━━━━━━━━━━━━━━━\n' +
+      '🆔 رقم الطلب: ' + id + '\n👤 مقدم الطلب: ' + profile.name + '\n' +
+      '💵 المبلغ المطلوب: ' + mhCashMoneyMini_(amount) + ' جنيه\n📝 الغرض: ' + purpose + '\n' +
+      '━━━━━━━━━━━━━━━━━━\n⏳ الحالة: بانتظار موافقة الإدارة';
+    const adminKeyboard = {inline_keyboard:[
+      [{text:'✅ موافقة',callback_data:'adm|cashact|approve|' + rowNum},{text:'❌ رفض',callback_data:'adm|cashact|reject|' + rowNum}],
+      [{text:'💸 تسجيل صرف العهدة',callback_data:'adm|cashact|paid|' + rowNum}]
+    ]};
+    mhNotifyFinanceAdminsMini_(adminMessage, adminKeyboard, id);
+    return {submitted:true,requestId:id,status:'قيد المراجعة',employeeMessage:employeeMessage,employeeNotified:employeeNotified,adminNotificationAttempted:true};
+  } finally { lock.releaseLock(); }
+}
+function mhCashMoneyMini_(value) {
+  return Number(value).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:2});
+}
+function mhSendTelegramMini_(chatId, text, replyMarkup) {
+  const token = PropertiesService.getScriptProperties().getProperty('BOT_TOKEN') || PropertiesService.getScriptProperties().getProperty('MOBIHUB_TELEGRAM_BOT_TOKEN');
+  if (!token) throw new Error('Missing BOT_TOKEN Script Property');
+  const payload = {chat_id:String(chatId),text:String(text)};
+  if (replyMarkup) payload.reply_markup = replyMarkup;
+  const response = UrlFetchApp.fetch('https://api.telegram.org/bot' + token + '/sendMessage',{
+    method:'post',contentType:'application/json',payload:JSON.stringify(payload),muteHttpExceptions:true
+  });
+  const result = JSON.parse(response.getContentText() || '{}');
+  if (!result.ok) throw new Error('TELEGRAM_SEND_FAILED');
+  return result;
+}
+function mhNotifyFinanceAdminsMini_(message, keyboard, requestId) {
+  const ss = spreadsheet_();
+  const managers = rowsAsObjects_(ss, MH.SHEETS.managers);
+  const recipients = [];
+  const mainAdmin = '9134455704';
+  recipients.push(mainAdmin);
+  managers.forEach(r=>{
+    const id=String(r['Chat ID']||'').trim(), role=String(r['الصلاحية']||'').trim(), active=String(r['الحالة']||'نشط').trim()==='نشط';
+    if(id && active && ['Super Admin','Admin','Finance'].includes(role) && !recipients.includes(id)) recipients.push(id);
+  });
+  const errors=[];
+  recipients.forEach(id=>{try{mhSendTelegramMini_(id,message,keyboard);}catch(e){errors.push(String(id));console.error('MobiHub finance notification failed for '+id+': '+e);}});
+  if(errors.length) console.warn('Cash withdrawal notification failures: '+errors.join(','));
 }

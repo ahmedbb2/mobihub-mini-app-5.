@@ -37,6 +37,7 @@
       modalRestore = null;
     }
     $('modalBody').innerHTML = '';
+    $('withdrawForm').classList.add('hidden');
     modal.classList.add('hidden');
     modal.setAttribute('aria-hidden', 'true');
     document.body.classList.remove('modal-open');
@@ -61,12 +62,12 @@
     SHIFT_NOT_AVAILABLE: 'بيانات الوردية لم تعد متاحة. راجع المسؤول.',
     NO_OPEN_ATTENDANCE: 'لا يوجد تسجيل حضور مفتوح لتسجيل الانصراف.',
     INVALID_UNIFORM_STATUS: 'اختيار حالة اليونيفورم غير صحيح.',
-    FORBIDDEN: 'ليس لديك صلاحية لتنفيذ هذا الإجراء.', EMPLOYEE_ONLY: 'الخدمة متاحة لحسابات الموظفين فقط.',
+    FORBIDDEN: 'ليس لديك صلاحية لتنفيذ هذا الإجراء.', EMPLOYEE_ONLY: 'الخدمة متاحة لحسابات المهندسين فقط.',
     INVALID_REQUEST_DETAILS: 'اكتب تفاصيل الطلب (من 5 إلى 1500 حرف).', INVALID_LEAVE_REASON: 'اكتب سبب الإذن (من 5 إلى 1000 حرف).',
     INVALID_LEAVE_DATE: 'اختر تاريخ اليوم أو تاريخًا قادمًا صحيحًا.', DUPLICATE_LEAVE_OVERLAP: 'لديك طلب إذن معلق أو معتمد يتعارض مع هذه الفترة.',
     NO_ACTIVE_SHIFT_ASSIGNED: 'لا توجد وردية نشطة لك في هذا التاريخ.', LEAVE_OUTSIDE_SHIFT: 'وقت أو مدة الإذن خارج حدود ورديتك.',
     LEAVE_START_NOT_FUTURE: 'بداية الإذن يجب أن تكون في وقت قادم.', FULL_DAY_LEAVE_AFTER_SHIFT_START: 'لا يمكن طلب إذن يوم كامل بعد بداية الوردية.',
-    LEAVE_CONFLICT_CONFIRMED_ABSENCE: 'لا يمكن اعتماد الإذن بعد تأكيد الغياب لهذا التاريخ.', REQUEST_ALREADY_REVIEWED: 'تمت مراجعة الطلب بالفعل.', LEAVE_ALREADY_REVIEWED: 'تمت مراجعة الإذن بالفعل.', INVALID_REQUEST_TYPE: 'نوع الطلب غير صحيح.', INVALID_LEAVE_TYPE: 'نوع الإذن غير صحيح.', INVALID_LEAVE_DAYS: 'عدد الأيام غير متاح.', INVALID_LEAVE_HOURS: 'مدة الإذن غير متاحة.', INVALID_LEAVE_TIME: 'وقت الإذن غير صحيح.', REQUEST_NOT_FOUND: 'الطلب غير موجود.', LEAVE_NOT_FOUND: 'طلب الإذن غير موجود.', INVALID_DECISION: 'القرار أو رقم السجل غير صحيح.', INVALID_CASH_AMOUNT: 'اكتب مبلغًا موجبًا صحيحًا بالجنيه.', INVALID_CASH_PURPOSE: 'اكتب الغرض من السلفة بوضوح (3 أحرف على الأقل).', CASH_ALREADY_REVIEWED: 'تمت مراجعة طلب السلفة بالفعل.', CASH_PAYOUT_NOT_ALLOWED: 'لا يمكن تسجيل الصرف قبل الموافقة أو تم تسجيل الصرف بالفعل.', CASH_REQUEST_NOT_FOUND: 'طلب السلفة غير موجود.', OPEN_CASH_CUSTODY: 'لا يمكن تسجيل الانصراف قبل إغلاق العهدة المفتوحة وتسوية المبلغ المتبقي.', SHEET_SCHEMA_MISMATCH: 'أعمدة الشيت لا تطابق النسخة المطلوبة. أوقف الاختبار وراجع الأعمدة.',
+    LEAVE_CONFLICT_CONFIRMED_ABSENCE: 'لا يمكن اعتماد الإذن بعد تأكيد الغياب لهذا التاريخ.', REQUEST_ALREADY_REVIEWED: 'تمت مراجعة الطلب بالفعل.', LEAVE_ALREADY_REVIEWED: 'تمت مراجعة الإذن بالفعل.', INVALID_REQUEST_TYPE: 'نوع الطلب غير صحيح.', INVALID_LEAVE_TYPE: 'نوع الإذن غير صحيح.', INVALID_LEAVE_DAYS: 'عدد الأيام غير متاح.', INVALID_LEAVE_HOURS: 'مدة الإذن غير متاحة.', INVALID_LEAVE_TIME: 'وقت الإذن غير صحيح.', REQUEST_NOT_FOUND: 'الطلب غير موجود.', LEAVE_NOT_FOUND: 'طلب الإذن غير موجود.', INVALID_DECISION: 'القرار أو رقم السجل غير صحيح.', INVALID_CASH_AMOUNT: '⚠️ المبلغ غير صحيح. اكتب مبلغًا موجبًا بالجنيه، مثال: 750.', INVALID_CASH_PURPOSE: 'اكتب الغرض بشكل أوضح، أو اضغط إلغاء.', CASH_ALREADY_REVIEWED: 'تمت مراجعة طلب السلفة بالفعل.', CASH_PAYOUT_NOT_ALLOWED: 'لا يمكن تسجيل الصرف قبل الموافقة أو تم تسجيل الصرف بالفعل.', CASH_REQUEST_NOT_FOUND: 'طلب السلفة غير موجود.', OPEN_CASH_CUSTODY: 'لا يمكن تسجيل الانصراف قبل إغلاق العهدة المفتوحة وتسوية المبلغ المتبقي.', SHEET_SCHEMA_MISMATCH: 'أعمدة الشيت لا تطابق النسخة المطلوبة. أوقف الاختبار وراجع الأعمدة.',
     INVALID_COMPLAINT: 'راجع تصنيف الشكوى والتفاصيل؛ التفاصيل مطلوبة من 10 إلى 3000 حرف.',
     COMPLAINT_NOT_FOUND: 'الشكوى غير موجودة.',
     COMPLAINT_CLOSED: 'الشكوى مغلقة ولا يمكن إضافة رد جديد.',
@@ -77,8 +78,8 @@
     DEDUCTION_ALREADY_REVIEWED: 'تمت مراجعة الخصم بالفعل.',
     INVALID_REWARD_REASON: 'اكتب سبب المكافأة من 3 إلى 250 حرفًا.',
     INVALID_HYGIENE_RATING: 'بيانات تقييم النظافة غير صحيحة.',
-    HYGIENE_ALREADY_RATED: 'تم تسجيل تقييم النظافة لهذا الموظف في هذا اليوم بالفعل.',
-    EMPLOYEE_NOT_FOUND: 'الموظف غير موجود أو حسابه غير نشط.',
+    HYGIENE_ALREADY_RATED: 'تم تسجيل تقييم النظافة لهذا المهندس في هذا اليوم بالفعل.',
+    EMPLOYEE_NOT_FOUND: 'المهندس غير موجود أو حسابه غير نشط.',
     INVALID_MONTH: 'صيغة الشهر غير صحيحة.',
     INVALID_DEDUCTION: 'راجع نوع الخصم والسبب والمبلغ.',
     INVALID_DECISION: 'قرار المراجعة غير صحيح.',
@@ -86,7 +87,7 @@
     DEDUCTION_ALREADY_REVIEWED: 'تمت مراجعة الخصم بالفعل.',
     INVALID_REWARD_REASON: 'اكتب سبب المكافأة من 3 إلى 250 حرفًا.',
     INVALID_HYGIENE_RATING: 'بيانات تقييم النظافة غير صحيحة.',
-    HYGIENE_ALREADY_RATED: 'تم تسجيل تقييم النظافة لهذا الموظف في هذا اليوم بالفعل.'
+    HYGIENE_ALREADY_RATED: 'تم تسجيل تقييم النظافة لهذا المهندس في هذا اليوم بالفعل.'
   };
 
   function fail(message) {
@@ -231,7 +232,8 @@
     if(isManager) {
       $('welcomeEyebrow').textContent = 'لوحة الإدارة والتشغيل';
       manager.classList.remove('hidden'); employee.classList.add('hidden');
-      mount(manager, ['stats','homeActions','attendance','reviewCenter','cashReviewCenter','financeCenter','deviceRegisterPanel','results','management']);
+      mount(manager, ['stats','attendance','reviewCenter','cashReviewCenter','financeCenter','deviceRegisterPanel','results','management']);
+      $('homeActions').classList.add('hidden');
       $('financeCenter').classList.add('hidden');
       $('deviceRegisterPanel').classList.add('hidden');
       $('requestCenter').classList.add('hidden');
@@ -250,25 +252,28 @@
         ['cashReviewCenter','السلف والعهد','ج.م'],['financeCenter','الخصومات والمكافآت','★']
       ].filter(([id])=>{const n=$(id);return n&&!n.classList.contains('hidden')}).map(([id,label,icon])=>`<button type="button" data-nav-target="${id}"><span>${icon}</span>${label}</button>`).join('');
     } else {
-      $('welcomeEyebrow').textContent = 'مساحة الموظف';
+      $('welcomeEyebrow').textContent = 'مساحة المهندس';
       employee.classList.remove('hidden'); manager.classList.add('hidden');
       mount(employee, ['stats','homeActions','attendance','requestCenter','financeCenter','deviceRegisterPanel','results']);
       $('requestCenter').classList.add('hidden');
       $('financeCenter').classList.add('hidden');
       $('deviceRegisterPanel').classList.add('hidden');
       $('reviewCenter').classList.add('hidden'); $('cashReviewCenter').classList.add('hidden'); $('management').classList.add('hidden');
-      $('financeCenter').classList.remove('hidden');
       $('deductionAdminTab').classList.add('hidden'); $('rewardAdminTab').classList.add('hidden');
       $('deductionAdminView').classList.add('hidden'); $('rewardAdminView').classList.add('hidden');
-      nav.innerHTML = [
-        ['attendance','الحضور والانصراف','◷'],['requestCenter','الخدمات والطلبات','▤'],['financeCenter','مكافآتي','★']
-      ].map(([id,label,icon])=>`<button type="button" data-nav-target="${id}"><span>${icon}</span>${label}</button>`).join('');
+      // Employee navigation mirrors the legacy bot keyboard; no secondary scroll navigation.
+      nav.innerHTML = '';
+      nav.classList.add('hidden');
+      $('stats').classList.add('hidden');
+      $('attendance').classList.add('hidden');
     }
-    nav.classList.remove('hidden');
-    nav.querySelectorAll('[data-nav-target]').forEach(btn=>btn.addEventListener('click',()=>{
-      const target=$(btn.dataset.navTarget); if(target){target.classList.remove('hidden');target.scrollIntoView({behavior:'smooth',block:'start'});}
-      nav.querySelectorAll('button').forEach(b=>b.classList.toggle('active',b===btn));
-    }));
+    if (isManager) {
+      nav.classList.remove('hidden');
+      nav.querySelectorAll('[data-nav-target]').forEach(btn=>btn.addEventListener('click',()=>{
+        const target=$(btn.dataset.navTarget); if(target){target.classList.remove('hidden');target.scrollIntoView({behavior:'smooth',block:'start'});}
+        nav.querySelectorAll('button').forEach(b=>b.classList.toggle('active',b===btn));
+      }));
+    }
   }
   async function start() {
     if (!tg) return fail('افتح التطبيق من زر Mini App داخل بوت MobiHub.');
@@ -279,7 +284,7 @@
       const data = await api('bootstrap');
       currentRole = data.profile.role || 'employee';
       $('userName').textContent = data.profile.name;
-      const roleNames = { employee: 'موظف', supervisor: 'مشرف', admin: 'مدير', finance: 'مالية', super_admin: 'مدير النظام' };
+      const roleNames = { employee: 'مهندس', supervisor: 'مشرف', admin: 'مدير', finance: 'مالية', super_admin: 'مدير النظام' };
       $('userRole').textContent = roleNames[data.profile.role] || data.profile.role;
       renderStats(data.summary);
       buildWorkspace(currentRole, data.permissions);
@@ -288,7 +293,7 @@
       if (data.permissions.reviewRequests) { $('reviewCenter').classList.remove('hidden'); await loadReviews(); }
       if (data.permissions.finance) { $('cashReviewCenter').classList.remove('hidden'); await loadCashReviews(); }
       $('connection').textContent = 'متصل'; $('connection').style.color = '#8be0aa';
-      try { await refreshAttendance(); } catch (e) { $('attendance').classList.remove('hidden'); showAttendanceMessage(e.message, true); }
+      try { await refreshAttendance(); if (!MANAGER_ROLES.includes(currentRole)) $('attendance').classList.add('hidden'); } catch (e) { if (MANAGER_ROLES.includes(currentRole)) $('attendance').classList.remove('hidden'); showAttendanceMessage(e.message, true); }
     } catch (e) { fail(e.message); }
   }
 
@@ -340,20 +345,34 @@
     openModal('طلباتي', $('requestPicker'));
   }
   function openHomeAction(action){
-    const scrollTo=id=>{const el=$(id);if(el){el.scrollIntoView({behavior:'smooth',block:'start'});}};
-    if(action==='attendance'){scrollTo('attendance');return;}
+    if(action==='attendance'){ $('attendance').classList.remove('hidden'); openModal('تسجيل حضور', $('attendance')); if(!$('checkinBtn').disabled) $('checkinBtn').click(); return; }
+    if(action==='checkout'){ $('attendance').classList.remove('hidden'); openModal('تسجيل انصراف', $('attendance')); if(!$('checkoutBtn').disabled) $('checkoutBtn').click(); return; }
     if(action==='history'){showAttendanceHistory();return;}
     if(action==='leave'){openRequestForm('leave');return;}
     if(action==='cash'){openRequestForm('cash');return;}
-    if(action==='requests'){$('requestCenter').classList.remove('hidden');showRequestPicker();return;}
+    if(action==='withdraw'){openModal('طلب سحب مبلغ', $('withdrawForm')); return;}
+    if(action==='requests'){showRequestPicker();return;}
     if(action==='settlement'){showList('cash');return;}
     if(action==='complaint-new'){openRequestForm('complaint');return;}
     if(action==='complaint-list'){showList('complaints');return;}
     if(action==='deductions'){showList('deductions');return;}
-    if(action==='rewards'){$('financeCenter').classList.remove('hidden');loadFinanceSummary();scrollTo('financeCenter');return;}
+    if(action==='rewards'){ $('financeCenter').classList.remove('hidden'); openModal('مكافآتي', $('financeCenter')); loadFinanceSummary(); return; }
     if(action==='monthly'){loadMonthlySummary();return;}
     if(action==='devices'){showList('devices');return;}
     if(action==='device-register'){openDeviceRegistration();return;}
+    if(action==='refresh'){refreshEmployeeWorkspace();return;}
+  }
+  async function refreshEmployeeWorkspace(){
+    const btn=document.querySelector('[data-home-action="refresh"]');
+    if(btn){btn.disabled=true;}
+    try{
+      const data=await api('bootstrap');
+      renderStats(data.summary||{});
+      await refreshAttendance();
+      if(!MANAGER_ROLES.includes(currentRole)) $('attendance').classList.add('hidden');
+      if(tg&&typeof tg.showAlert==='function') tg.showAlert('تم تحديث لوحة المهندس بنجاح.');
+    }catch(e){if(tg&&typeof tg.showAlert==='function') tg.showAlert(e.message);else fail(e.message);}
+    finally{if(btn)btn.disabled=false;}
   }
   async function openDeviceRegistration(){
     const panel=$('deviceRegisterPanel');
@@ -381,6 +400,7 @@
 
   async function loadMonthlySummary(){
     $('results').classList.remove('hidden');$('resultTitle').textContent='ملخص الشهر';$('resultBody').textContent='جاري تحميل التقرير...';
+    openModal('ملخص الشهر', $('results'));
     try{
       const d=await api('monthly_summary');
       $('resultBody').innerHTML=`<div class="monthly-report"><div class="report-month">تقرير شهر <b>${escapeHtml(d.month)}</b></div><div class="report-grid">
@@ -393,6 +413,19 @@
         <div class="report-stat"><b>${Number(d.leaveCount)||0}</b><small>طلبات أذونات هذا الشهر</small></div>
       </div><p class="report-note">الأرقام تعكس السجلات والقرارات الموجودة حاليًا في النظام.</p></div>`;
     }catch(e){$('resultBody').textContent=e.message;}
+  }
+
+
+  async function submitWithdraw(){
+    const b=$('submitWithdraw'); b.disabled=true; $('withdrawMessage').classList.add('hidden');
+    try{
+      const result=await api('cash_withdraw_create',{amount:$('withdrawAmount').value,purpose:$('withdrawPurpose').value});
+      $('withdrawAmount').value=''; $('withdrawPurpose').value='';
+      const text=result.employeeMessage || `تم تسجيل طلب سحب المبلغ. رقم الطلب: ${result.requestId}`;
+      $('withdrawMessage').textContent=text; $('withdrawMessage').classList.remove('hidden');
+      if(tg&&typeof tg.showAlert==='function') tg.showAlert(text);
+    }catch(e){$('withdrawMessage').textContent=e.message;$('withdrawMessage').classList.remove('hidden');}
+    finally{b.disabled=false;}
   }
 
   async function submitLeave() {
@@ -482,7 +515,7 @@
     try { const [requests,leaves]=await Promise.all([api('list',{entity:'requests'}),api('list',{entity:'leaves'})]);
       const pendingR=requests.filter(r=>(r['القرار']||'')==='قيد الانتظار'); const pendingL=leaves.filter(r=>(r['الحالة']||'')==='بانتظار مراجعة المدير');
       const cards=[];
-      pendingR.forEach(r=>cards.push(`<article class="review-item"><strong>طلب موظف · ${escapeHtml(r['نوع الطلب']||'')}</strong><p>${escapeHtml(r['اسم الموظف']||'')}\n${escapeHtml(r['التفاصيل']||'')}\n${escapeHtml(r['التاريخ والوقت']||'')}</p><div class="review-actions"><button class="primary-btn" data-decide-request="${r.__row||''}" data-decision="مقبول">موافقة</button><button class="secondary-btn" data-decide-request="${r.__row||''}" data-decision="مرفوض">رفض</button></div></article>`));
+      pendingR.forEach(r=>cards.push(`<article class="review-item"><strong>طلب مهندس · ${escapeHtml(r['نوع الطلب']||'')}</strong><p>${escapeHtml(r['اسم الموظف']||'')}\n${escapeHtml(r['التفاصيل']||'')}\n${escapeHtml(r['التاريخ والوقت']||'')}</p><div class="review-actions"><button class="primary-btn" data-decide-request="${r.__row||''}" data-decision="مقبول">موافقة</button><button class="secondary-btn" data-decide-request="${r.__row||''}" data-decision="مرفوض">رفض</button></div></article>`));
       pendingL.forEach(r=>cards.push(`<article class="review-item"><strong>إذن · ${escapeHtml(r['نوع الإذن']||'')}</strong><p>${escapeHtml(r['اسم الموظف']||'')} · ${escapeHtml(r['تاريخ الإذن']||'')} ${escapeHtml(r['تاريخ نهاية الإذن']||'')}\n${escapeHtml(r['من الساعة']||'')} إلى ${escapeHtml(r['إلى الساعة']||'')}\n${escapeHtml(r['السبب']||'')}\n${escapeHtml(r['رقم الطلب']||'')}</p><div class="review-actions"><button class="primary-btn" data-decide-leave="${r.__row||''}" data-decision="مقبول">موافقة</button><button class="secondary-btn" data-decide-leave="${r.__row||''}" data-decision="مرفوض">رفض</button></div></article>`));
       box.innerHTML=cards.length?cards.join(''):'لا توجد طلبات أو أذونات معلقة.';
       box.querySelectorAll('[data-decide-request]').forEach(b=>b.addEventListener('click',()=>decide('request_decide',b.dataset.decideRequest,b.dataset.decision)));
@@ -566,6 +599,7 @@
     showRequestPicker();
   });
   $('submitCash').addEventListener('click',submitCash);
+  $('submitWithdraw').addEventListener('click',submitWithdraw);
   $('submitDeviceRegister').addEventListener('click',submitDeviceRegistration);
   document.querySelectorAll('[data-request-entity]').forEach(b=>b.addEventListener('click',()=>showList(b.dataset.requestEntity)));
   document.querySelectorAll('[data-home-action]').forEach(b=>b.addEventListener('click',()=>openHomeAction(b.dataset.homeAction)));

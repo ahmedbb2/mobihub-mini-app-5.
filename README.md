@@ -1,36 +1,27 @@
-# MobiHub Mini App V1.9.1 — Devices & Reports UI Fix
+# MobiHub Mini App V1.9.3 — Legacy Employee Board Parity
+
+## Included
+- Frontend: `index.html`, `styles.css`, `app.js`
+- Apps Script API: `Code.gs`
+- Original MobiHub logo: `assets/mobihub-logo.webp` and `.png` (also inlined in HTML to prevent broken paths)
+- Legacy V40 source reference: `MobiHub_Attendance_v40_REFERENCE.gs` (REFERENCE ONLY; do not deploy this file beside Code.gs)
 
 ## Changes
-- Hidden legacy service and finance panels on initial workspace load; they open from their relevant workspace actions/navigation instead of duplicating the home tiles.
-- Split **الأجهزة** and **التقارير** into separate workspace groups.
-- Added a permission-gated **تسجيل جهاز** action for admin/supervisor and active employees whose job title includes استلام/مدير/مشرف.
-- Added device intake form: external intake order ID + assigned technician.
-- Added server-side device registration, duplicate order protection, sheet header validation, lock protection, and initial movement history entry.
-- Device list now includes records where the current employee is either the assigned technician or intake owner; manager roles retain broader visibility.
-- API version: 1.9.1.
+- Employee home buttons follow the legacy keyboard order and 2-column arrangement.
+- Employee-facing role label is `مهندس`.
+- Attendance, leave, advance, withdrawal, settlement, device, deductions, rewards, requests, monthly report and complaints open in modal sheets instead of requiring page scrolling.
+- Added a Mini App cash withdrawal endpoint using the V40 `طلبات السحب` row layout and the legacy `adm|cashact|...` callback contract.
+- Cash withdrawal sends the legacy-style employee confirmation and finance/admin approval message through the existing bot token.
+- Logo is embedded in HTML and also shipped as assets.
 
 ## Deployment
-1. Deploy `Code.gs` to the **TEST Apps Script project** and create a new deployment version.
-2. Deploy `index.html`, `styles.css`, and `app.js` to the same Cloudflare Pages branch used by the current Mini App.
-3. Keep the existing Cloudflare Worker proxy unchanged.
-4. Do not modify the production bot or production spreadsheet during acceptance testing.
+1. Deploy `index.html`, `styles.css`, `app.js`, and the `assets/` folder to the same Cloudflare Pages root.
+2. Replace the Apps Script API source with `Code.gs` and deploy a new Web App version.
+3. Keep the existing Cloudflare Worker URL and legacy Telegram webhook unchanged.
+4. Ensure Apps Script properties include `BOT_TOKEN` (or `MOBIHUB_TELEGRAM_BOT_TOKEN`) and `SPREADSHEET_ID`.
+5. Test using a TEST spreadsheet and test employee/admin accounts before production.
 
-## Device registration behavior
-- Registration follows the existing V40 rule: available only to admin/supervisor or active intake staff.
-- The order ID must already exist in the external intake system. This Mini App records the ID, intake owner, assigned technician, initial status/location, and movement history. It does not import customer/device details from the external intake system.
-- The assigned technician receives the record in **حالة الأجهزة**.
-
-## Validation
-- `app.js` and `Code.gs` passed Node syntax checks.
-- HTML IDs checked for duplicates.
-- Live Telegram, Cloudflare, Apps Script deployment, and Google Sheets writes have not been tested from this environment.
-
-## V1.9.2 UI update
-- Added the supplied MobiHub logo to the app header and app icon references.
-- Added reusable responsive bottom-sheet modal for leave, cash advance, complaint, request lists, attendance history, and device registration.
-- Request actions no longer require scrolling down the main page; modal content scrolls independently.
-- This is a UI-only change over V1.9.1; `Code.gs` and API proxy are unchanged.
-
-## Assets
-- `assets/mobihub-logo.webp` — optimized in-app logo.
-- `assets/mobihub-logo.png` — Apple touch icon.
+## Important limitations
+- This release does not claim full V40 migration. Other bot flows and notification families still require parity work.
+- The cash withdrawal approval buttons rely on the existing V40 bot webhook handler for `adm|cashact|approve|row`, `reject`, and `paid`. Keep that webhook active.
+- Manager dashboard functionality is unchanged in this patch.
