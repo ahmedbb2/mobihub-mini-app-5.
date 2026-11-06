@@ -97,3 +97,28 @@ body{background:radial-gradient(ellipse at 88% 0%,rgba(255,145,43,.16),transpare
 .monthly-report{padding:15px;border-radius:18px;border:1px solid var(--glass-line);background:rgba(255,255,255,.035)}.report-month{font-size:12px;color:#b8c4cd;margin-bottom:10px}.report-month b{color:#ffb66d}.report-stat b{font-size:21px;color:#ffb66d;display:block;margin-bottom:4px}.report-note{font-size:10px;color:#93a1ac;line-height:1.7;margin:12px 0 0}
 #results{scroll-margin-top:88px}
 @media(max-width:390px){.home-actions{padding:13px}.home-card{min-height:94px;padding:10px}.home-card b{font-size:11px}.home-card small{font-size:9px}.home-grid{gap:7px}.record-grid,.report-grid{gap:6px}.record-field,.report-stat{padding:9px}}
+
+
+/* MobiHub logo + reusable native-feel modal sheets */
+.brand-logo{width:44px;height:44px;object-fit:cover;border-radius:50%;border:1px solid rgba(255,157,49,.75);box-shadow:0 0 0 3px rgba(255,152,47,.10),0 7px 20px rgba(0,0,0,.32);flex:0 0 auto}
+.brand-lockup{gap:12px}
+.app-modal{position:fixed;inset:0;z-index:9999;display:flex;align-items:flex-end;justify-content:center;padding:0;}
+.app-modal.hidden{display:none!important}
+.modal-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.70);backdrop-filter:blur(9px);-webkit-backdrop-filter:blur(9px);animation:modalFade .18s ease both}
+.modal-sheet{position:relative;z-index:1;width:min(100%,680px);max-height:min(88dvh,900px);overflow:hidden;display:flex;flex-direction:column;padding:9px 18px calc(18px + env(safe-area-inset-bottom));border:1px solid rgba(255,255,255,.14);border-bottom:0;border-radius:26px 26px 0 0;background:linear-gradient(155deg,rgba(30,43,54,.98),rgba(9,15,21,.99));box-shadow:0 -18px 70px rgba(0,0,0,.48);animation:modalUp .24s cubic-bezier(.2,.8,.2,1) both}
+.modal-grabber{width:42px;height:4px;border-radius:8px;background:rgba(255,255,255,.27);margin:1px auto 13px}
+.modal-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 0 13px;border-bottom:1px solid rgba(255,255,255,.09);flex:0 0 auto}
+.modal-header small{font-size:9px;letter-spacing:1.8px;color:#ffb56d;font-weight:800}
+.modal-header h2{font-size:17px;margin:4px 0 0;color:#f7f8f9}
+.modal-close{width:36px;height:36px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.07);color:#fff;font-size:25px;line-height:1;cursor:pointer}
+.modal-body{overflow-y:auto;overscroll-behavior:contain;padding:12px 0 8px;min-height:0;scrollbar-width:thin;scrollbar-color:rgba(255,152,47,.35) transparent}
+.modal-body>.request-form,.modal-body>.request-panel,.modal-body>.results,.modal-body>.request-picker{display:block!important;margin:0;border:0;background:transparent;box-shadow:none;padding:10px 2px}
+.modal-body>.request-panel{padding:10px 2px}
+.modal-body>.results{padding:10px 2px}
+.modal-message{margin-top:10px;padding:11px 13px;border-radius:12px;background:rgba(53,170,111,.12);border:1px solid rgba(92,211,151,.2);color:#a8edc6;font-size:12px;line-height:1.7}
+.modal-message.is-error{background:rgba(255,79,79,.1);border-color:rgba(255,100,100,.24);color:#ffb0b0}
+body.modal-open{overflow:hidden;touch-action:none}
+@keyframes modalFade{from{opacity:0}to{opacity:1}}
+@keyframes modalUp{from{transform:translateY(24px);opacity:.7}to{transform:translateY(0);opacity:1}}
+@media(min-width:700px){.app-modal{align-items:center;padding:24px}.modal-sheet{border:1px solid rgba(255,255,255,.14);border-radius:26px;max-height:85vh}.modal-grabber{display:none}}
+@media(prefers-reduced-motion:reduce){.modal-backdrop,.modal-sheet{animation:none}}

@@ -24,3 +24,13 @@
 - `app.js` and `Code.gs` passed Node syntax checks.
 - HTML IDs checked for duplicates.
 - Live Telegram, Cloudflare, Apps Script deployment, and Google Sheets writes have not been tested from this environment.
+
+## V1.9.2 UI update
+- Added the supplied MobiHub logo to the app header and app icon references.
+- Added reusable responsive bottom-sheet modal for leave, cash advance, complaint, request lists, attendance history, and device registration.
+- Request actions no longer require scrolling down the main page; modal content scrolls independently.
+- This is a UI-only change over V1.9.1; `Code.gs` and API proxy are unchanged.
+
+## Assets
+- `assets/mobihub-logo.webp` — optimized in-app logo.
+- `assets/mobihub-logo.png` — Apple touch icon.

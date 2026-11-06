@@ -8,6 +8,45 @@
   let currentAttendance = null;
   let pendingUniform = false;
   let currentRole = 'employee';
+  let modalRestore = null;
+
+  function openModal(title, element) {
+    const modal = $('appModal'), body = $('modalBody');
+    if (modalRestore) closeModal();
+    $('modalTitle').textContent = title || 'التفاصيل';
+    $('modalMessage').classList.add('hidden');
+    if (element) {
+      const placeholder = document.createComment('modal-origin');
+      element.parentNode.insertBefore(placeholder, element);
+      modalRestore = { element, placeholder };
+      body.appendChild(element);
+      element.classList.remove('hidden');
+    }
+    modal.classList.remove('hidden');
+    modal.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('modal-open');
+    $('modalClose').focus();
+  }
+  function closeModal() {
+    const modal = $('appModal');
+    if (modalRestore) {
+      const { element, placeholder } = modalRestore;
+      placeholder.parentNode.insertBefore(element, placeholder);
+      placeholder.remove();
+      element.classList.add('hidden');
+      modalRestore = null;
+    }
+    $('modalBody').innerHTML = '';
+    modal.classList.add('hidden');
+    modal.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('modal-open');
+  }
+  function openRequestForm(which) {
+    switchRequestForm(which);
+    const ids = { leave: ['leaveForm','طلب إذن جديد'], cash: ['cashForm','طلب سلفة / عهدة'], complaint: ['complaintForm','تقديم شكوى'] };
+    const item = ids[which];
+    if (item) openModal(item[1], $(item[0]));
+  }
 
   const errorMessages = {
     UNAUTHORIZED: 'تعذر التحقق من هوية Telegram. أغلق التطبيق وافتحه مرة أخرى.',
@@ -165,6 +204,7 @@
     $('results').classList.remove('hidden');
     $('resultTitle').textContent = titles.attendance;
     $('resultBody').textContent = 'جاري تحميل السجل...';
+    openModal(titles.attendance, $('results'));
     try {
       const rows = await api('attendance_history', { limit: 30 });
       if (!rows.length) { $('resultBody').textContent = 'لا توجد سجلات حضور حتى الآن.'; return; }
@@ -256,6 +296,7 @@
     $('results').classList.remove('hidden');
     $('resultTitle').textContent = titles[entity] || 'السجلات';
     $('resultBody').textContent = 'جاري التحميل...';
+    openModal(titles[entity] || 'السجلات', $('results'));
     try {
       const rows = await api('list', { entity });
       if (!rows.length) { $('resultBody').textContent = 'لا توجد سجلات.'; return; }
@@ -296,17 +337,17 @@
     ['leaveForm','cashForm','complaintForm','complaintThread'].forEach(id=>$(id).classList.add('hidden'));
     $('requestMessage').classList.add('hidden');
     $('results').classList.add('hidden');
-    $('requestPicker').scrollIntoView({behavior:'smooth',block:'center'});
+    openModal('طلباتي', $('requestPicker'));
   }
   function openHomeAction(action){
     const scrollTo=id=>{const el=$(id);if(el){el.scrollIntoView({behavior:'smooth',block:'start'});}};
     if(action==='attendance'){scrollTo('attendance');return;}
     if(action==='history'){showAttendanceHistory();return;}
-    if(action==='leave'){$('requestCenter').classList.remove('hidden');$('requestPicker').classList.add('hidden');switchRequestForm('leave');scrollTo('requestCenter');return;}
-    if(action==='cash'){$('requestCenter').classList.remove('hidden');$('requestPicker').classList.add('hidden');switchRequestForm('cash');scrollTo('requestCenter');return;}
+    if(action==='leave'){openRequestForm('leave');return;}
+    if(action==='cash'){openRequestForm('cash');return;}
     if(action==='requests'){$('requestCenter').classList.remove('hidden');showRequestPicker();return;}
     if(action==='settlement'){showList('cash');return;}
-    if(action==='complaint-new'){$('requestCenter').classList.remove('hidden');$('requestPicker').classList.add('hidden');switchRequestForm('complaint');scrollTo('requestCenter');return;}
+    if(action==='complaint-new'){openRequestForm('complaint');return;}
     if(action==='complaint-list'){showList('complaints');return;}
     if(action==='deductions'){showList('deductions');return;}
     if(action==='rewards'){$('financeCenter').classList.remove('hidden');loadFinanceSummary();scrollTo('financeCenter');return;}
@@ -319,7 +360,7 @@
     panel.classList.remove('hidden');
     $('deviceRegisterMessage').classList.add('hidden');
     $('deviceTechnician').innerHTML='<option value="">جاري تحميل الفنيين...</option>';
-    panel.scrollIntoView({behavior:'smooth',block:'start'});
+    openModal('تسجيل جهاز جديد', panel);
     try{
       const data=await api('device_registration_options');
       if(!data.allowed){$('registerDeviceCard').classList.add('hidden');$('deviceRegisterMessage').textContent='تسجيل الأجهزة متاح لمسؤول الاستلام أو الإدارة فقط.';$('deviceRegisterMessage').classList.remove('hidden');return;}
@@ -423,7 +464,7 @@
       $('resultTitle').textContent='محادثة الشكوى';
     }catch(e){box.textContent=e.message;}
   }
-  function messageRequest(text,isError=false){const el=$('requestMessage');el.textContent=text;el.classList.toggle('is-error',isError);el.classList.remove('hidden');}
+  function messageRequest(text,isError=false){const el=$('requestMessage');el.textContent=text;el.classList.toggle('is-error',isError);el.classList.remove('hidden');const modalMsg=$('modalMessage');if(modalMsg){modalMsg.textContent=text;modalMsg.classList.toggle('is-error',isError);modalMsg.classList.remove('hidden');}}
   function switchRequestForm(which){
     $('requestPicker').classList.add('hidden');
     $('leaveForm').classList.toggle('hidden',which!=='leave');
@@ -511,8 +552,12 @@
     return String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
-  $('newLeaveTab').addEventListener('click',()=>{$('requestCenter').classList.remove('hidden');switchRequestForm('leave');});
-  $('newCashTab').addEventListener('click',()=>{$('requestCenter').classList.remove('hidden');switchRequestForm('cash');});
+  $('modalClose').addEventListener('click',closeModal);
+  $('appModal').querySelectorAll('[data-modal-close]').forEach(el=>el.addEventListener('click',closeModal));
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('appModal').classList.contains('hidden'))closeModal();});
+
+  $('newLeaveTab').addEventListener('click',()=>openRequestForm('leave'));
+  $('newCashTab').addEventListener('click',()=>openRequestForm('cash'));
   $('myRequestsTab').addEventListener('click',()=>{
     $('requestCenter').classList.remove('hidden');
     $('leaveForm').classList.add('hidden');$('cashForm').classList.add('hidden');
@@ -532,7 +577,7 @@
   $('submitBonus').addEventListener('click',submitBonus);
   $('hygieneDate').value=new Date().toISOString().slice(0,10);
   $('submitComplaint').addEventListener('click',submitComplaint);
-  $('complaintsTab').addEventListener('click',()=>{$('requestCenter').classList.remove('hidden');switchRequestForm('complaint');$('complaintForm').classList.remove('hidden');$('leaveForm').classList.add('hidden');$('cashForm').classList.add('hidden');$('complaintThread').classList.add('hidden');$('requestPicker').classList.add('hidden');$('complaintsTab').classList.add('active');$('complaintHistoryTab').classList.remove('active');});
+  $('complaintsTab').addEventListener('click',()=>openRequestForm('complaint'));
   $('complaintHistoryTab').addEventListener('click',()=>{ $('requestCenter').classList.remove('hidden');$('requestPicker').classList.add('hidden'); $('complaintForm').classList.add('hidden'); showList('complaints'); });
   $('leaveType').addEventListener('change',syncLeaveFields);
   $('submitLeave').addEventListener('click',submitLeave);
@@ -543,6 +588,6 @@
   $('historyBtn').addEventListener('click', showAttendanceHistory);
   document.querySelectorAll('[data-uniform]').forEach(btn => btn.addEventListener('click', () => confirmUniform(btn.dataset.uniform)));
   document.querySelectorAll('[data-entity]').forEach(btn => btn.addEventListener('click', () => showList(btn.dataset.entity)));
-  $('backBtn').addEventListener('click', () => { $('results').classList.add('hidden'); if($('resultTitle').textContent==='الطلبات العامة'||$('resultTitle').textContent==='طلبات الأذونات'||$('resultTitle').textContent==='السلف والعهد') showRequestPicker(); });
+  $('backBtn').addEventListener('click', () => { const title=$('resultTitle').textContent; $('results').classList.add('hidden'); if(['الطلبات العامة','طلبات الأذونات','السلف والعهد'].includes(title)) showRequestPicker(); else closeModal(); });
   start();
 })();

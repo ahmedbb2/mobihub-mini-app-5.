@@ -5,13 +5,15 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
   <meta name="theme-color" content="#101820">
   <title>MobiHub | لوحة العمل</title>
+  <link rel="icon" type="image/webp" href="assets/mobihub-logo.webp">
+  <link rel="apple-touch-icon" href="assets/mobihub-logo.png">
   <link rel="stylesheet" href="styles.css">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
   <div class="app-shell">
     <header class="topbar">
-      <div class="brand-lockup"><div class="brand-mark">M</div><div><strong>MobiHub</strong><small>WORKSPACE</small></div></div>
+      <div class="brand-lockup"><img class="brand-logo" src="assets/mobihub-logo.webp" alt="MobiHub logo"><div><strong>MobiHub</strong><small>WORKSPACE</small></div></div>
       <div class="topbar-meta"><span id="connection" class="status"><i></i> جاري الاتصال</span></div>
     </header>
     <main>
@@ -204,7 +206,16 @@
       </section>
       <p id="error" class="error hidden"></p>
     </main>
-    <footer>نظام MobiHub الداخلي · إصدار تجريبي</footer>
+    <div id="appModal" class="app-modal hidden" aria-hidden="true">
+      <div class="modal-backdrop" data-modal-close></div>
+      <section class="modal-sheet" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+        <div class="modal-grabber"></div>
+        <header class="modal-header"><div><small>MOBIHUB WORKSPACE</small><h2 id="modalTitle">التفاصيل</h2></div><button type="button" class="modal-close" id="modalClose" aria-label="إغلاق">×</button></header>
+        <div id="modalMessage" class="modal-message hidden" aria-live="polite"></div>
+        <div id="modalBody" class="modal-body"></div>
+      </section>
+    </div>
+    <footer>نظام MobiHub الداخلي · V1.9.2</footer>
   </div>
   <script src="app.js"></script>
 </body>
