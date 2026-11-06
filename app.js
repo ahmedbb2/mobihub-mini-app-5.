@@ -243,7 +243,14 @@
   async function decideCash(row,decision){ const note=decision==='مرفوض'?prompt('سبب الرفض (اختياري):')||'':''; if(!confirm(`تأكيد إجراء «${decision}»؟`))return; try{await api('cash_decide',{row:Number(row),decision,note});await loadCashReviews();messageRequest('تم تحديث طلب السلفة.');}catch(e){messageRequest(e.message,true);} }
 
   function messageRequest(text,isError=false){const el=$('requestMessage');el.textContent=text;el.classList.toggle('is-error',isError);el.classList.remove('hidden');}
-  function switchRequestForm(which){$('leaveForm').classList.toggle('hidden',which!=='leave');$('cashForm').classList.toggle('hidden',which!=='cash');$('requestMessage').classList.add('hidden');}
+  function switchRequestForm(which){
+    $('leaveForm').classList.toggle('hidden',which!=='leave');
+    $('cashForm').classList.toggle('hidden',which!=='cash');
+    $('newLeaveTab').classList.toggle('active',which==='leave');
+    $('newCashTab').classList.toggle('active',which==='cash');
+    $('myRequestsTab').classList.remove('active');
+    $('requestMessage').classList.add('hidden');
+  }
   function syncLeaveFields(){const hourly=$('leaveType').value==='بالساعات';$('leaveDaysWrap').classList.toggle('hidden',hourly);$('leaveHoursWrap').classList.toggle('hidden',!hourly);}
   async function loadReviews(){
     const box=$('reviewBody'); box.textContent='جاري تحميل الطلبات المعلقة...';
@@ -265,7 +272,12 @@
 
   $('newLeaveTab').addEventListener('click',()=>switchRequestForm('leave'));
   $('newCashTab').addEventListener('click',()=>switchRequestForm('cash'));
-  $('myRequestsTab').addEventListener('click',()=>showList('requests'));
+  $('myRequestsTab').addEventListener('click',()=>{
+    $('leaveForm').classList.add('hidden');$('cashForm').classList.add('hidden');
+    $('newLeaveTab').classList.remove('active');$('newCashTab').classList.remove('active');
+    $('myRequestsTab').classList.add('active');$('requestMessage').classList.add('hidden');
+    showList('requests');
+  });
   $('submitCash').addEventListener('click',submitCash);
   $('leaveType').addEventListener('change',syncLeaveFields);
   $('submitLeave').addEventListener('click',submitLeave);
