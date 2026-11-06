@@ -21,3 +21,18 @@ h1{font-size:25px;margin:4px 0}h2{font-size:17px;margin:0}.muted{color:#9cabb8;f
 .error{background:#4a2020;color:#ffb9b9;padding:12px;border-radius:10px}
 footer{text-align:center;color:#647482;font-size:10px;padding:35px 0 5px}
 .hidden{display:none!important}
+
+/* Attendance module */
+.attendance-panel{background:#172530;border:1px solid #ff9b3833;border-radius:18px;padding:14px;margin:8px 0 24px}
+.attendance-state{background:#202f3b;border-radius:13px;padding:13px;margin:10px 0}
+.attendance-state strong{font-size:15px}.attendance-state p{margin:5px 0 0}
+.shift-info{font-size:12px;color:#b9c5cf;line-height:1.9}
+.attendance-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:12px}
+.primary-btn,.secondary-btn{border:0;border-radius:12px;padding:12px 16px;font:inherit;font-size:13px;font-weight:700;cursor:pointer;flex:1;min-width:125px}
+.primary-btn{background:#ff922e;color:#171717}.secondary-btn{background:#344655;color:#f5f7fa}
+.primary-btn:disabled,.secondary-btn:disabled{opacity:.45;cursor:not-allowed}
+.uniform-box{margin-top:14px;padding:13px;border:1px solid #ffad5b55;border-radius:13px;background:#211f1a}
+.uniform-box p{margin:5px 0}.inline-message{padding:10px 12px;border-radius:10px;background:#203b31;color:#a9edc4;font-size:12px;margin:12px 0 0;line-height:1.7}
+.inline-message.is-error{background:#4a2020;color:#ffb9b9}
+.record-meta{display:block;color:#aebbc6;font-size:11px;line-height:1.8;margin-top:5px}
+@media(max-width:380px){.attendance-actions{flex-direction:column}.primary-btn,.secondary-btn{width:100%}}

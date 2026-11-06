@@ -21,6 +21,30 @@
         <h1 id="userName">جاري تحميل حسابك...</h1>
         <p id="userRole" class="muted">يتم التحقق من حساب Telegram</p>
       </section>
+
+      <section id="attendance" class="attendance-panel hidden">
+        <div class="section-head"><h2>الحضور والانصراف</h2><span id="attendanceDate" class="muted">—</span></div>
+        <div class="attendance-state">
+          <strong id="attendanceStateTitle">جاري تحميل حالة الحضور...</strong>
+          <p id="attendanceStateText" class="muted">سيتم التحقق من الوردية والموقع عند التسجيل.</p>
+        </div>
+        <div class="shift-info" id="shiftInfo"></div>
+        <div class="attendance-actions">
+          <button id="checkinBtn" class="primary-btn" disabled>تسجيل حضور</button>
+          <button id="checkoutBtn" class="secondary-btn" disabled>تسجيل انصراف</button>
+          <button id="historyBtn" class="text-btn">سجل الحضور</button>
+        </div>
+        <div id="uniformBox" class="uniform-box hidden">
+          <strong>تأكيد حالة اليونيفورم</strong>
+          <p class="muted">أكد الحالة الفعلية لليونيفورم لإتمام تسجيل الحضور.</p>
+          <div class="attendance-actions">
+            <button class="primary-btn" data-uniform="ملتزم">ملتزم</button>
+            <button class="secondary-btn" data-uniform="غير ملتزم">غير ملتزم</button>
+          </div>
+        </div>
+        <p id="attendanceMessage" class="inline-message hidden" aria-live="polite"></p>
+      </section>
+
       <section id="stats" class="stats"></section>
       <section>
         <div class="section-head"><h2>الخدمات</h2><span class="muted">المرحلة الأولى</span></div>
@@ -33,7 +57,7 @@
       </section>
       <section id="management" class="management hidden">
         <div class="section-head"><h2>الإدارة</h2><span class="muted">حسب صلاحيتك</span></div>
-        <p class="muted">سيتم تفعيل لوحات المراجعة والإجراءات في المرحلة التالية بعد اعتماد ربط البيانات.</p>
+        <p class="muted">لوحات المراجعة والإجراءات الإدارية ستُنقل تدريجيًا بعد اعتماد كل وحدة.</p>
       </section>
       <section id="results" class="results hidden">
         <div class="section-head"><h2 id="resultTitle">السجلات</h2><button id="backBtn" class="text-btn">رجوع</button></div>
