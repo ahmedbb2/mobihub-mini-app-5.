@@ -891,9 +891,8 @@ const MH_CASH = Object.freeze({
 function createCashRequest_(profile, body) {
   if (profile.role !== 'employee') throw new Error('EMPLOYEE_ONLY');
   const amountRaw = String(body.amount ?? '').replace(/[٬,]/g, '').trim();
-  const amount = Number(amountRaw), purpose = String(body.purpose || '').trim();
+  const amount = Number(amountRaw);
   if (!/^\d+(?:\.\d{1,2})?$/.test(amountRaw) || !Number.isFinite(amount) || amount <= 0 || amount > 1000000) throw new Error('INVALID_CASH_AMOUNT');
-  if (purpose.length < 3 || purpose.length > 1000) throw new Error('INVALID_CASH_PURPOSE');
   const sh = mhSheet_(MH.SHEETS.cash); mhAssertHeaders_(sh, MH_CASH.HEADERS);
   const lock = LockService.getScriptLock(); lock.waitLock(15000);
   try {
@@ -901,7 +900,7 @@ function createCashRequest_(profile, body) {
     const row = new Array(MH_CASH.HEADERS.length).fill('');
     const set = (h,v) => row[MH_CASH.HEADERS.indexOf(h)] = v;
     set('رقم الطلب',id); set('التاريخ والوقت',mhNow_()); set('Chat ID',profile.chatId); set('اسم الموظف',profile.name);
-    set('المبلغ المطلوب بالجنيه',amount); set('الغرض',purpose); set('الحالة','قيد المراجعة'); set('حالة الصرف','لم يصرف');
+    set('المبلغ المطلوب بالجنيه',amount); set('الغرض',''); set('الحالة','قيد المراجعة'); set('حالة الصرف','لم يصرف');
     set('حالة العهدة','غير مطلوبة بعد'); set('تاريخ آخر تحديث',mhNow_()); sh.appendRow(row);
     return {submitted:true,requestId:id,status:'قيد المراجعة',message:'تم إرسال طلب السلفة/العهدة إلى الإدارة للمراجعة.'};
   } finally { lock.releaseLock(); }

@@ -203,7 +203,7 @@
   }
   async function submitCash(){
     const b=$('submitCash'); b.disabled=true; $('requestMessage').classList.add('hidden');
-    try { const result=await api('cash_create',{amount:$('cashAmount').value,purpose:$('cashPurpose').value}); $('cashAmount').value=''; $('cashPurpose').value=''; messageRequest(`${result.message} رقم الطلب: ${result.requestId}`); await showList('cash'); }
+    try { const result=await api('cash_create',{amount:$('cashAmount').value}); $('cashAmount').value=''; messageRequest(`${result.message} رقم الطلب: ${result.requestId}`); await showList('cash'); }
     catch(e){messageRequest(e.message,true);} finally{b.disabled=false;}
   }
   async function loadCashReviews(){
@@ -216,7 +216,7 @@
         const payout=String(r['حالة الصرف']||'');
         const custody=String(r['حالة العهدة']||'');
         const settlement=String(r['حالة التسوية']||'');
-        const base=`<p>${escapeHtml(r['اسم الموظف']||'')} · ${escapeHtml(r['المبلغ المطلوب بالجنيه']||'—')} جنيه<br>${escapeHtml(r['الغرض']||'')}<br>${escapeHtml(r['التاريخ والوقت']||'')}</p>`;
+        const base=`<p>${escapeHtml(r['اسم الموظف']||'')} · ${escapeHtml(r['المبلغ المطلوب بالجنيه']||'—')} جنيه<br>${escapeHtml(r['التاريخ والوقت']||'')}</p>`;
         if(status==='قيد المراجعة') cards.push(`<article class="review-item"><strong>${escapeHtml(r['رقم الطلب']||'طلب سلفة')} · طلب جديد</strong>${base}<div class="review-actions"><button class="primary-btn" data-cash-row="${r.__row}" data-cash-decision="مقبول">موافقة</button><button class="secondary-btn" data-cash-row="${r.__row}" data-cash-decision="مرفوض">رفض</button></div></article>`);
         if(status==='تمت الموافقة' && payout!=='تم الصرف') cards.push(`<article class="review-item"><strong>${escapeHtml(r['رقم الطلب']||'طلب سلفة')} · بانتظار الصرف</strong>${base}<div class="review-actions"><button class="primary-btn" data-cash-row="${r.__row}" data-cash-decision="تم الصرف">تأكيد صرف العهدة</button></div></article>`);
         if(settlement==='بانتظار مراجعة التسوية') cards.push(`<article class="review-item"><strong>${escapeHtml(r['رقم الطلب']||'عهدة')} · مراجعة التسوية</strong><p>${escapeHtml(r['اسم الموظف']||'')}<br>المعتمد: ${escapeHtml(r['المبلغ المعتمد بالجنيه']||'—')} جنيه<br>المصروف: ${escapeHtml(r['المصروف الفعلي بالجنيه']||'—')} جنيه<br>المطلوب إرجاعه: ${escapeHtml(r['المبلغ المطلوب إرجاعه بالجنيه']||'—')} جنيه<br>ملاحظات: ${escapeHtml(r['ملاحظات التسوية']||'—')}</p><div class="review-actions"><button class="primary-btn" data-settle-review="${r.__row}" data-settle-decision="مقبول">اعتماد التسوية</button><button class="secondary-btn" data-settle-review="${r.__row}" data-settle-decision="مرفوض">إرجاع للتصحيح</button></div></article>`);
