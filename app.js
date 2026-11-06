@@ -172,6 +172,59 @@
     } catch (e) { $('resultBody').textContent = e.message; }
   }
 
+
+  const MANAGER_ROLES = ['super_admin','admin','finance','supervisor'];
+  function buildWorkspace(role, permissions) {
+    const isManager = MANAGER_ROLES.includes(role);
+    const employee = $('employeeWorkspace'), manager = $('managerWorkspace'), nav = $('workspaceNav');
+    const sections = {
+      attendance: $('attendance'),
+      requests: $('requestCenter'),
+      finance: $('financeCenter'),
+      stats: $('stats'),
+      reviews: $('reviewCenter'),
+      cashReviews: $('cashReviewCenter'),
+      services: document.querySelector('main > section:not(#attendance):not(#requestCenter):not(#reviewCenter):not(#cashReviewCenter):not(#financeCenter):not(#stats):not(#management):not(#results):not(.welcome)')
+    };
+    // Both workspaces are distinct DOM roots. Only the sections allowed for this role are mounted.
+    const mount = (root, ids) => ids.forEach(id => { const node=$(id); if(node) root.appendChild(node); });
+    if(isManager) {
+      $('welcomeEyebrow').textContent = 'لوحة الإدارة والتشغيل';
+      manager.classList.remove('hidden'); employee.classList.add('hidden');
+      mount(manager, ['stats','attendance','reviewCenter','cashReviewCenter','financeCenter','results','management']);
+      $('requestCenter').classList.add('hidden');
+      if(role==='supervisor') {
+        $('deductionAdminTab').classList.add('hidden');
+        $('rewardAdminTab').classList.remove('hidden');
+      } else if(['admin','super_admin','finance'].includes(role)) {
+        $('deductionAdminTab').classList.remove('hidden');
+        $('rewardAdminTab').classList.remove('hidden');
+      }
+      if(!permissions.reviewRequests) $('reviewCenter').classList.add('hidden');
+      if(!permissions.finance) $('cashReviewCenter').classList.add('hidden');
+      if(role==='finance') $('attendance').classList.add('hidden');
+      nav.innerHTML = [
+        ['stats','نظرة عامة','▦'],['attendance','الحضور','◷'],['reviewCenter','مراجعة الطلبات','✓'],
+        ['cashReviewCenter','السلف والعهد','ج.م'],['financeCenter','الخصومات والمكافآت','★']
+      ].filter(([id])=>{const n=$(id);return n&&!n.classList.contains('hidden')}).map(([id,label,icon])=>`<button type="button" data-nav-target="${id}"><span>${icon}</span>${label}</button>`).join('');
+    } else {
+      $('welcomeEyebrow').textContent = 'مساحة الموظف';
+      employee.classList.remove('hidden'); manager.classList.add('hidden');
+      mount(employee, ['stats','attendance','requestCenter','financeCenter','results']);
+      $('reviewCenter').classList.add('hidden'); $('cashReviewCenter').classList.add('hidden'); $('management').classList.add('hidden');
+      $('financeCenter').classList.remove('hidden');
+      $('deductionAdminTab').classList.add('hidden'); $('rewardAdminTab').classList.add('hidden');
+      $('deductionAdminView').classList.add('hidden'); $('rewardAdminView').classList.add('hidden');
+      nav.innerHTML = [
+        ['attendance','الحضور والانصراف','◷'],['requestCenter','الخدمات والطلبات','▤'],['financeCenter','مكافآتي','★']
+      ].map(([id,label,icon])=>`<button type="button" data-nav-target="${id}"><span>${icon}</span>${label}</button>`).join('');
+    }
+    nav.classList.remove('hidden');
+    nav.querySelectorAll('[data-nav-target]').forEach(btn=>btn.addEventListener('click',()=>{
+      const target=$(btn.dataset.navTarget); if(target){target.scrollIntoView({behavior:'smooth',block:'start'});}
+      nav.querySelectorAll('button').forEach(b=>b.classList.toggle('active',b===btn));
+    }));
+  }
   async function start() {
     if (!tg) return fail('افتح التطبيق من زر Mini App داخل بوت MobiHub.');
     tg.ready(); tg.expand();
@@ -180,16 +233,11 @@
     try {
       const data = await api('bootstrap');
       currentRole = data.profile.role || 'employee';
-      if(['super_admin','admin','finance'].includes(currentRole)){
-        $('deductionAdminTab').classList.remove('hidden');
-      }
-      if(['super_admin','admin','finance','supervisor'].includes(currentRole)){
-        $('rewardAdminTab').classList.remove('hidden');
-      }
       $('userName').textContent = data.profile.name;
       const roleNames = { employee: 'موظف', supervisor: 'مشرف', admin: 'مدير', finance: 'مالية', super_admin: 'مدير النظام' };
       $('userRole').textContent = roleNames[data.profile.role] || data.profile.role;
       renderStats(data.summary);
+      buildWorkspace(currentRole, data.permissions);
       if (data.permissions.viewManagement) $('management').classList.remove('hidden');
       if (data.permissions.reviewRequests) { $('reviewCenter').classList.remove('hidden'); await loadReviews(); }
       if (data.permissions.finance) { $('cashReviewCenter').classList.remove('hidden'); await loadCashReviews(); }

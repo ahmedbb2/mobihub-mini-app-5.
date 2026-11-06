@@ -11,16 +11,17 @@
 <body>
   <div class="app-shell">
     <header class="topbar">
-      <div class="brand-mark">M</div>
-      <div><strong>MobiHub</strong><small>لوحة إدارة العمل</small></div>
-      <span id="connection" class="status">جاري الاتصال</span>
+      <div class="brand-lockup"><div class="brand-mark">M</div><div><strong>MobiHub</strong><small>WORKSPACE</small></div></div>
+      <div class="topbar-meta"><span id="connection" class="status"><i></i> جاري الاتصال</span></div>
     </header>
     <main>
       <section class="welcome">
-        <p class="eyebrow">أهلاً بيك</p>
-        <h1 id="userName">جاري تحميل حسابك...</h1>
-        <p id="userRole" class="muted">يتم التحقق من حساب Telegram</p>
+        <div><p class="eyebrow" id="welcomeEyebrow">مساحة العمل الخاصة بك</p><h1 id="userName">جاري تحميل حسابك...</h1><p id="userRole" class="muted">يتم التحقق من حساب Telegram</p></div>
+        <div class="welcome-mark" aria-hidden="true">MH</div>
       </section>
+      <nav id="workspaceNav" class="workspace-nav hidden" aria-label="التنقل بين الأقسام"></nav>
+      <div id="employeeWorkspace" class="workspace-layout hidden"></div>
+      <div id="managerWorkspace" class="workspace-layout hidden"></div>
 
       <section id="attendance" class="attendance-panel hidden">
         <div class="section-head"><h2>الحضور والانصراف</h2><span id="attendanceDate" class="muted">—</span></div>

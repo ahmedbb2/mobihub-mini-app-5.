@@ -42,3 +42,12 @@ This release does NOT yet migrate automatic attendance-generated deductions (lat
 - Apps Script syntax checked with Node parser (syntax only).
 - Not tested against live Google Sheets, Telegram, or real role accounts.
 - Test using employee, supervisor, admin and finance accounts before any production rollout.
+
+
+## UI refresh V1.8.1
+- Split the authenticated DOM into separate employee and management workspace roots.
+- Employee role sees attendance, employee requests, and personal rewards/deductions only.
+- Manager roles see review/operations sections according to server-provided permissions.
+- Finance role does not see attendance controls.
+- Rebuilt navigation, spacing, icon tiles, cards, and glass-like visual styling.
+- This is a front-end organization pass; it does not change API business logic.
