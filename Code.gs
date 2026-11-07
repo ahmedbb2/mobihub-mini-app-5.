@@ -1,5 +1,5 @@
 /**
- * MobiHub Mini App API — V1.10.1 Manager Workspace
+ * MobiHub Mini App API — V1.10.2 Manager Workspace
  * Separate Apps Script project for the TEST spreadsheet.
  *
  * Required Script Properties:
@@ -535,7 +535,8 @@ function listData_(profile, entity) {
   const dailySupervisorEntities = ['attendance','absences'];
   if (staffAdminEntities.indexOf(entity) >= 0 && ['super_admin','admin'].indexOf(role) < 0) throw new Error('FORBIDDEN');
   if (dailySupervisorEntities.indexOf(entity) >= 0 && ['super_admin','admin','supervisor'].indexOf(role) < 0) throw new Error('FORBIDDEN');
-  if (entity === 'devices' && ['super_admin','admin'].indexOf(role) < 0) throw new Error('FORBIDDEN');
+  const canUseDeviceIntake = entity === 'devices' && deviceIntakeAllowed_(profile);
+  if (entity === 'devices' && ['super_admin','admin'].indexOf(role) < 0 && !canUseDeviceIntake) throw new Error('FORBIDDEN');
   if (entity === 'managers' && role !== 'super_admin') throw new Error('FORBIDDEN');
   if (['notifications','notificationSettings','complaints'].indexOf(entity) >= 0 && ['super_admin','admin','supervisor'].indexOf(role) < 0) throw new Error('FORBIDDEN');
   const canReviewGeneral = [
@@ -549,8 +550,10 @@ function listData_(profile, entity) {
   let canViewAll = false;
 
   if (entity === 'managers') canViewAll = role === 'super_admin';
-  else if (staffAdminEntities.indexOf(entity) >= 0 || dailySupervisorEntities.indexOf(entity) >= 0 || entity === 'devices' || ['notifications','notificationSettings'].indexOf(entity) >= 0) {
+  else if (staffAdminEntities.indexOf(entity) >= 0 || dailySupervisorEntities.indexOf(entity) >= 0 || ['notifications','notificationSettings'].indexOf(entity) >= 0) {
     canViewAll = true;
+  } else if (entity === 'devices') {
+    canViewAll = ['super_admin','admin'].indexOf(role) >= 0;
   } else if (entity === 'cash' || entity === 'deductions' || entity === 'overtime' || entity === 'rewards') {
     canViewAll = canReviewCash;
   } else {
@@ -740,19 +743,49 @@ const MH_DEVICE = Object.freeze({
   DEVICE_HEADERS: ['رقم الطلب','تاريخ الاستلام','اسم الجهاز','اسم العميل','المشكلة المسجلة','مسؤول الاستلام Chat ID','مسؤول الاستلام','الموظف المسؤول Chat ID','الموظف المسؤول','القسم','حالة الجهاز','مكان الجهاز','آخر تحديث'],
   MOVEMENT_HEADERS: ['التاريخ والوقت','رقم الطلب','نوع الحركة','من Chat ID','من الموظف','إلى Chat ID','إلى الموظف','الحالة','المكان','ملاحظات','منفذ الحركة Chat ID','منفذ الحركة']
 });
+function mhEmployeeIsActive_(row) {
+  const state = String(row['الحالة'] || '').trim().toLowerCase();
+  const account = String(row['حالة الحساب'] || 'نشط').trim().toLowerCase();
+  const activeValues = ['نشط','فعال','مفعل','active','enabled','true','1'];
+  return activeValues.indexOf(state) >= 0 && activeValues.indexOf(account) >= 0;
+}
+function mhEmployeeJob_(row) {
+  return String(row['الوظيفة'] || row['المسمى الوظيفي'] || row['الدور'] || '').trim();
+}
+function mhIsIntakeJob_(job) {
+  // Accept common Arabic spellings and English job labels used in staff sheets.
+  return /استلام|استقبال|مسئول\s*استلام|مسؤول\s*استلام|reception|intake/i.test(String(job || ''));
+}
 function deviceIntakeAllowed_(profile) {
   if (['super_admin','admin','supervisor'].includes(profile.role)) return true;
   const rows = rowsAsObjects_(spreadsheet_(), MH.SHEETS.employees);
-  const employee = rows.find(r => String(r['Chat ID']).trim() === profile.chatId && String(r['الحالة']).trim() === 'نشط' && String(r['حالة الحساب'] || 'نشط').trim() === 'نشط');
-  return !!employee && /استلام|مدير|مشرف/i.test(String(employee['الوظيفة'] || ''));
+  const employee = rows.find(r => String(r['Chat ID'] || '').trim() === String(profile.chatId || '').trim());
+  return !!employee && mhEmployeeIsActive_(employee) && mhIsIntakeJob_(mhEmployeeJob_(employee));
 }
 function deviceRegistrationOptions_(profile) {
-  if (!deviceIntakeAllowed_(profile)) return {allowed:false,technicians:[]};
+  if (!deviceIntakeAllowed_(profile)) {
+    return {allowed:false,technicians:[],message:'حسابك غير مسجل كمسؤول استلام. راجع عمود الوظيفة في شيت الموظفين، واكتب: مسؤول استلام.'};
+  }
   const employees = rowsAsObjects_(spreadsheet_(), MH.SHEETS.employees).filter(r => {
-    const job = String(r['الوظيفة'] || '');
-    return String(r['Chat ID'] || '').trim() && String(r['الحالة'] || '').trim() === 'نشط' && String(r['حالة الحساب'] || 'نشط').trim() === 'نشط' && !/استلام/i.test(job);
+    const id = String(r['Chat ID'] || '').trim();
+    const job = mhEmployeeJob_(r);
+    return id && id !== String(profile.chatId || '').trim() &&
+      mhEmployeeIsActive_(r) && !mhIsIntakeJob_(job) &&
+      !/مدير|مشرف|إدارة|manager|supervisor/i.test(job);
   });
-  return {allowed:true,technicians:employees.slice(0,100).map(r=>({id:String(r['Chat ID']).trim(),name:String(r['اسم الموظف']||''),job:String(r['الوظيفة']||'')}))};
+  const technicalEmployees = employees.filter(r => /مهندس|فني|صيانة|تقني|technician|engineer|repair|technical/i.test(mhEmployeeJob_(r)));
+  const eligibleEmployees = technicalEmployees.length ? technicalEmployees : employees;
+  const technicians = eligibleEmployees.slice(0,100).map(r=>({
+    id:String(r['Chat ID']).trim(),
+    name:String(r['اسم الموظف']||'').trim() || 'مهندس',
+    job:mhEmployeeJob_(r)
+  }));
+  return {
+    allowed:true,
+    technicians:technicians,
+    technicianCount:technicians.length,
+    message:technicians.length ? '' : 'لا يوجد مهندسون نشطون متاحون للإسناد. راجع حالة الحساب والوظيفة في شيت الموظفين.'
+  };
 }
 function registerDeviceMini_(profile, body) {
   if (!deviceIntakeAllowed_(profile)) throw new Error('FORBIDDEN');
@@ -766,10 +799,9 @@ function registerDeviceMini_(profile, body) {
   mhAssertHeaders_(movement, MH_DEVICE.MOVEMENT_HEADERS);
   const employees = rowsAsObjects_(ss, MH.SHEETS.employees);
   const intake = employees.find(r=>String(r['Chat ID']).trim()===profile.chatId && String(r['الحالة']).trim()==='نشط' && String(r['حالة الحساب']||'نشط').trim()==='نشط');
-  const technician = employees.find(r=>String(r['Chat ID']).trim()===technicianId && String(r['الحالة']).trim()==='نشط' && String(r['حالة الحساب']||'نشط').trim()==='نشط');
-  const isManager = ['super_admin','admin','supervisor'].includes(profile.role);
+  const technician = employees.find(r=>String(r['Chat ID'] || '').trim()===technicianId && mhEmployeeIsActive_(r));
   if (!technician) throw new Error('INVALID_DEVICE_TECHNICIAN');
-  if (/استلام/i.test(String(technician['الوظيفة']||''))) throw new Error('INVALID_DEVICE_TECHNICIAN');
+  if (mhIsIntakeJob_(mhEmployeeJob_(technician))) throw new Error('INVALID_DEVICE_TECHNICIAN');
   const lock=LockService.getScriptLock(); lock.waitLock(15000);
   try {
     const existing = rowsAsObjects_(ss, MH.SHEETS.devices).some(r=>String(r['رقم الطلب']).trim()===orderId);
@@ -1801,7 +1833,7 @@ function mhNotifyFinanceAdminsMini_(message, keyboard, requestId) {
 
 
 /* =========================================================
-   V1.10.1 — DEVICE OPERATIONS, NOTIFICATIONS, ADMIN USERS
+   V1.10.2 — DEVICE OPERATIONS, NOTIFICATIONS, ADMIN USERS
    All mutations are server-side role checked and audited.
 ========================================================= */
 const MH_DEVICE_HEADERS = ['رقم الطلب','تاريخ الاستلام','اسم الجهاز','اسم العميل','المشكلة المسجلة','مسؤول الاستلام Chat ID','مسؤول الاستلام','الموظف المسؤول Chat ID','الموظف المسؤول','القسم','حالة الجهاز','مكان الجهاز','آخر تحديث'];

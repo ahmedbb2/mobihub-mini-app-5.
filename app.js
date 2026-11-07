@@ -602,7 +602,9 @@
     try{
       const data=await api('device_registration_options');
       if(!data.allowed){$('registerDeviceCard').classList.add('hidden');$('deviceRegisterMessage').textContent='تسجيل الأجهزة متاح لمسؤول الاستلام أو الإدارة فقط.';$('deviceRegisterMessage').classList.remove('hidden');return;}
-      $('deviceTechnician').innerHTML='<option value="">اختر الفني المسؤول</option>'+(data.technicians||[]).map(e=>`<option value="${escapeHtml(e.id)}">${escapeHtml(e.name)}${e.job?` — ${escapeHtml(e.job)}`:''}</option>`).join('');
+      const technicians=data.technicians||[];
+      $('deviceTechnician').innerHTML='<option value="">اختر الفني المسؤول</option>'+technicians.map(e=>`<option value="${escapeHtml(e.id)}">${escapeHtml(e.name)}${e.job?` — ${escapeHtml(e.job)}`:''}</option>`).join('');
+      if(!technicians.length){$('deviceRegisterMessage').textContent=data.message||'لا يوجد مهندسون نشطون متاحون للإسناد. راجع شيت الموظفين.';$('deviceRegisterMessage').classList.remove('hidden');}
     }catch(e){$('deviceRegisterMessage').textContent=e.message;$('deviceRegisterMessage').classList.remove('hidden');}
   }
   async function submitDeviceRegistration(){

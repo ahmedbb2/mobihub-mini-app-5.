@@ -2041,24 +2041,15 @@ function sendEmployeeRefresh_(chatId, employee, sheets) {
 
 // القائمة الرئيسية
 function sendMainMenu_(chatId, text, sheets) {
-  const keyboard = {
-    keyboard: [
-      // ترتيب العرض RTL: أول عنصر في كل صف يظهر ناحية اليمين.
-      [{ text: "🚪 تسجيل انصراف" }, { text: "✅ تسجيل حضور" }],
-      [{ text: "⏳ طلب إذن" }, { text: "💵 طلب سلفة" }],
-      [{ text: "💰 تسوية عهدة" }, { text: "💰 طلب سحب مبلغ" }],
-      [{ text: "📱 حالة الجهاز" }, { text: "📥 تسجيل جهاز" }],
-      [{ text: "🏆 مكافآتي" }, { text: "💰 خصوماتي" }],
-      [{ text: "📊 ملخص الشهر" }, { text: "📩 طلباتي" }],
-      [{ text: "🔄 تحديث اللوحة" }, { text: "📩 تقديم شكوى" }],
-      [{ text: "📨 شكاويي" }],
-      ...(isAdmin_(chatId, sheets) ? [[{ text: "🛠️ إدارة الأجهزة" }]] : [])
-    ],
-    resize_keyboard: true,
-    is_persistent: true,
-    one_time_keyboard: false
-  };
-  return sendMessage_(chatId, text, keyboard, sheets);
+  // V1.10.2 Mini App migration:
+  // Remove the legacy employee Reply Keyboard so Telegram does not keep
+  // showing the old bot menu below the chat composer.
+  return sendMessage_(
+    chatId,
+    String(text || "تم تحديث نظام MobiHub. افتح التطبيق من زر Open App في ملف البوت."),
+    { remove_keyboard: true },
+    sheets
+  );
 }
 
 
