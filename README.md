@@ -1,53 +1,60 @@
-# MobiHub Mini App — V1.10.0 Manager Workspace
+# MobiHub Mini App — V1.10.1 Manager Operations
 
 ## What this release adds
 
-This release replaces the manager placeholder with a distinct, role-scoped management workspace. The manager landing page no longer displays the engineer's personal attendance/check-out controls or personal summary tiles. Manager tools open in modal sheets instead of being appended below the home dashboard.
+This is a continuation of the V1.10.1 manager workspace. It keeps the existing V40 bot as the operational reference and uses the same Google Sheets workbook for manager operations.
 
-### Manager dashboard
-- Live aggregate cards from Google Sheets: active engineers, present now, pending requests/leaves, pending cash actions, open complaints, and active devices (each card is shown only to roles allowed to see that domain).
-- Daily follow-up: today's latest attendance movement per engineer and absence review records.
-- Staff: engineer directory, search, add/edit engineer details, activate/deactivate an account, and assign an active shift with workdays and date range.
-- Requests: existing request/leave approval flow and complaint thread/status workflow.
-- Finance: existing cash/custody review and the existing deductions/rewards management screens for Finance and Super Admin.
-- Devices: registered devices and movement-log count.
-- Reports: general monthly attendance, checkout, lateness, absence and leave summary.
-- Notifications: read-only log and settings view; controls and test-send are not included yet.
+### Device operations
+- Device register list with current state, assigned engineer and storage location.
+- Update device status and location from a modal form.
+- Reassign a device to an active engineer.
+- Append each update to `سجل حركة الأجهزة` with old/new assignee, state, location, actor and note.
+- Send a Telegram message to the engineer when a device is newly assigned.
+
+### Notification center
+- View recent notification log rows and notification settings.
+- Enable/disable existing notification settings by writing to `إعدادات الإشعارات`.
+- Send an administrative Telegram message to one active engineer or all active engineers.
+- Log successful and failed deliveries in `سجل الإشعارات`.
+- The legacy V40 notification engine continues to own scheduled reminders; this Mini App changes the shared settings sheet rather than duplicating the scheduler.
+
+### Manager directory
+- Super Admin only: add manager accounts with `Admin`, `Finance` or `Supervisor` roles.
+- Change an existing manager's role or activate/deactivate their account.
+- Backend revalidates Super Admin permission on every mutation.
+- The existing Super Admin cannot be changed through this endpoint.
 
 ## Role policy
 
-- `Super Admin`: all dashboard modules.
-- `Admin`: daily follow-up, staff, devices, requests and reports.
+- `Super Admin`: all dashboard modules, including manager directory.
+- `Admin`: daily follow-up, staff, devices, requests, reports and notifications.
 - `Finance`: finance module only.
-- `Supervisor`: daily follow-up, requests and read-only notification history/settings.
-
-New staff and shift write endpoints revalidate the role on Apps Script. Engineer create/edit/status and shift assignment are restricted to Super Admin and Admin. The requested workspace is revalidated from Telegram identity and active Google Sheets records on every API request.
+- `Supervisor`: daily follow-up, requests and notification center.
 
 ## Files
 
 - `index.html`, `styles.css`, `app.js`: Mini App frontend.
-- `Code.gs`: Apps Script API V1.10.0.
+- `Code.gs`: Apps Script API V1.10.1.
 - `assets/`: MobiHub logo PNG/WebP.
 - `MobiHub_Attendance_v40_REFERENCE.gs`: read-only reference copy of the legacy V40 bot. Do not deploy this file over the active bot project.
 - `_headers`: Cloudflare Pages security headers.
 
 ## Deploy to TEST first
 
-1. Back up the current Cloudflare Pages deployment and the current TEST Apps Script project.
+1. Back up the current Cloudflare Pages deployment and TEST Apps Script project.
 2. Upload `index.html`, `styles.css`, `app.js`, `_headers`, and the complete `assets/` folder to the existing Cloudflare Pages project.
 3. Replace `Code.gs` in the TEST Apps Script project and deploy a new Web App version. Keep the same API endpoint so the existing Cloudflare Worker proxy does not need to change.
-4. Keep the legacy Telegram bot webhook and production spreadsheet unchanged during testing.
-5. Test with at least one account for each role. For dual-role accounts, test both workspace directions.
+4. Confirm the Apps Script project has `SPREADSHEET_ID` and the Telegram token property (`BOT_TOKEN` or `MOBIHUB_TELEGRAM_BOT_TOKEN`). Never put the bot token in frontend files.
+5. Keep the production bot webhook and production spreadsheet unchanged during testing.
+6. Test with Super Admin, Admin, Finance and Supervisor accounts. For dual-role accounts, test both workspace directions.
 
-## Validation performed in this build
+## Validation
 
 - `node --check app.js`: passed.
 - Apps Script source syntax checked with Node parser: passed.
-- HTML duplicate-ID check: passed.
-- `manager_dashboard` aggregate/role-scope tests with mocked sheet rows: passed.
+- HTML duplicate-ID check: pending in this release build.
+- Live Telegram, Cloudflare, Apps Script deployment and real Google Sheets writes have not been performed from this environment. Test the actions in the TEST workbook before production.
 
-Live Telegram, Cloudflare, Apps Script deployment and real Google Sheets write tests have not been performed from this build environment. Deploy to the TEST project and verify before production.
+## Explicit scope limits
 
-## Still pending from V40
-
-This is the first functional manager-workspace foundation, not a claim that all 233 legacy functions have migrated. Still to port/test: notification setting mutation and test-send, full notification delivery parity, full device status/movement actions, advanced shift CRUD, manager directory CRUD, deeper employee performance/reward drill-down, and full V40 monthly/financial reports.
+This release adds manager-side device updates, notification setting mutation/manual sends and manager account controls. It does not claim full migration of every legacy V40 workflow. Scheduled notification delivery remains in the legacy V40 trigger engine. Advanced shift CRUD, detailed individual reward/performance drill-down and complete parity testing remain separate work items.

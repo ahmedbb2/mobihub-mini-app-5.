@@ -1,5 +1,5 @@
 /**
- * MobiHub Mini App API — V1.10.0 Manager Workspace
+ * MobiHub Mini App API — V1.10.1 Manager Workspace
  * Separate Apps Script project for the TEST spreadsheet.
  *
  * Required Script Properties:
@@ -10,7 +10,7 @@
  */
 
 const MH = Object.freeze({
-  VERSION: '1.10.0',
+  VERSION: '1.10.1',
   TZ: 'Africa/Cairo',
   AUTH_MAX_AGE_SECONDS: 300,
   SHEETS: {
@@ -118,6 +118,22 @@ function doPost(e) {
         data = managerAssignShift_(profile, body);
         break;
 
+
+      case 'device_update':
+        data = managerUpdateDevice_(profile, body);
+        break;
+      case 'notification_setting':
+        data = managerSetNotificationSetting_(profile, body);
+        break;
+      case 'notification_send':
+        data = managerSendNotification_(profile, body);
+        break;
+      case 'manager_create':
+        data = managerCreateAdmin_(profile, body);
+        break;
+      case 'manager_update':
+        data = managerUpdateAdmin_(profile, body);
+        break;
       case 'list':
         data = listData_(profile, String(body.entity || ''));
         break;
@@ -505,7 +521,8 @@ function listData_(profile, entity) {
     assignments: { sheet: MH.SHEETS.assignments, owner: 'Chat ID' },
     deviceMovements: { sheet: 'سجل حركة الأجهزة', owner: 'منفذ الحركة Chat ID' },
     notifications: { sheet: 'سجل الإشعارات', owner: 'المستلم' },
-    notificationSettings: { sheet: 'إعدادات الإشعارات', owner: 'الإعداد' }
+    notificationSettings: { sheet: 'إعدادات الإشعارات', owner: 'الإعداد' },
+    managers: { sheet: 'المديرين', owner: 'Chat ID' }
   };
 
   const definition = definitions[entity];
@@ -519,6 +536,7 @@ function listData_(profile, entity) {
   if (staffAdminEntities.indexOf(entity) >= 0 && ['super_admin','admin'].indexOf(role) < 0) throw new Error('FORBIDDEN');
   if (dailySupervisorEntities.indexOf(entity) >= 0 && ['super_admin','admin','supervisor'].indexOf(role) < 0) throw new Error('FORBIDDEN');
   if (entity === 'devices' && ['super_admin','admin'].indexOf(role) < 0) throw new Error('FORBIDDEN');
+  if (entity === 'managers' && role !== 'super_admin') throw new Error('FORBIDDEN');
   if (['notifications','notificationSettings','complaints'].indexOf(entity) >= 0 && ['super_admin','admin','supervisor'].indexOf(role) < 0) throw new Error('FORBIDDEN');
   const canReviewGeneral = [
     'super_admin', 'admin', 'supervisor'
@@ -530,7 +548,8 @@ function listData_(profile, entity) {
 
   let canViewAll = false;
 
-  if (staffAdminEntities.indexOf(entity) >= 0 || dailySupervisorEntities.indexOf(entity) >= 0 || entity === 'devices' || ['notifications','notificationSettings'].indexOf(entity) >= 0) {
+  if (entity === 'managers') canViewAll = role === 'super_admin';
+  else if (staffAdminEntities.indexOf(entity) >= 0 || dailySupervisorEntities.indexOf(entity) >= 0 || entity === 'devices' || ['notifications','notificationSettings'].indexOf(entity) >= 0) {
     canViewAll = true;
   } else if (entity === 'cash' || entity === 'deductions' || entity === 'overtime' || entity === 'rewards') {
     canViewAll = canReviewCash;
@@ -567,7 +586,8 @@ function managerDashboard_(profile) {
     requests: ['super_admin','admin','supervisor'].includes(role),
     finance: ['super_admin','finance'].includes(role),
     system: ['super_admin','admin'].includes(role),
-    notifications: ['super_admin','admin','supervisor'].includes(role)
+    notifications: ['super_admin','admin','supervisor'].includes(role),
+    managers: role === 'super_admin'
   };
   const dataWarnings = [];
   const safeRows = function(name, enabled) {
@@ -1777,4 +1797,128 @@ function mhNotifyFinanceAdminsMini_(message, keyboard, requestId) {
   const errors=[];
   recipients.forEach(id=>{try{mhSendTelegramMini_(id,message,keyboard);}catch(e){errors.push(String(id));console.error('MobiHub finance notification failed for '+id+': '+e);}});
   if(errors.length) console.warn('Cash withdrawal notification failures: '+errors.join(','));
+}
+
+
+/* =========================================================
+   V1.10.1 — DEVICE OPERATIONS, NOTIFICATIONS, ADMIN USERS
+   All mutations are server-side role checked and audited.
+========================================================= */
+const MH_DEVICE_HEADERS = ['رقم الطلب','تاريخ الاستلام','اسم الجهاز','اسم العميل','المشكلة المسجلة','مسؤول الاستلام Chat ID','مسؤول الاستلام','الموظف المسؤول Chat ID','الموظف المسؤول','القسم','حالة الجهاز','مكان الجهاز','آخر تحديث'];
+const MH_DEVICE_MOVEMENT_HEADERS = ['التاريخ والوقت','رقم الطلب','نوع الحركة','من Chat ID','من الموظف','إلى Chat ID','إلى الموظف','الحالة','المكان','ملاحظات','منفذ الحركة Chat ID','منفذ الحركة'];
+const MH_NOTIFICATION_HEADERS = ['معرف الإشعار','التاريخ والوقت','المستلم','نوع الإشعار','مفتاح منع التكرار','الحالة','تفاصيل الخطأ'];
+const MH_NOTIFICATION_SETTING_HEADERS = ['الإعداد','القيمة','الوصف'];
+const MH_MANAGER_HEADERS = ['Chat ID','اسم المدير','الصلاحية','الحالة','أضيف بواسطة','تاريخ الإضافة','آخر تحديث'];
+const MH_DEVICE_STATUSES = ['تم الاستلام','قيد الفحص','يحتاج قطعة غيار','يحتاج التواصل مع العميل','بانتظار رد العميل','لم يتم الرد','قيد الإصلاح','مراجعة الجودة','يحتاج إعادة فحص','جاهز للتسليم','تم التسليم'];
+const MH_DEVICE_LOCATIONS = ['قسم الاستلام','ترابيزة الهاردوير','درج الفحص 1','درج الفحص 2','درج مراجعة الجودة','درج انتظار قطع الغيار','درج انتظار العميل','درج جاهز للتسليم','مكان آخر'];
+const MH_ADMIN_ROLES = ['Admin','Finance','Supervisor'];
+
+function mhEnsureSheet_(name, headers) {
+  const ss=spreadsheet_(); let sh=ss.getSheetByName(name);
+  if(!sh) sh=ss.insertSheet(name);
+  if(sh.getLastRow()===0) sh.getRange(1,1,1,headers.length).setValues([headers]);
+  mhAssertHeaders_(sh,headers);
+  return sh;
+}
+function mhStamp_(){return Utilities.formatDate(new Date(),MH.TZ,'yyyy-MM-dd HH:mm:ss');}
+function mhAppendNotificationLog_(recipient,type,status,errorText) {
+  const sh=mhEnsureSheet_('سجل الإشعارات',MH_NOTIFICATION_HEADERS);
+  sh.appendRow([Utilities.getUuid(),mhStamp_(),String(recipient),String(type),'miniapp_'+Utilities.getUuid(),String(status),String(errorText||'')]);
+}
+function mhTelegramSend_(chatId,message) {
+  const token=PropertiesService.getScriptProperties().getProperty('MOBIHUB_TELEGRAM_BOT_TOKEN') ||
+    PropertiesService.getScriptProperties().getProperty('BOT_TOKEN');
+  if(!token) throw new Error('BOT_TOKEN_NOT_CONFIGURED');
+  const response=UrlFetchApp.fetch('https://api.telegram.org/bot'+token+'/sendMessage',{
+    method:'post',contentType:'application/json',muteHttpExceptions:true,
+    payload:JSON.stringify({chat_id:String(chatId),text:String(message).slice(0,3900),disable_web_page_preview:true})
+  });
+  const result=JSON.parse(response.getContentText()||'{}');
+  if(!result.ok) throw new Error('TELEGRAM_SEND_FAILED');
+  return result;
+}
+function managerUpdateDevice_(profile,body) {
+  mhRequireRole_(profile,['super_admin','admin']);
+  const orderId=String(body.orderId||'').trim();
+  const status=String(body.status||'').trim();
+  const location=String(body.location||'').trim();
+  const employeeId=String(body.employeeId||'').trim();
+  const note=String(body.note||'').trim().slice(0,500);
+  if(!orderId || MH_DEVICE_STATUSES.indexOf(status)<0 || MH_DEVICE_LOCATIONS.indexOf(location)<0) throw new Error('INVALID_DEVICE_UPDATE');
+  const sh=mhEnsureSheet_('الأجهزة',MH_DEVICE_HEADERS), map=mhHeaderMap_(sh);
+  const rows=mhRowsObjects_(sh), found=rows.find(r=>String(r['رقم الطلب']).trim()===orderId);
+  if(!found) throw new Error('DEVICE_NOT_FOUND');
+  let nextEmployeeId=String(found['الموظف المسؤول Chat ID']||'').trim();
+  let nextEmployee=String(found['الموظف المسؤول']||'').trim();
+  if(employeeId) {
+    const emp=rowsAsObjects_(spreadsheet_(),MH.SHEETS.employees).find(r=>String(r['Chat ID']).trim()===employeeId && String(r['الحالة']||'نشط').trim()==='نشط' && String(r['حالة الحساب']||'نشط').trim()==='نشط');
+    if(!emp) throw new Error('EMPLOYEE_NOT_FOUND_OR_INACTIVE');
+    nextEmployeeId=employeeId; nextEmployee=String(emp['اسم الموظف']||'');
+  }
+  const row=found.__row, oldId=String(found['الموظف المسؤول Chat ID']||''), oldName=String(found['الموظف المسؤول']||'');
+  const lock=LockService.getScriptLock();lock.waitLock(15000);
+  try {
+    sh.getRange(row,map['الموظف المسؤول Chat ID']).setValue(nextEmployeeId);
+    sh.getRange(row,map['الموظف المسؤول']).setValue(nextEmployee);
+    sh.getRange(row,map['حالة الجهاز']).setValue(status);
+    sh.getRange(row,map['مكان الجهاز']).setValue(location);
+    sh.getRange(row,map['آخر تحديث']).setValue(mhStamp_());
+    const movement=mhEnsureSheet_('سجل حركة الأجهزة',MH_DEVICE_MOVEMENT_HEADERS);
+    movement.appendRow([mhStamp_(),orderId,'تحديث من لوحة الإدارة',oldId,oldName,nextEmployeeId,nextEmployee,status,location,note,profile.chatId,profile.name]);
+  } finally {lock.releaseLock();}
+  if(employeeId && employeeId!==oldId) {
+    try { mhTelegramSend_(employeeId,'📱 تم إسناد جهاز إليك من إدارة MobiHub\\nرقم الطلب: '+orderId+'\\nالجهاز: '+String(found['اسم الجهاز']||'')+'\\nالحالة: '+status+'\\nالمكان: '+location); mhAppendNotificationLog_(employeeId,'إسناد جهاز','تم الإرسال',''); }
+    catch(e){mhAppendNotificationLog_(employeeId,'إسناد جهاز','فشل',e.message);}
+  }
+  return {updated:true,orderId:orderId,status:status,location:location,employeeId:nextEmployeeId,employee:nextEmployee};
+}
+function managerSetNotificationSetting_(profile,body) {
+  mhRequireRole_(profile,['super_admin','admin']);
+  const key=String(body.key||'').trim(), value=body.enabled===true?'TRUE':'FALSE';
+  if(!key || key.length>120) throw new Error('INVALID_SETTING');
+  const sh=mhEnsureSheet_('إعدادات الإشعارات',MH_NOTIFICATION_SETTING_HEADERS);
+  const map=mhHeaderMap_(sh), rows=mhRowsObjects_(sh), found=rows.find(r=>String(r['الإعداد']).trim()===key);
+  if(!found) throw new Error('SETTING_NOT_FOUND');
+  sh.getRange(found.__row,map['القيمة']).setValue(value);
+  return {key:key,value:value};
+}
+function managerSendNotification_(profile,body) {
+  mhRequireRole_(profile,['super_admin','admin']);
+  const recipient=String(body.recipient||'').trim(), message=String(body.message||'').trim();
+  if(message.length<2 || message.length>3900) throw new Error('INVALID_NOTIFICATION_MESSAGE');
+  const employees=rowsAsObjects_(spreadsheet_(),MH.SHEETS.employees).filter(r=>String(r['الحالة']||'نشط').trim()==='نشط' && String(r['حالة الحساب']||'نشط').trim()==='نشط' && String(r['Chat ID']||'').trim());
+  const targets=recipient==='all'?employees:employees.filter(r=>String(r['Chat ID']).trim()===recipient);
+  if(!targets.length) throw new Error('NOTIFICATION_RECIPIENT_NOT_FOUND');
+  let sent=0,failed=0;
+  targets.forEach(emp=>{
+    const id=String(emp['Chat ID']).trim();
+    try { mhTelegramSend_(id,message); mhAppendNotificationLog_(id,'رسالة إدارية','تم الإرسال',''); sent++; }
+    catch(e){ mhAppendNotificationLog_(id,'رسالة إدارية','فشل',e.message); failed++; }
+  });
+  return {sent:sent,failed:failed,total:targets.length};
+}
+function managerCreateAdmin_(profile,body) {
+  mhRequireRole_(profile,['super_admin']);
+  const id=String(body.chatId||'').trim(), name=String(body.name||'').trim(), role=String(body.role||'Admin').trim();
+  if(!/^\\d{5,20}$/.test(id)||name.length<2||name.length>80||MH_ADMIN_ROLES.indexOf(role)<0) throw new Error('INVALID_MANAGER_DATA');
+  const sh=mhEnsureSheet_('المديرين',MH_MANAGER_HEADERS), rows=mhRowsObjects_(sh);
+  if(rows.some(r=>String(r['Chat ID']).trim()===id)) throw new Error('MANAGER_ALREADY_EXISTS');
+  sh.appendRow([id,name,role,'نشط',profile.chatId,mhStamp_(),mhStamp_()]);
+  try{mhTelegramSend_(id,'🛡️ تم تفعيل صلاحية '+role+' في نظام MobiHub. أرسل /start لفتح لوحة الإدارة.');}catch(e){}
+  return {created:true,chatId:id,name:name,role:role};
+}
+function managerUpdateAdmin_(profile,body) {
+  mhRequireRole_(profile,['super_admin']);
+  const id=String(body.chatId||'').trim(), role=String(body.role||'').trim();
+  const hasStatus=Object.prototype.hasOwnProperty.call(body,'status');
+  const status=hasStatus?String(body.status||'').trim():'';
+  if(!/^\d{5,20}$/.test(id)||id===String(profile.chatId)) throw new Error('INVALID_MANAGER_ID');
+  if(role && MH_ADMIN_ROLES.indexOf(role)<0) throw new Error('INVALID_MANAGER_ROLE');
+  if(hasStatus && ['نشط','موقوف'].indexOf(status)<0) throw new Error('INVALID_MANAGER_STATUS');
+  const sh=mhEnsureSheet_('المديرين',MH_MANAGER_HEADERS), map=mhHeaderMap_(sh), found=mhRowsObjects_(sh).find(r=>String(r['Chat ID']).trim()===id);
+  if(!found) throw new Error('MANAGER_NOT_FOUND');
+  if(role) sh.getRange(found.__row,map['الصلاحية']).setValue(role);
+  if(hasStatus) sh.getRange(found.__row,map['الحالة']).setValue(status);
+  sh.getRange(found.__row,map['آخر تحديث']).setValue(mhStamp_());
+  return {updated:true,chatId:id,role:role||String(found['الصلاحية']),status:hasStatus?status:String(found['الحالة'])};
 }
