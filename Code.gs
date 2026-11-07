@@ -1,5 +1,5 @@
 /**
- * MobiHub Mini App API — V1.10.2 Manager Workspace
+ * MobiHub Mini App API — V1.10.3 Rewards & Telegram Cleanup
  * Separate Apps Script project for the TEST spreadsheet.
  *
  * Required Script Properties:
@@ -10,7 +10,7 @@
  */
 
 const MH = Object.freeze({
-  VERSION: '1.10.1',
+  VERSION: '1.10.3',
   TZ: 'Africa/Cairo',
   AUTH_MAX_AGE_SECONDS: 300,
   SHEETS: {
@@ -1701,47 +1701,117 @@ function monthlySummary_(profile) {
 }
 
 function rewardSummary_(profile, body) {
-  const month=financeMonth_(body.month);
-  const employeeId=String(body.employeeId||profile.chatId);
-  if(employeeId!==profile.chatId) mhRequireRole_(profile,MH_FINANCE.REVIEW_ROLES);
-  const employee=employeeId===profile.chatId?{chatId:employeeId,name:profile.name}:financeEmployee_(employeeId);
-  const assignments=mhRowsObjects_(mhSheet_(MH.SHEETS.assignments));
-  const attendance=mhRowsObjects_(mhSheet_(MH.SHEETS.attendance));
-  const hygiene=mhRowsObjects_(mhSheet_(MH.SHEETS.rewardHygiene));
-  const bonuses=mhRowsObjects_(mhSheet_(MH.SHEETS.rewardBonus));
-  let eligible=0,elapsedEligible=0,earned=0,commitment=0,hygienePoints=0,excluded=0,shifts=0,hygienePending=0;
-  const daysInMonth=new Date(Number(month.slice(0,4)),Number(month.slice(5,7)),0).getDate(), today=mhToday_();
-  for(let day=1;day<=daysInMonth;day++){
-    const date=month+'-'+String(day).padStart(2,'0');
-    const ass=mhAssignmentForDate_(spreadsheet_(),employeeId,date); if(!ass) continue;
-    const shift=mhShiftById_(spreadsheet_(),ass.shiftId); if(!shift) continue;
+  const month = financeMonth_(body.month);
+  const employeeId = String(body.employeeId || profile.chatId);
+  if (employeeId !== profile.chatId) mhRequireRole_(profile, MH_FINANCE.REVIEW_ROLES);
+  const employee = employeeId === profile.chatId
+    ? { chatId: employeeId, name: profile.name }
+    : financeEmployee_(employeeId);
+  const ss = spreadsheet_();
+  // Read each source sheet once. Avoid per-day Spreadsheet reads: they made
+  // the old Mini App reward view slow and could exceed Apps Script quotas.
+  const assignments = mhRowsObjects_(mhSheet_(MH.SHEETS.assignments));
+  const shiftsData = mhRowsObjects_(mhSheet_(MH.SHEETS.shifts));
+  const leaves = mhRowsObjects_(mhSheet_(MH.SHEETS.leaves));
+  const attendance = mhRowsObjects_(mhSheet_(MH.SHEETS.attendance));
+  const hygiene = mhRowsObjects_(mhSheet_(MH.SHEETS.rewardHygiene));
+  const bonuses = mhRowsObjects_(mhSheet_(MH.SHEETS.rewardBonus));
+  let eligible = 0, elapsedEligible = 0, earned = 0;
+  let commitment = 0, onTime = 0, uniform = 0, hygienePoints = 0;
+  let excluded = 0, shifts = 0, hygienePending = 0;
+  const daysInMonth = new Date(Number(month.slice(0,4)), Number(month.slice(5,7)), 0).getDate();
+  const today = mhToday_();
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const date = month + '-' + String(day).padStart(2,'0');
+    const dayOfWeek = new Date(date + 'T12:00:00').getDay();
+    const assignmentRows = assignments.filter(r =>
+      String(r['Chat ID'] || '').trim() === employeeId &&
+      String(r['الحالة'] || 'نشط').trim() === 'نشط' &&
+      (!mhDate_(r['تاريخ البداية']) || mhDate_(r['تاريخ البداية']) <= date) &&
+      (!mhDate_(r['تاريخ النهاية']) || mhDate_(r['تاريخ النهاية']) >= date) &&
+      String(r['أيام العمل'] || '0,1,2,3,4,6').split(',').map(x => Number(x.trim())).includes(dayOfWeek)
+    );
+    if (!assignmentRows.length) continue;
+    const assignment = assignmentRows[assignmentRows.length - 1];
+    const shiftId = String(assignment['Shift ID'] || '').trim();
+    const shiftRow = shiftsData.find(r => String(r['Shift ID'] || '').trim() === shiftId && String(r['الحالة'] || 'نشط').trim() === 'نشط');
+    if (!shiftRow) continue;
+    const isFlexibleShift = shiftId === MH_ATTENDANCE.FLEX_SHIFT_ID || String(shiftRow['اسم الوردية'] || '').trim() === 'بدون ميعاد ثابت';
+    const shiftStart = isFlexibleShift ? '' : mhTime_(shiftRow['موعد الحضور']);
     shifts++;
-    if(rewardIsApprovedLeaveMini_(employeeId,date)){excluded++;continue;}
-    eligible+=MH_FINANCE.DAILY_POINTS;
-    if(date>=today) continue;
-    elapsedEligible+=MH_FINANCE.DAILY_POINTS;
-    const recs=attendance.filter(r=>String(r['Chat ID']).trim()===employeeId&&mhDate_(r['التاريخ'])===date&&String(r['النوع'])==='حضور');
-    const attended=recs.length?recs[recs.length-1]:null;
-    const onTime=!!(attended&&String(attended['حالة الحضور'])==='في الموعد'&&Number(attended['دقائق التأخير']||0)===0);
-    const uniform=!!(attended&&String(attended['اليونيفورم'])==='ملتزم');
-    if(onTime&&uniform){commitment++;earned++;}
-    const hygieneRecord=hygiene.filter(r=>String(r['Chat ID']).trim()===employeeId&&mhDate_(r['التاريخ'])===date).slice(-1)[0];
-    if(hygieneRecord&&String(hygieneRecord['التقييم'])==='نظيف'){hygienePoints++;earned++;}
-    else if(!hygieneRecord||!String(hygieneRecord['التقييم']||'')){hygienePending++;}
+    const approvedLeave = leaves.some(r => {
+      if (String(r['Chat ID'] || '').trim() !== employeeId || String(r['الحالة'] || '').trim() !== 'مقبول') return false;
+      const leaveType = String(r['نوع الإذن'] || '').trim();
+      const leaveStart = mhDate_(r['تاريخ الإذن']);
+      const leaveEnd = mhDate_(r['تاريخ نهاية الإذن']) || leaveStart;
+      if (leaveType === 'يوم كامل') return !!leaveStart && date >= leaveStart && date <= leaveEnd;
+      return leaveType === 'بالساعات' && leaveStart === date && !isFlexibleShift && mhTimeMinutes_(r['من الساعة']) >= 0 && mhTimeMinutes_(r['من الساعة']) <= mhTimeMinutes_(shiftStart);
+    });
+    if (approvedLeave) { excluded++; continue; }
+
+    // Match V40: two scheduled points per shift; future shifts remain in
+    // the monthly denominator but are not scored before the shift ends.
+    eligible += MH_FINANCE.DAILY_POINTS;
+    if (date >= today) continue;
+    elapsedEligible += MH_FINANCE.DAILY_POINTS;
+
+    const records = attendance.filter(r =>
+      String(r['Chat ID'] || '').trim() === employeeId &&
+      mhDate_(r['التاريخ']) === date &&
+      String(r['النوع'] || '').trim() === 'حضور'
+    );
+    const attended = records.length ? records[records.length - 1] : null;
+    const isOnTime = !!(attended &&
+      String(attended['حالة الحضور'] || '').trim() === 'في الموعد' &&
+      Number(attended['دقائق التأخير'] || 0) === 0);
+    const isUniform = !!(attended && String(attended['اليونيفورم'] || '').trim() === 'ملتزم');
+    if (isOnTime) onTime++;
+    if (isUniform) uniform++;
+    if (isOnTime && isUniform) { commitment++; earned++; }
+
+    const dayHygiene = hygiene.filter(r =>
+      String(r['Chat ID'] || '').trim() === employeeId &&
+      mhDate_(r['التاريخ']) === date
+    ).slice(-1)[0];
+    const rating = dayHygiene ? String(dayHygiene['التقييم'] || '').trim() : '';
+    if (rating === 'نظيف') { hygienePoints++; earned++; }
+    else if (!rating) hygienePending++;
   }
-  const scoredEligible=Math.max(0,elapsedEligible-hygienePending);
-  const ratio=scoredEligible?Math.min(1,earned/scoredEligible):0;
-  const bonus=bonuses.filter(r=>String(r['Chat ID']).trim()===employeeId&&String(r['الشهر'])===month&&String(r['الحالة']||'معتمد')==='معتمد').reduce((s,r)=>s+Number(r['المبلغ بالجنيه']||0),0);
-  const deductionRows=mhRowsObjects_(mhSheet_(MH.SHEETS.deductions)).filter(r=>String(r['Chat ID']).trim()===employeeId&&String(mhDate_(r['تاريخ الواقعة'])).startsWith(month));
-  const approved=deductionRows.filter(r=>String(r['الحالة'])==='معتمد');
-  const pending=deductionRows.filter(r=>String(r['الحالة'])==='بانتظار اعتماد المدير');
+
+  const scoredEligible = Math.max(0, elapsedEligible - hygienePending);
+  const ratio = scoredEligible ? Math.min(1, earned / scoredEligible) : 0;
+  const monthHygiene = hygiene.filter(r =>
+    String(r['Chat ID'] || '').trim() === employeeId &&
+    String(mhDate_(r['التاريخ'])).startsWith(month)
+  );
+  const clean = monthHygiene.filter(r => String(r['التقييم'] || '').trim() === 'نظيف').length;
+  const notClean = monthHygiene.filter(r => String(r['التقييم'] || '').trim() === 'غير ملتزم').length;
+  const bonusRows = bonuses.filter(r =>
+    String(r['Chat ID'] || '').trim() === employeeId &&
+    String(r['الشهر'] || '').trim() === month &&
+    String(r['الحالة'] || 'معتمد').trim() === 'معتمد'
+  );
+  const bonus = bonusRows.reduce((sum,r) => sum + Number(r['المبلغ بالجنيه'] || 0), 0);
+  const deductionRows = mhRowsObjects_(mhSheet_(MH.SHEETS.deductions)).filter(r =>
+    String(r['Chat ID'] || '').trim() === employeeId &&
+    String(mhDate_(r['تاريخ الواقعة'])).startsWith(month)
+  );
+  const approved = deductionRows.filter(r => String(r['الحالة'] || '').trim() === 'معتمد');
+  const pending = deductionRows.filter(r => String(r['الحالة'] || '').trim() === 'بانتظار اعتماد المدير');
+
   return {
-    employeeName:employee.name,month,shifts,excluded,eligible,elapsedEligible,scoredEligible,earned,commitment,hygienePoints,hygienePending,
-    ratio,base:Math.round(MH_FINANCE.BASE_REWARD*ratio*100)/100,bonus,total:Math.round((MH_FINANCE.BASE_REWARD*ratio+bonus)*100)/100,
-    deductionsApproved:approved.reduce((s,r)=>s+Number(r['المبلغ بالجنيه']||0),0),
-    deductionsPending:pending.reduce((s,r)=>s+Number(r['المبلغ بالجنيه']||0),0),
-    deductionRows:deductionRows.slice(-30).reverse(),
-    hygieneRows:hygiene.filter(r=>String(r['Chat ID']).trim()===employeeId&&String(mhDate_(r['التاريخ'])).startsWith(month)).slice(-31).reverse()
+    employeeName: employee.name, month, shifts, excluded, eligible, elapsedEligible,
+    scoredEligible, earned, commitment, onTime, uniform, hygienePoints, hygienePending,
+    clean, notClean, ratio,
+    base: Math.round(MH_FINANCE.BASE_REWARD * ratio * 100) / 100,
+    bonus: Math.round(bonus * 100) / 100,
+    total: Math.round((MH_FINANCE.BASE_REWARD * ratio + bonus) * 100) / 100,
+    deductionsApproved: approved.reduce((s,r) => s + Number(r['المبلغ بالجنيه'] || 0), 0),
+    deductionsPending: pending.reduce((s,r) => s + Number(r['المبلغ بالجنيه'] || 0), 0),
+    deductionRows: deductionRows.slice(-30).reverse(),
+    hygieneRows: monthHygiene.slice(-31).reverse(),
+    bonusRows: bonusRows.slice(-31).reverse()
   };
 }
 
@@ -1776,18 +1846,10 @@ function createCashWithdrawalMini_(profile, body) {
       '🆔 رقم الطلب: ' + id + '\n👤 الموظف: ' + profile.name + '\n' +
       '💵 المبلغ المطلوب: ' + mhCashMoneyMini_(amount) + ' جنيه\n📝 الغرض: ' + purpose + '\n' +
       '━━━━━━━━━━━━━━━━━━\n⏳ الحالة: بانتظار موافقة الإدارة';
-    const employeeKeyboard = {keyboard:[
-      [{text:'✅ تسجيل حضور'},{text:'🚪 تسجيل انصراف'}],
-      [{text:'💵 طلب سلفة'},{text:'⏳ طلب إذن'}],
-      [{text:'💰 طلب سحب مبلغ'},{text:'💰 تسوية عهدة'}],
-      [{text:'📥 تسجيل جهاز'},{text:'📱 حالة الجهاز'}],
-      [{text:'💰 خصوماتي'},{text:'🏆 مكافآتي'}],
-      [{text:'📩 طلباتي'},{text:'📊 ملخص الشهر'}],
-      [{text:'📩 تقديم شكوى'},{text:'🔄 تحديث اللوحة'}],
-      [{text:'📨 شكاوي'}]
-    ],resize_keyboard:true,is_persistent:true,one_time_keyboard:false};
     let employeeNotified = false;
-    try { mhSendTelegramMini_(profile.chatId, employeeMessage, employeeKeyboard); employeeNotified = true; }
+    // Mini App migration: employee confirmations must never re-create the
+    // retired persistent Reply Keyboard. The Mini App is the primary menu.
+    try { mhSendTelegramMini_(profile.chatId, employeeMessage, { remove_keyboard: true }); employeeNotified = true; }
     catch (notifyError) { console.error('Unable to send V40-style employee confirmation for ' + id + ': ' + notifyError); }
     const adminMessage = '💰 طلب عهدة مالية جديد\n━━━━━━━━━━━━━━━━━━\n' +
       '🆔 رقم الطلب: ' + id + '\n👤 مقدم الطلب: ' + profile.name + '\n' +

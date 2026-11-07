@@ -1821,7 +1821,7 @@ function sendChoiceMenu_(chatId, text, rows) {
     }),
     resize_keyboard: true,
     one_time_keyboard: true,
-    is_persistent: true
+    is_persistent: false
   });
 }
 
@@ -2041,9 +2041,8 @@ function sendEmployeeRefresh_(chatId, employee, sheets) {
 
 // القائمة الرئيسية
 function sendMainMenu_(chatId, text, sheets) {
-  // V1.10.2 Mini App migration:
-  // Remove the legacy employee Reply Keyboard so Telegram does not keep
-  // showing the old bot menu below the chat composer.
+  // The Telegram Mini App is the primary interface. Retire the old persistent
+  // employee Reply Keyboard and send only the response text.
   return sendMessage_(
     chatId,
     String(text || "تم تحديث نظام MobiHub. افتح التطبيق من زر Open App في ملف البوت."),
@@ -2075,7 +2074,7 @@ function sendLocationRequest_(chatId, text) {
 
     resize_keyboard: true,
     one_time_keyboard: false,
-    is_persistent: true
+    is_persistent: false
   };
 
   return sendMessage_(
@@ -2099,7 +2098,7 @@ function sendCancelMenu_(chatId, text) {
 
     resize_keyboard: true,
     one_time_keyboard: false,
-    is_persistent: true
+    is_persistent: false
   };
 
   return sendMessage_(
@@ -2501,7 +2500,7 @@ function showEmployeeDevices_(chatId, employee, sheets) {
   const all = getSheetObjects_(sheets.devices);
   const isAdmin = isAdmin_(chatId, sheets);
   const rows = all.map(function(r,i){return {r:r,row:i+2};}).filter(function(x){return isAdmin || String(x.r["الموظف المسؤول Chat ID"]||"")===String(chatId) || String(x.r["مسؤول الاستلام Chat ID"]||"")===String(chatId);}).slice(-25).reverse();
-  if (!rows.length) { sendMessage_(chatId,"📱 لا توجد أجهزة مرتبطة بك حاليًا.", {keyboard:[[ {text:"📱 حالة الجهاز"},{text:"📥 تسجيل جهاز"} ],[{text:"🔄 تحديث اللوحة"}]],resize_keyboard:true}); return; }
+  if (!rows.length) { sendMessage_(chatId,"📱 لا توجد أجهزة مرتبطة بك حاليًا. افتح Mini App من زر Open App لمتابعة خدماتك.", {remove_keyboard:true}); return; }
   const buttons = rows.map(function(x){return [{text:String(x.r["رقم الطلب"])+" · "+String(x.r["اسم الجهاز"]||"جهاز").substring(0,25),callback_data:"dev|open|"+x.row}];});
   buttons.push([{text:"🏠 القائمة الرئيسية",callback_data:"dev|menu"}]);
   sendMessage_(chatId,"📱 أجهزتك / الأجهزة المسندة إليك\nعدد الأجهزة: " + rows.length + "\nاختر رقم الطلب لعرض التفاصيل:",{inline_keyboard:buttons});

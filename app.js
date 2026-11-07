@@ -758,20 +758,56 @@
   }
   async function loadFinanceSummary(){
     switchFinance('mine');
+    const summary = $('financeSummary');
+    const deductions = $('myDeductionRows');
+    summary.innerHTML = '<div class="loading-state">جاري تحميل تقرير المكافآت من سجلات الحضور والورديات...</div>';
+    deductions.innerHTML = '';
     try{
       const d=await api('reward_summary',{});
-      $('rewardMonthLabel').textContent=`${d.month} · ${d.employeeName}`;
-      $('financeSummary').innerHTML=`<div class="finance-grid">
-        <div class="finance-stat"><b>${Number(d.base).toFixed(2)} ج</b><small>المكافأة الأساسية التقديرية</small></div>
-        <div class="finance-stat"><b>${Number(d.bonus).toFixed(2)} ج</b><small>المكافآت الإضافية المعتمدة</small></div>
-        <div class="finance-stat"><b>${Number(d.total).toFixed(2)} ج</b><small>إجمالي المكافآت التقديري</small></div>
-        <div class="finance-stat"><b>${Number(d.deductionsApproved).toFixed(2)} ج</b><small>الخصومات المعتمدة</small></div>
-        <div class="finance-stat"><b>${Number(d.deductionsPending).toFixed(2)} ج</b><small>خصومات قيد المراجعة</small></div>
-        <div class="finance-stat"><b>${d.earned} / ${d.scoredEligible}</b><small>النقاط المحسومة</small></div>
-      </div><p class="muted">نسبة المكافأة الأساسية: ${Math.round(d.ratio*100)}% · تقييمات النظافة المعلقة: ${d.hygienePending} · الورديات المستبعدة بإذن معتمد: ${d.excluded}</p>`;
-      $('myDeductionRows').innerHTML=(d.deductionRows||[]).length?'<h3>آخر الخصومات</h3>'+d.deductionRows.map(r=>`<article class="record"><strong>${escapeHtml(r['نوع الخصم']||'خصم')} · ${escapeHtml(r['الحالة']||'')}</strong><small class="record-meta">${escapeHtml(r['تاريخ الواقعة']||'')} · ${escapeHtml(r['المبلغ بالجنيه']||0)} جنيه</small><p>${escapeHtml(r['السبب']||'')}</p></article>`).join(''):'<p class="muted">لا توجد خصومات مسجلة هذا الشهر.</p>';
-    }catch(e){financeMessage(e.message,true);}
+      const money=n=>`${Number(n||0).toLocaleString('en-EG',{minimumFractionDigits:2,maximumFractionDigits:2})} جنيه`;
+      const pct=Math.max(0,Math.min(100,Math.round(Number(d.ratio||0)*100)));
+      const pointsLabel=`${Number(d.earned||0)} / ${Number(d.scoredEligible||0)}`;
+      const noShift=Number(d.shifts||0)===0;
+      summary.innerHTML=`
+        <section class="reward-report">
+          <header class="reward-report-head">
+            <div><span class="reward-kicker">MOBIHUB REWARDS</span><h3>🏆 مكافآتي | ${escapeHtml(d.month||'')}</h3><small>${escapeHtml(d.employeeName||'')}</small></div>
+            <span class="reward-month-chip">${escapeHtml(d.month||'')}</span>
+          </header>
+          <div class="reward-main-amount">
+            <small>المكافأة الأساسية التقديرية</small>
+            <strong>${money(d.base)} <i>/ 500.00 جنيه</i></strong>
+            <div class="reward-progress"><span style="width:${pct}%"></span></div>
+            <small>${pct}% من المكافأة الأساسية</small>
+          </div>
+          <div class="reward-score-grid">
+            <article><small>النقاط المحققة / المحسومة</small><b>${pointsLabel}</b></article>
+            <article><small>إجمالي نقاط الشهر المجدولة</small><b>${Number(d.eligible||0)}</b></article>
+            <article><small>الورديات المحتسبة</small><b>${Number(d.shifts||0)}</b></article>
+            <article><small>الورديات المستبعدة</small><b>${Number(d.excluded||0)}</b></article>
+          </div>
+          <h4>📌 تفاصيل النقاط</h4>
+          <div class="reward-detail-row"><span>🤝 الالتزام (الحضور في الموعد + اليونيفورم)</span><b>${Number(d.commitment||0)} نقطة</b></div>
+          <div class="reward-detail-row"><span>✅ الحضور في الموعد</span><b>${Number(d.onTime||0)}</b></div>
+          <div class="reward-detail-row"><span>👕 الالتزام باليونيفورم</span><b>${Number(d.uniform||0)}</b></div>
+          <div class="reward-detail-row"><span>🧹 نظافة المكان</span><b>${Number(d.hygienePoints||0)} نقطة</b></div>
+          <div class="reward-detail-row"><span>⏳ تقييمات النظافة المعلقة</span><b>${Number(d.hygienePending||0)} يوم</b></div>
+          <div class="reward-detail-row"><span>🧽 تقييمات نظافة معتمدة (نظيف / غير ملتزم)</span><b>${Number(d.clean||0)} / ${Number(d.notClean||0)}</b></div>
+          <h4>💰 ملخص المستحقات</h4>
+          <div class="reward-detail-row"><span>🎁 مكافآت إضافية معتمدة</span><b>${money(d.bonus)}</b></div>
+          <div class="reward-detail-row reward-total"><span>💵 إجمالي المكافآت التقديري</span><b>${money(d.total)}</b></div>
+          ${noShift?'<div class="reward-notice warning">لا توجد ورديات مرتبطة بحسابك في جدول الورديات لهذا الشهر. لذلك لا توجد نقاط محسوبة. راجع الإدارة للتأكد من تعيين الوردية.</div>':''}
+          <div class="reward-notice">💡 نقطة الالتزام لا تُحسب إلا عند الجمع بين الحضور في الموعد والالتزام باليونيفورم. نقطة النظافة تُحتسب بعد تقييم المدير. التقييمات المعلقة لا تدخل في النسبة حتى لا تُحسب كنقاط صفرية. النسبة الحالية تخص الورديات المكتملة قبل اليوم، والورديات القادمة تظهر في إجمالي الشهر المجدول.</div>
+        </section>`;
+      deductions.innerHTML=(d.deductionRows||[]).length
+        ? '<h3>آخر الخصومات المعتمدة والمعلقة</h3>'+d.deductionRows.map(r=>`<article class="record"><strong>${escapeHtml(r['نوع الخصم']||'خصم')} · ${escapeHtml(r['الحالة']||'')}</strong><small class="record-meta">${escapeHtml(r['تاريخ الواقعة']||'')} · ${money(r['المبلغ بالجنيه'])}</small><p>${escapeHtml(r['السبب']||'')}</p></article>`).join('')
+        : '<p class="muted">لا توجد خصومات مسجلة لهذا الشهر.</p>';
+    }catch(e){
+      summary.innerHTML='';
+      financeMessage(e.message || 'تعذر تحميل تقرير المكافآت. راجع اتصال التطبيق ونسخة Apps Script المنشورة.',true);
+    }
   }
+
   async function loadFinanceEmployees(){
     const rows=await api('active_employees',{});
     const options=rows.map(r=>`<option value="${escapeHtml(r['Chat ID'])}">${escapeHtml(r['اسم الموظف'])}</option>`).join('');
