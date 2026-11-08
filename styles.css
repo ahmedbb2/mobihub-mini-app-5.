@@ -167,3 +167,15 @@ body.modal-open{overflow:hidden;touch-action:none}
 .reward-main-amount{background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.09);border-radius:14px;padding:14px}.reward-main-amount small{display:block;color:#aebbc6;font-size:11px}.reward-main-amount strong{display:block;color:#ffad63;font-size:23px;margin:7px 0}.reward-main-amount strong i{font-style:normal;color:#aebbc6;font-size:11px;font-weight:500}.reward-progress{height:8px;background:#344451;border-radius:20px;overflow:hidden;margin:8px 0}.reward-progress span{display:block;height:100%;background:linear-gradient(90deg,#e88b32,#ffb766);border-radius:20px}
 .reward-score-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.reward-score-grid article{background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:11px}.reward-score-grid small{display:block;color:#aebbc6;font-size:10px;line-height:1.5}.reward-score-grid b{display:block;color:#ffad63;font-size:20px;margin-top:5px}.reward-report h4{font-size:14px;margin:5px 0 0;color:#fff}.reward-detail-row{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;padding:9px 0;border-bottom:1px solid rgba(255,255,255,.08);font-size:12px;line-height:1.6}.reward-detail-row span{color:#c2ccd4}.reward-detail-row b{color:#ffbd7c;white-space:nowrap}.reward-detail-row.reward-total{border:0;background:rgba(255,173,99,.1);border-radius:10px;padding:12px}.reward-notice{background:rgba(91,132,156,.12);border:1px solid rgba(135,174,194,.16);border-radius:11px;padding:11px;color:#bdcbd4;font-size:11px;line-height:1.8}.reward-notice.warning{background:rgba(255,173,99,.1);border-color:rgba(255,173,99,.22);color:#ffd09f}.loading-state{padding:18px;text-align:center;color:#aebbc6;font-size:13px}
 @media(max-width:380px){.reward-report{padding:12px}.reward-main-amount strong{font-size:19px}.reward-detail-row{font-size:11px}}
+
+
+/* V1.10.5 device module */
+.manager-module-toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:12px 0 18px}
+.manager-module-toolbar input{flex:1;min-width:180px}
+.manager-row-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.inspection-device-group{margin:14px 0;padding:12px;border:1px solid var(--border,#e5e7eb);border-radius:14px}
+.inspection-item{padding:10px 0;border-bottom:1px solid var(--border,#e5e7eb)}
+.inspection-item:last-child{border-bottom:0}
+.inspection-item summary{font-weight:700;cursor:pointer}
+.inspection-item p{margin:8px 0 0;color:var(--muted,#667085);line-height:1.7}
+.manager-device-detail p{margin:8px 0;line-height:1.6}

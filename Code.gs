@@ -212,6 +212,25 @@ function doPost(e) {
         data = registerDeviceMini_(profile, body);
         break;
 
+      case 'device_list':
+        data = deviceListMiniV105_(profile);
+        break;
+      case 'device_detail':
+        data = deviceDetailMiniV105_(profile, body);
+        break;
+      case 'device_staff':
+        data = deviceStaffMiniV105_(profile);
+        break;
+      case 'device_status_update':
+        data = deviceStatusUpdateMiniV105_(profile, body);
+        break;
+      case 'device_transfer':
+        data = deviceTransferMiniV105_(profile, body);
+        break;
+      case 'device_inspection_catalog':
+        data = deviceInspectionCatalogMini_();
+        break;
+
       case 'complaint_create':
         data = createComplaint_(profile, body);
         break;
@@ -562,6 +581,11 @@ function listData_(profile, entity) {
 
   const rows = rowsAsObjects_(spreadsheet_(), definition.sheet).map(function(row, index) { row.__row = index + 2; return row; });
 
+  // Finance role sees only personal-advance rows from the general requests sheet.
+  if (entity === 'requests' && role === 'finance') {
+    return rows.filter(r => String(r['نوع الطلب'] || '').trim() === 'سلفة').slice(-100).reverse();
+  }
+
   const visibleRows = canViewAll
     ? rows
     : rows.filter(function(row) {
@@ -608,7 +632,7 @@ function managerDashboard_(profile) {
   const latest = {};
   attendance.forEach(r => { const id=String(r['Chat ID']||'').trim(); if(id) latest[id]=r; });
   const presentNow = Object.keys(latest).filter(id => String(latest[id]['النوع']||'').trim() === 'حضور').length;
-  const requests = safeRows(MH.SHEETS.requests, modules.requests);
+  const requests = safeRows(MH.SHEETS.requests, modules.requests || modules.finance);
   const leaves = safeRows(MH.SHEETS.leaves, modules.requests || modules.daily);
   const cash = safeRows(MH.SHEETS.cash, modules.finance);
   const complaints = safeRows(MH.SHEETS.complaints, modules.requests);
@@ -616,7 +640,9 @@ function managerDashboard_(profile) {
   const absences = safeRows(MH.SHEETS.absences, modules.daily);
   const pendingRequests = requests.filter(r => String(r['القرار']||'').trim() === 'قيد الانتظار').length;
   const pendingLeaves = leaves.filter(r => ['بانتظار مراجعة المدير','قيد الانتظار','معلق'].includes(String(r['الحالة']||'').trim()) && String(r['قرار المدير']||'').trim() !== 'مقبول').length;
-  const pendingCash = cash.filter(r => ['قيد المراجعة','طلب جديد','بانتظار مراجعة المدير','بانتظار الصرف','بانتظار مراجعة التسوية','بانتظار تأكيد استلام المتبقي'].includes(String(r['الحالة']||r['حالة التسوية']||'').trim()) || ['بانتظار الصرف','بانتظار مراجعة التسوية','بانتظار تأكيد استلام المتبقي'].includes(String(r['حالة الصرف']||r['حالة التسوية']||'').trim())).length;
+  const pendingCustody = cash.filter(r => ['قيد المراجعة','طلب جديد','بانتظار مراجعة المدير','بانتظار الصرف','بانتظار مراجعة التسوية','بانتظار تأكيد استلام المتبقي'].includes(String(r['الحالة']||r['حالة التسوية']||'').trim()) || ['بانتظار الصرف','بانتظار مراجعة التسوية','بانتظار تأكيد استلام المتبقي'].includes(String(r['حالة الصرف']||r['حالة التسوية']||'').trim())).length;
+  const pendingAdvances = requests.filter(r => String(r['نوع الطلب']||'').trim()==='سلفة' && String(r['القرار']||'').trim()==='قيد الانتظار').length;
+  const pendingCash = pendingCustody + pendingAdvances;
   const openComplaints = complaints.filter(r => !['مغلقة','تم الحل'].includes(String(r['الحالة']||'').trim()));
   const activeDevices = devices.filter(r => String(r['حالة الجهاز']||'').trim() !== 'تم التسليم');
   const pendingAbsences = absences.filter(r => /انتظار|مراجعة|معلق/.test(String(r['الحالة']||r['قرار المدير']||'')));
@@ -648,7 +674,7 @@ function managerDashboard_(profile) {
       checkedInToday:modules.daily?Object.keys(latest).length:null,
       pendingRequests:modules.requests?pendingRequests:null,
       pendingLeaves:(modules.requests||modules.daily)?pendingLeaves:null,
-      pendingCash:modules.finance?pendingCash:null,
+      pendingCash:modules.finance?pendingCash:null, pendingAdvances:modules.finance?pendingAdvances:null, pendingCustody:modules.finance?pendingCustody:null,
       openComplaints:modules.requests?openComplaints.length:null,
       activeDevices:modules.devices?activeDevices.length:null,
       pendingAbsences:modules.daily?pendingAbsences.length:null
@@ -1268,18 +1294,27 @@ function createCashRequest_(profile, body) {
   const amountRaw = String(body.amount ?? '').replace(/[٬,]/g, '').trim();
   const amount = Number(amountRaw);
   if (!/^\d+(?:\.\d{1,2})?$/.test(amountRaw) || !Number.isFinite(amount) || amount <= 0 || amount > 1000000) throw new Error('INVALID_CASH_AMOUNT');
-  const sh = mhSheet_(MH.SHEETS.cash); mhAssertHeaders_(sh, MH_CASH.HEADERS);
+
+  // V40 schema: a personal advance is a request row of type "سلفة".
+  // "طلبات السحب" remains exclusive to purchase cash/custody.
+  const sh = mhSheet_(MH.SHEETS.requests);
+  const map = mhAssertHeaders_(sh, MH_REQUESTS.REQUEST_HEADERS);
   const lock = LockService.getScriptLock(); lock.waitLock(15000);
   try {
-    const id = 'CASH-' + Utilities.formatDate(new Date(), MH.TZ, 'yyyyMMdd-HHmmss') + '-' + String(profile.chatId).slice(-4);
-    const row = new Array(MH_CASH.HEADERS.length).fill('');
-    const set = (h,v) => row[MH_CASH.HEADERS.indexOf(h)] = v;
-    set('رقم الطلب',id); set('التاريخ والوقت',mhNow_()); set('Chat ID',profile.chatId); set('اسم الموظف',profile.name);
-    set('المبلغ المطلوب بالجنيه',amount); set('الغرض',''); set('الحالة','قيد المراجعة'); set('حالة الصرف','لم يصرف');
-    set('حالة العهدة','غير مطلوبة بعد'); set('تاريخ آخر تحديث',mhNow_()); sh.appendRow(row);
-    return {submitted:true,requestId:id,status:'قيد المراجعة',message:'تم إرسال طلب السلفة/العهدة إلى الإدارة للمراجعة.'};
+    const rowNum = sh.getLastRow() + 1;
+    const details = amount.toLocaleString('en-US',{maximumFractionDigits:2}) + ' جنيه';
+    sh.appendRow([mhNow_(),profile.chatId,profile.name,'سلفة',details,MH_REQUESTS.PENDING_REQUEST,amount,'','','','','']);
+    const requestId = 'ADV-' + Utilities.formatDate(new Date(),MH.TZ,'yyyyMMdd-HHmmss') + '-' + String(profile.chatId).slice(-4);
+    const employeeMessage = '💵 تم تسجيل طلب السلفة بنجاح\n━━━━━━━━━━━━━━━━━━\n🆔 رقم الطلب: '+requestId+'\n👤 الموظف: '+profile.name+'\n💰 المبلغ المطلوب: '+details+'\n⏳ الحالة: قيد مراجعة الإدارة';
+    let employeeNotified = false;
+    try { mhSendTelegramMini_(profile.chatId,employeeMessage,{remove_keyboard:true}); employeeNotified=true; }
+    catch(e) { console.error('Advance employee confirmation failed: '+e); }
+    const adminMessage = '💵 طلب سلفة جديد\n━━━━━━━━━━━━━━━━━━\n🆔 رقم الطلب: '+requestId+'\n👤 الموظف: '+profile.name+'\n💰 المبلغ المطلوب: '+details+'\n📅 '+mhNow_()+'\n⏳ الحالة: قيد المراجعة\n\nافتح لوحة MobiHub لمراجعة الطلب.';
+    const notification = mhNotifyRequestAdminsMini_(adminMessage,requestId);
+    return {submitted:true,requestId:requestId,row:rowNum,status:MH_REQUESTS.PENDING_REQUEST,message:'تم إرسال طلب السلفة إلى الإدارة للمراجعة.',employeeNotified:employeeNotified,adminNotificationsSent:notification.sent,adminNotificationsFailed:notification.failed};
   } finally { lock.releaseLock(); }
 }
+
 function decideCashRequest_(profile, body) {
   mhRequireRole_(profile, MH_CASH.REVIEW_ROLES);
   const rowNum=Number(body.row), decision=String(body.decision||'').trim(), note=String(body.note||'').trim();
@@ -1462,16 +1497,29 @@ function createLeaveRequest_(profile, body) {
   return {submitted:true, requestId:id, status:MH_REQUESTS.PENDING_LEAVE, message:'تم إرسال طلب الإذن. لا يعتبر معتمدًا قبل موافقة الإدارة.'};
 }
 function decideEmployeeRequest_(profile, body) {
-  mhRequireRole_(profile,['super_admin','admin','supervisor']);
+  mhRequireRole_(profile,['super_admin','admin','supervisor','finance']);
   const rowNum=Number(body.row), decision=String(body.decision || '');
   if (!Number.isInteger(rowNum)||rowNum<2||!['مقبول','مرفوض'].includes(decision)) throw new Error('INVALID_DECISION');
   const sh=mhSheet_(MH.SHEETS.requests); const map=mhAssertHeaders_(sh,MH_REQUESTS.REQUEST_HEADERS);
   if(rowNum>sh.getLastRow()) throw new Error('REQUEST_NOT_FOUND');
-  const current=String(sh.getRange(rowNum,map['القرار']).getDisplayValue());
+  const values=sh.getRange(rowNum,1,1,sh.getLastColumn()).getDisplayValues()[0];
+  const get=h=>values[map[h]-1] || '';
+  if(profile.role==='finance' && String(get('نوع الطلب')).trim()!=='سلفة') throw new Error('FORBIDDEN');
+  const current=String(get('القرار')).trim();
   if(current!==MH_REQUESTS.PENDING_REQUEST) throw new Error('REQUEST_ALREADY_REVIEWED');
   const lock=LockService.getScriptLock(); lock.waitLock(15000);
   try { sh.getRange(rowNum,map['القرار']).setValue(decision); } finally { lock.releaseLock(); }
-  return {decided:true,status:decision};
+  let employeeNotified=false;
+  try {
+    const isAdvance=String(get('نوع الطلب')).trim()==='سلفة';
+    const resultText=isAdvance
+      ? (decision==='مقبول'?'✅ تمت الموافقة على طلب السلفة.':'❌ تم رفض طلب السلفة.')
+      : (decision==='مقبول'?'✅ تمت الموافقة على طلبك.':'❌ تم رفض طلبك.');
+    const amountLine=isAdvance?'\n\n💰 المبلغ: '+String(get('مبلغ السلفة بالجنيه')||get('التفاصيل')||''):'';
+    mhSendTelegramMini_(String(get('Chat ID')).trim(),resultText+amountLine+'\n👤 تمت المراجعة بواسطة: '+mhManagerName_(profile),{remove_keyboard:true});
+    employeeNotified=true;
+  } catch(notifyError) { console.error('Employee request decision notification failed: '+notifyError); }
+  return {decided:true,status:decision,employeeNotified:employeeNotified};
 }
 function decideLeaveRequest_(profile, body) {
   mhRequireRole_(profile,['super_admin','admin','supervisor']);
@@ -1855,12 +1903,8 @@ function createCashWithdrawalMini_(profile, body) {
       '🆔 رقم الطلب: ' + id + '\n👤 مقدم الطلب: ' + profile.name + '\n' +
       '💵 المبلغ المطلوب: ' + mhCashMoneyMini_(amount) + ' جنيه\n📝 الغرض: ' + purpose + '\n' +
       '━━━━━━━━━━━━━━━━━━\n⏳ الحالة: بانتظار موافقة الإدارة';
-    const adminKeyboard = {inline_keyboard:[
-      [{text:'✅ موافقة',callback_data:'adm|cashact|approve|' + rowNum},{text:'❌ رفض',callback_data:'adm|cashact|reject|' + rowNum}],
-      [{text:'💸 تسجيل صرف العهدة',callback_data:'adm|cashact|paid|' + rowNum}]
-    ]};
-    mhNotifyFinanceAdminsMini_(adminMessage, adminKeyboard, id);
-    return {submitted:true,requestId:id,status:'قيد المراجعة',employeeMessage:employeeMessage,employeeNotified:employeeNotified,adminNotificationAttempted:true};
+    const notification=mhNotifyFinanceAdminsMini_(adminMessage+'\nافتح لوحة MobiHub لمراجعة طلب العهدة والصرف والتسوية.',null,id);
+    return {submitted:true,requestId:id,status:'قيد المراجعة',employeeMessage:employeeMessage,employeeNotified:employeeNotified,adminNotificationsSent:notification.sent,adminNotificationsFailed:notification.failed};
   } finally { lock.releaseLock(); }
 }
 function mhCashMoneyMini_(value) {
@@ -1879,18 +1923,41 @@ function mhSendTelegramMini_(chatId, text, replyMarkup) {
   return result;
 }
 function mhNotifyFinanceAdminsMini_(message, keyboard, requestId) {
-  const ss = spreadsheet_();
-  const managers = rowsAsObjects_(ss, MH.SHEETS.managers);
-  const recipients = [];
-  const mainAdmin = '9134455704';
-  recipients.push(mainAdmin);
+  const ss=spreadsheet_(), managers=rowsAsObjects_(ss,MH.SHEETS.managers), recipients=[];
+  const rootId=String(PropertiesService.getScriptProperties().getProperty('ADMIN_ID')||'9134455704').trim();
+  if(/^\d{5,20}$/.test(rootId)) recipients.push(rootId);
   managers.forEach(r=>{
     const id=String(r['Chat ID']||'').trim(), role=String(r['الصلاحية']||'').trim(), active=String(r['الحالة']||'نشط').trim()==='نشط';
-    if(id && active && ['Super Admin','Admin','Finance'].includes(role) && !recipients.includes(id)) recipients.push(id);
+    if(id&&active&&['Super Admin','Admin','Finance'].includes(role)&&!recipients.includes(id)) recipients.push(id);
   });
-  const errors=[];
-  recipients.forEach(id=>{try{mhSendTelegramMini_(id,message,keyboard);}catch(e){errors.push(String(id));console.error('MobiHub finance notification failed for '+id+': '+e);}});
-  if(errors.length) console.warn('Cash withdrawal notification failures: '+errors.join(','));
+  let sent=0,failed=0;
+  recipients.forEach(id=>{
+    try { mhSendTelegramMini_(id,message+(requestId?'\n\nمرجع الإشعار: '+requestId:''),keyboard||{remove_keyboard:true}); sent++; }
+    catch(e) { failed++; console.error('MobiHub finance notification failed for '+id+': '+e); }
+  });
+  return {sent:sent,failed:failed,recipients:recipients.length};
+}
+
+
+/* Telegram notification delivery for personal advance requests. */
+function mhNotifyRequestAdminsMini_(message, requestId) {
+  const ss=spreadsheet_();
+  const managers=rowsAsObjects_(ss,MH.SHEETS.managers);
+  const recipients=[];
+  const rootId=String(PropertiesService.getScriptProperties().getProperty('ADMIN_ID')||'9134455704').trim();
+  if(/^\d{5,20}$/.test(rootId)) recipients.push(rootId);
+  managers.forEach(r=>{
+    const id=String(r['Chat ID']||'').trim();
+    const role=String(r['الصلاحية']||'').trim();
+    const active=String(r['الحالة']||'نشط').trim()==='نشط';
+    if(id&&active&&['Super Admin','Admin','Finance'].includes(role)&&!recipients.includes(id)) recipients.push(id);
+  });
+  let sent=0,failed=0;
+  recipients.forEach(id=>{
+    try { mhSendTelegramMini_(id,message+'\n\nمرجع الإشعار: '+requestId,{remove_keyboard:true}); sent++; }
+    catch(e) { failed++; console.error('Advance admin notification failed for '+id+': '+e); }
+  });
+  return {sent:sent,failed:failed,recipients:recipients.length};
 }
 
 
@@ -1994,7 +2061,7 @@ function managerSendNotification_(profile,body) {
 function managerCreateAdmin_(profile,body) {
   mhRequireRole_(profile,['super_admin']);
   const id=String(body.chatId||'').trim(), name=String(body.name||'').trim(), role=String(body.role||'Admin').trim();
-  if(!/^\\d{5,20}$/.test(id)||name.length<2||name.length>80||MH_ADMIN_ROLES.indexOf(role)<0) throw new Error('INVALID_MANAGER_DATA');
+  if(!/^\d{5,20}$/.test(id)||name.length<2||name.length>80||MH_ADMIN_ROLES.indexOf(role)<0) throw new Error('INVALID_MANAGER_DATA');
   const sh=mhEnsureSheet_('المديرين',MH_MANAGER_HEADERS), rows=mhRowsObjects_(sh);
   if(rows.some(r=>String(r['Chat ID']).trim()===id)) throw new Error('MANAGER_ALREADY_EXISTS');
   sh.appendRow([id,name,role,'نشط',profile.chatId,mhStamp_(),mhStamp_()]);
@@ -2015,4 +2082,220 @@ function managerUpdateAdmin_(profile,body) {
   if(hasStatus) sh.getRange(found.__row,map['الحالة']).setValue(status);
   sh.getRange(found.__row,map['آخر تحديث']).setValue(mhStamp_());
   return {updated:true,chatId:id,role:role||String(found['الصلاحية']),status:hasStatus?status:String(found['الحالة'])};
+}
+
+
+
+/* V1.10.5 device detail, history, transfer and inspection catalog integration.
+ * Uses the existing V1.10.4 sheet schema and authorization model.
+ */
+function deviceListMiniV105_(profile) {
+  const ss = spreadsheet_();
+  const rows = rowsAsObjects_(ss, MH.SHEETS.devices);
+  const admin = ['super_admin','admin'].includes(profile.role);
+  const intakeAllowed = deviceIntakeAllowed_(profile);
+  return rows.filter(r => {
+    const intakeId = String(r['مسؤول الاستلام Chat ID'] || '').trim();
+    const employeeId = String(r['الموظف المسؤول Chat ID'] || '').trim();
+    return admin || (intakeAllowed && intakeId === String(profile.chatId)) ||
+      employeeId === String(profile.chatId);
+  }).slice(-150).reverse().map(r => ({
+    orderId:String(r['رقم الطلب'] || ''),
+    receivedAt:String(r['تاريخ الاستلام'] || ''),
+    deviceName:String(r['اسم الجهاز'] || ''),
+    customerName:String(r['اسم العميل'] || ''),
+    issue:String(r['المشكلة المسجلة'] || ''),
+    intakeId:String(r['مسؤول الاستلام Chat ID'] || ''),
+    intakeName:String(r['مسؤول الاستلام'] || ''),
+    employeeId:String(r['الموظف المسؤول Chat ID'] || ''),
+    employeeName:String(r['الموظف المسؤول'] || ''),
+    department:String(r['القسم'] || ''),
+    status:String(r['حالة الجهاز'] || ''),
+    location:String(r['مكان الجهاز'] || ''),
+    updatedAt:String(r['آخر تحديث'] || '')
+  })).filter(r => r.orderId);
+}
+
+function deviceDetailMiniV105_(profile, body) {
+  const orderId = String(body.orderId || '').trim();
+  if (!orderId) throw new Error('DEVICE_NOT_FOUND');
+  const ss = spreadsheet_();
+  const rows = rowsAsObjects_(ss, MH.SHEETS.devices);
+  const row = rows.find(r => String(r['رقم الطلب'] || '').trim() === orderId);
+  if (!row) throw new Error('DEVICE_NOT_FOUND');
+  const admin = ['super_admin','admin'].includes(profile.role);
+  const intakeAllowed = deviceIntakeAllowed_(profile);
+  const canView = admin ||
+    (intakeAllowed && String(row['مسؤول الاستلام Chat ID'] || '').trim() === String(profile.chatId)) ||
+    String(row['الموظف المسؤول Chat ID'] || '').trim() === String(profile.chatId);
+  if (!canView) throw new Error('FORBIDDEN');
+  const history = rowsAsObjects_(ss, 'سجل حركة الأجهزة')
+    .filter(r => String(r['رقم الطلب'] || '').trim() === orderId)
+    .slice(-30).reverse();
+  return {
+    device: {
+      orderId:orderId,
+      receivedAt:String(row['تاريخ الاستلام'] || ''),
+      deviceName:String(row['اسم الجهاز'] || ''),
+      customerName:String(row['اسم العميل'] || ''),
+      issue:String(row['المشكلة المسجلة'] || ''),
+      intakeName:String(row['مسؤول الاستلام'] || ''),
+      employeeId:String(row['الموظف المسؤول Chat ID'] || ''),
+      employeeName:String(row['الموظف المسؤول'] || ''),
+      department:String(row['القسم'] || ''),
+      status:String(row['حالة الجهاز'] || ''),
+      location:String(row['مكان الجهاز'] || ''),
+      updatedAt:String(row['آخر تحديث'] || '')
+    },
+    history:history
+  };
+}
+
+function deviceStaffMiniV105_(profile) {
+  if (!deviceIntakeAllowed_(profile) && !['super_admin','admin'].includes(profile.role)) {
+    throw new Error('FORBIDDEN');
+  }
+  return rowsAsObjects_(spreadsheet_(), MH.SHEETS.employees)
+    .filter(r => String(r['Chat ID'] || '').trim() && mhEmployeeIsActive_(r))
+    .filter(r => !mhIsIntakeJob_(mhEmployeeJob_(r)))
+    .map(r => ({
+      chatId:String(r['Chat ID']).trim(),
+      name:String(r['اسم الموظف'] || ''),
+      job:mhEmployeeJob_(r)
+    })).slice(0,150);
+}
+
+function deviceStatusUpdateMiniV105_(profile, body) {
+  const orderId = String(body.orderId || '').trim();
+  const status = String(body.status || '').trim();
+  const location = String(body.location || '').trim();
+  const note = String(body.note || '').trim().slice(0,500);
+  if (!orderId || MH_DEVICE_STATUSES.indexOf(status) < 0) throw new Error('INVALID_DEVICE_UPDATE');
+  if (location && MH_DEVICE_LOCATIONS.indexOf(location) < 0) throw new Error('INVALID_DEVICE_LOCATION');
+  const ss = spreadsheet_();
+  const sh = ss.getSheetByName(MH.SHEETS.devices);
+  if (!sh) throw new Error('DEVICE_SHEETS_MISSING');
+  mhAssertHeaders_(sh, MH_DEVICE.DEVICE_HEADERS);
+  const rows = mhRowsObjects_(sh);
+  const found = rows.find(r => String(r['رقم الطلب'] || '').trim() === orderId);
+  if (!found) throw new Error('DEVICE_NOT_FOUND');
+  const admin = ['super_admin','admin'].includes(profile.role);
+  const intakeAllowed = deviceIntakeAllowed_(profile);
+  const assigned = String(found['الموظف المسؤول Chat ID'] || '').trim() === String(profile.chatId);
+  if (!admin && !intakeAllowed && !assigned) throw new Error('FORBIDDEN');
+  const movement = mhEnsureSheet_('سجل حركة الأجهزة', MH_DEVICE.MOVEMENT_HEADERS);
+  const row = found.__row;
+  const oldStatus = String(found['حالة الجهاز'] || '');
+  const oldLocation = String(found['مكان الجهاز'] || '');
+  const now = mhStamp_();
+  const lock = LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    const map = mhHeaderMap_(sh);
+    sh.getRange(row, map['حالة الجهاز']).setValue(status);
+    if (location) sh.getRange(row, map['مكان الجهاز']).setValue(location);
+    sh.getRange(row, map['آخر تحديث']).setValue(now);
+    movement.appendRow([now, orderId, 'تحديث حالة الجهاز', profile.chatId, profile.name, String(found['الموظف المسؤول Chat ID'] || ''), String(found['الموظف المسؤول'] || ''), status, location || oldLocation, note, profile.chatId, profile.name]);
+  } finally { lock.releaseLock(); }
+  return {orderId:orderId,status:status,location:location || oldLocation,previousStatus:oldStatus,updatedAt:now};
+}
+
+function deviceTransferMiniV105_(profile, body) {
+  if (!['super_admin','admin'].includes(profile.role)) throw new Error('FORBIDDEN');
+  const orderId = String(body.orderId || '').trim();
+  const employeeId = String(body.employeeId || '').trim();
+  if (!orderId || !employeeId) throw new Error('INVALID_DEVICE_TRANSFER');
+  const ss = spreadsheet_();
+  const sh = ss.getSheetByName(MH.SHEETS.devices);
+  if (!sh) throw new Error('DEVICE_SHEETS_MISSING');
+  mhAssertHeaders_(sh, MH_DEVICE.DEVICE_HEADERS);
+  const rows = mhRowsObjects_(sh);
+  const found = rows.find(r => String(r['رقم الطلب'] || '').trim() === orderId);
+  if (!found) throw new Error('DEVICE_NOT_FOUND');
+  const target = rowsAsObjects_(ss, MH.SHEETS.employees).find(r =>
+    String(r['Chat ID'] || '').trim() === employeeId && mhEmployeeIsActive_(r) &&
+    !mhIsIntakeJob_(mhEmployeeJob_(r)));
+  if (!target) throw new Error('EMPLOYEE_NOT_FOUND_OR_INACTIVE');
+  const movement = mhEnsureSheet_('سجل حركة الأجهزة', MH_DEVICE.MOVEMENT_HEADERS);
+  const map = mhHeaderMap_(sh), row = found.__row, now = mhStamp_();
+  const oldId = String(found['الموظف المسؤول Chat ID'] || '');
+  const oldName = String(found['الموظف المسؤول'] || '');
+  const lock = LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    sh.getRange(row, map['الموظف المسؤول Chat ID']).setValue(employeeId);
+    sh.getRange(row, map['الموظف المسؤول']).setValue(String(target['اسم الموظف'] || ''));
+    sh.getRange(row, map['القسم']).setValue(mhEmployeeJob_(target));
+    sh.getRange(row, map['آخر تحديث']).setValue(now);
+    movement.appendRow([now, orderId, 'تحويل مسؤولية الجهاز', oldId, oldName, employeeId, String(target['اسم الموظف'] || ''), String(found['حالة الجهاز'] || ''), String(found['مكان الجهاز'] || ''), 'تحويل من Mini App بواسطة ' + profile.name, profile.chatId, profile.name]);
+  } finally { lock.releaseLock(); }
+  const message = 'تم إسناد الجهاز رقم ' + orderId + ' إليك بواسطة ' + profile.name;
+  try { mhTelegramSend_(employeeId, message); mhAppendNotificationLog_(employeeId, 'إسناد جهاز', 'تم الإرسال', ''); }
+  catch (e) { mhAppendNotificationLog_(employeeId, 'إسناد جهاز', 'فشل الإرسال', String(e.message || e)); }
+  return {orderId:orderId,from:oldName,to:String(target['اسم الموظف'] || ''),updatedAt:now};
+}
+
+
+const MH_DEVICE_INSPECTION_CATALOG_ = {"iphone": {"name": "iPhone", "items": ["الشاشة: الصورة والألوان والبقع والبيكسلات الميتة", "اللمس: الاستجابة في جميع أجزاء الشاشة", "سطوع الشاشة والسطوع التلقائي", "True Tone وNight Shift", "معدل تحديث الشاشة ProMotion إن وجد", "Face ID وفتح القفل", "الكاميرا الأمامية: الصورة والتركيز", "الكاميرا الأمامية: تسجيل الفيديو", "الكاميرا الخلفية الرئيسية: الصورة والتركيز", "الكاميرا الخلفية فائقة الاتساع إن وجدت", "كاميرا التقريب Telephoto إن وجدت", "الفلاش الخلفي", "وضع Portrait والعزل", "تثبيت الصورة والتركيز أثناء الفيديو", "سماعة المكالمات العلوية", "السماعة الخارجية ووضوح الصوت", "الميكروفون أثناء المكالمات", "الميكروفونات أثناء تصوير الفيديو", "الميكروفون وتسجيل Voice Memos", "زر رفع الصوت وخفضه", "زر التشغيل والقفل", "مفتاح الصامت أو Action Button حسب الموديل", "الاهتزاز وTaptic Engine", "الشحن السلكي ومنفذ Lightning أو USB-C", "الشحن اللاسلكي وMagSafe إن وجد", "صحة البطارية وعدد دورات الشحن إن أمكن", "ثبات الشحن وعدم وجود سخونة غير طبيعية", "إجراء واستقبال المكالمات عبر الشبكة الخلوية", "بيانات الهاتف المحمول 4G / 5G", "الاتصال بشبكة Wi-Fi وثباته", "Bluetooth والاتصال بالملحقات", "GPS وتحديد الموقع", "مستشعر القرب وإطفاء الشاشة أثناء المكالمة", "مستشعر الإضاءة التلقائية", "الجيروسكوب ومقياس التسارع", "البوصلة والاتجاهات", "NFC وApple Pay إن أمكن اختباره", "درج الشريحة وقراءة SIM أو eSIM حسب الموديل", "الأزرار والهيكل والإطار والزجاج وآثار الصدمات", "مؤشرات السوائل وآثار الرطوبة أو التآكل"]}, "ipad": {"name": "iPad", "items": ["الشاشة: الصورة والألوان والبقع", "اللمس والقلم إن وجد", "الكاميرا الأمامية", "الكاميرا الخلفية والفلاش", "السماعات", "الميكروفونات", "الشحن ومنفذ الشحن", "البطارية والشحن", "الأزرار", "Wi-Fi وBluetooth", "الشبكة الخلوية إن وجدت", "الحساسات والبصمة إن وجدت", "الهيكل وآثار الصدمات", "مؤشرات أو آثار السوائل"]}, "macbook": {"name": "MacBook", "items": ["الشاشة والإضاءة والبقع", "الكاميرا", "الميكروفونات", "السماعات", "لوحة المفاتيح", "Trackpad", "Touch ID إن وجد", "البطارية ودورة الشحن", "الشاحن ومنفذ الشحن", "منافذ USB / Thunderbolt / HDMI", "Wi-Fi وBluetooth", "المفصلات والهيكل", "المراوح ودرجة الحرارة", "آثار السوائل أو الصدمات"]}, "watch": {"name": "Apple Watch", "items": ["الشاشة واللمس", "Digital Crown", "الزر الجانبي", "البطارية والشحن المغناطيسي", "السماعة", "الميكروفون", "الاهتزاز", "الحساسات", "الاتصال والاقتران", "الهيكل والزجاج", "آثار السوائل أو الصدمات"]}, "airpods": {"name": "AirPods", "items": ["سماعة اليمين", "سماعة الشمال", "الميكروفونات", "علبة الشحن", "منفذ أو وسيلة الشحن", "البطارية لكل سماعة", "الاقتران والاتصال", "حساسات الأذن والإيقاف التلقائي", "إلغاء الضوضاء / الشفافية إن وجدت", "الهيكل وآثار السوائل"]}};
+
+function getInspectionInstruction_(deviceType, index) {
+  var iphoneInstructions = [
+    'افتح تطبيق الصور واعرض صورًا فاتحة وداكنة وملونة. افحص وجود بقع ثابتة أو خطوط أو نقاط لا يتغير لونها.',
+    'مرّر إصبعك على الشاشة بالكامل، وافتح لوحة الرسم أو الأيقونات وجرّب السحب والضغط والكتابة عند الحواف والزوايا.',
+    'ارفع السطوع وخفّضه يدويًا، ثم فعّل السطوع التلقائي وجرّب تغيير الإضاءة المحيطة ولاحظ استجابة الشاشة.',
+    'من الإعدادات > الشاشة والإضاءة، فعّل True Tone ثم أوقفه ولاحظ تغير حرارة الألوان. جرّب Night Shift أيضًا.',
+    'إذا كان الموديل يدعم ProMotion، جرّب التمرير السريع بين الصفحات والقوائم ولاحظ سلاسة الحركة وعدم التقطيع غير الطبيعي.',
+    'من الإعدادات > Face ID ورمز الدخول، اختبر إعداد Face ID وفتح القفل عدة مرات. لا تُعد ضبط بيانات العميل دون إذنه.',
+    'افتح الكاميرا الأمامية وصوّر وجهًا ونصًا في إضاءة جيدة، ثم افحص وضوح الصورة والتركيز وعدم وجود ضباب أو بقع.',
+    'سجّل فيديو بالكاميرا الأمامية مع التحدث وتحريك الجهاز، ثم شغّل التسجيل وافحص الصورة والصوت.',
+    'افتح الكاميرا الرئيسية وصوّر جسمًا قريبًا ونصًا ومشهدًا بعيدًا. افحص التركيز والوضوح وتجانس الصورة.',
+    'اختر العدسة فائقة الاتساع 0.5x إن كانت موجودة، وصوّر مشهدًا واسعًا وافحص الصورة والحواف وعدم وجود بقع.',
+    'اختر عدسة التقريب Telephoto أو مستوى التقريب البصري المدعوم، وصوّر جسمًا بعيدًا وافحص التركيز والوضوح.',
+    'فعّل الفلاش من تطبيق الكاميرا والتقط صورة، ثم اختبر تشغيل المصباح من مركز التحكم.',
+    'صوّر شخصًا بوضع Portrait وجرّب تغيير مستوى العزل إن توفر. افحص فصل الشخص عن الخلفية وعدم قص أجزاء منه بشكل واضح.',
+    'سجّل فيديو مع تحريك الهاتف ببطء ثم بالمشي، وجرّب التركيز على جسم قريب ثم بعيد. افحص ثبات الصورة وانتقال التركيز.',
+    'أجرِ مكالمة اختبارية بموافقة العميل، وضع الهاتف على أذنك وافحص وضوح الصوت من سماعة المكالمات العلوية.',
+    'شغّل مقطعًا صوتيًا وارفع مستوى الصوت تدريجيًا. افحص السماعتين إن كان الموديل يدعم صوتًا مجسمًا، وانتبه للتشويش.',
+    'أجرِ مكالمة اختبارية وتحدث عبر ميكروفون الهاتف، واسأل الطرف الآخر عن وضوح صوتك وخلوه من التقطيع.',
+    'سجّل فيديو بالكاميرا الأمامية ثم الخلفية مع التحدث، وشغّل التسجيل وافحص وضوح الصوت وعدم وجود طقطقة أو انقطاع.',
+    'افتح تطبيق المذكرات الصوتية Voice Memos وسجّل عدة ثوانٍ، ثم استمع للتسجيل وافحص مستوى الصوت ونقاءه.',
+    'اضغط زر رفع الصوت وخفضه عدة مرات أثناء ظهور مؤشر الصوت، وتأكد من استجابة كل زر وعدم تعليقه.',
+    'اضغط زر التشغيل لقفل الشاشة ثم إيقاظها، واضغط مطولًا لاختبار الوظيفة المرتبطة به حسب إعدادات الجهاز دون تنفيذ إيقاف غير مقصود.',
+    'جرّب مفتاح الصامت أو Action Button حسب الموديل والإعدادات. تأكد من تغير الحالة أو تنفيذ الوظيفة المعيّنة.',
+    'فعّل الاهتزاز من إعدادات الأصوات أو استخدم اختبارًا آمنًا للتنبيه، وتأكد من وجود اهتزاز منتظم دون صوت ميكانيكي غير طبيعي.',
+    'استخدم كابلًا وشاحنًا موثوقين ومتوافقين. افحص ثبات التوصيل وظهور علامة الشحن، وعاين المنفذ بصريًا دون إدخال أدوات معدنية.',
+    'إذا كان الجهاز يدعم الشحن اللاسلكي أو MagSafe، ضعه على شاحن متوافق وتأكد من بدء الشحن وثبات الاتصال والمحاذاة.',
+    'راجع الإعدادات > البطارية > صحة البطارية والشحن إن كانت متاحة. سجّل السعة القصوى ورسالة الخدمة، ولا تستنتج عدد الدورات إن لم يعرضه النظام.',
+    'اترك الجهاز على الشاحن عدة دقائق وراقب استمرار الشحن وثبات النسبة ودرجة الحرارة. أوقف الاختبار إذا ظهرت سخونة شديدة أو انتفاخ.',
+    'بموافقة العميل، أجرِ مكالمة واردة وصادرة قصيرة. تحقق من التسجيل على الشبكة ووضوح الصوت وعدم انقطاع الاتصال.',
+    'أوقف Wi-Fi واتصل ببيانات الهاتف. افتح صفحة موثوقة أو نفّذ اختبار اتصال بسيط، وتحقق من ظهور 4G/5G حسب التغطية والباقه.',
+    'اتصل بشبكة Wi-Fi مصرح بها، افتح صفحة أو تطبيقًا، وابتعد قليلًا عن نقطة الوصول للتأكد من ثبات الاتصال.',
+    'فعّل Bluetooth وابحث عن ملحق متاح ومصرح به مثل سماعة اختبار. أتمم الاقتران وتأكد من استمرار الاتصال والصوت.',
+    'افتح تطبيق الخرائط في مكان مفتوح وبموافقة العميل، وانتظر تحديد الموقع. قارن موضع المؤشر بالمكان الفعلي ولا تعتمد على اختبار داخل المبنى وحده.',
+    'أثناء مكالمة اختبارية، قرّب الهاتف من الأذن ولاحظ انطفاء الشاشة، ثم أبعده وتأكد من عودتها للعمل.',
+    'فعّل السطوع التلقائي وغطِّ مستشعر الإضاءة أعلى الشاشة ثم اكشفه تدريجيًا. لاحظ تغير السطوع بعد لحظات.',
+    'افتح تطبيقًا يدعم تدوير الشاشة أو أداة اختبار حساسات موثوقة، ودوّر الجهاز وحرّكه في الاتجاهات المختلفة وتحقق من استجابة الاتجاه والحركة.',
+    'افتح تطبيق البوصلة وحرّك الهاتف على شكل رقم 8 عند الحاجة للمعايرة. تحقق من تغير الاتجاه بصورة منطقية بعيدًا عن المعادن والمغناطيس.',
+    'إذا كان NFC مدعومًا، اختبره بوسيلة اختبار آمنة ومصرح بها أو بطاقة اختبار متوافقة. لا تنفذ أي عملية دفع فعلية ولا تطلب بيانات العميل.',
+    'افحص درج SIM بصريًا ثم أدخل شريحة اختبار بموافقة العميل وتحقق من تعرف الجهاز عليها. اختبر eSIM من الإعدادات فقط إذا كان متاحًا وبموافقة العميل دون حذف خط العميل.',
+    'افحص الإطار والزجاج والظهر والأزرار والدرج تحت إضاءة جيدة. سجّل الخدوش والانبعاجات والكسور وآثار السقوط بالصور عند الحاجة.',
+    'افحص مؤشر ملامسة السوائل الظاهر دون تفكيك، ومنافذ الجهاز ودرج الشريحة بحثًا عن ترسبات أو تآكل. لا تعتبر تغير اللون وحده دليلًا قاطعًا دون توثيق.'
+  ];
+  if (deviceType === "iphone" && iphoneInstructions[index]) return iphoneInstructions[index];
+
+  var catalog = getInspectionCatalog_();
+  var device = catalog[deviceType];
+  var item = device && device.items ? String(device.items[index] || "") : "";
+  if (/شاشة|لمس/.test(item)) return "افتح خلفيات فاتحة وداكنة وملونة، وافحص الصورة والبقع والخطوط. جرّب الضغط والسحب في جميع أجزاء الشاشة والحواف.";
+  if (/كاميرا/.test(item)) return "افتح تطبيق الكاميرا، بدّل إلى الكاميرا المطلوبة، وصوّر صورة وفيديو في إضاءة جيدة. افحص الوضوح والتركيز والصوت إن كان الاختبار يتضمنه.";
+  if (/سماعة|صوت/.test(item)) return "شغّل مقطعًا صوتيًا أو نفّذ مكالمة اختبارية بموافقة العميل. افحص وضوح الصوت ومستواه وعدم وجود تشويش أو تقطيع.";
+  if (/ميكروفون/.test(item)) return "سجّل مقطعًا صوتيًا أو فيديو وتحدث بصوت طبيعي، ثم استمع للتسجيل وافحص وضوح الصوت وعدم انقطاعه.";
+  if (/شحن|بطارية/.test(item)) return "استخدم شاحنًا وكابلًا متوافقين، وتأكد من بدء الشحن وثباته. راجع حالة البطارية من الإعدادات إذا كانت متاحة، ولاحظ السخونة غير الطبيعية.";
+  if (/Wi-Fi|Bluetooth|اتصال|الشبكة/.test(item)) return "فعّل الوظيفة واتصل بشبكة أو ملحق اختبار مصرح به. جرّب نقل بيانات أو فتح صفحة وتأكد من ثبات الاتصال.";
+  if (/زر|Digital Crown|Trackpad|لوحة المفاتيح/.test(item)) return "جرّب الزر أو الجزء عدة مرات أثناء استخدام الوظيفة المرتبطة به، وتأكد من الاستجابة وعدم التعليق أو التكرار.";
+  if (/هيكل|زجاج|سوائل|صدمات/.test(item)) return "افحص الجهاز من جميع الجهات تحت إضاءة جيدة، وسجّل الخدوش والكسور والانبعاجات وآثار السوائل أو التآكل الظاهرة.";
+  if (/حساس|مستشعر|بصمة|Face ID/.test(item)) return "افتح الوظيفة أو إعدادها المخصص، وجرّبها أكثر من مرة بالطريقة الطبيعية. لا تحذف بيانات العميل أو تعِد ضبطها دون إذنه.";
+  return "نفّذ اختبارًا عمليًا للوظيفة المذكورة على الجهاز، وكرره أكثر من مرة. سجّل سليم فقط إذا عملت الوظيفة بصورة طبيعية، وإلا اختر مشكلة أو لم يُختبر.";
+}
+
+function deviceInspectionCatalogMini_(){
+  const out={};Object.keys(MH_DEVICE_INSPECTION_CATALOG_).forEach(type=>{const d=MH_DEVICE_INSPECTION_CATALOG_[type];out[type]={name:d.name,items:d.items.map((item,index)=>({name:item,instruction:getInspectionInstruction_(type,index)}))};});return out;
 }

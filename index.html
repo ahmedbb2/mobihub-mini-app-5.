@@ -79,7 +79,7 @@
         </div>
         <div class="request-tabs">
           <button class="service-action" id="newLeaveTab" type="button"><span class="service-icon">◷</span><b>طلب إذن</b><small>بالساعات أو الأيام</small></button>
-          <button class="service-action" id="newCashTab" type="button"><span class="service-icon">ج.م</span><b>طلب سلفة</b><small>طلب عهدة مالية</small></button>
+          <button class="service-action" id="newCashTab" type="button"><span class="service-icon">ج.م</span><b>طلب سلفة</b><small>سلفة شخصية من الإدارة</small></button>
           <button class="service-action" id="myRequestsTab" type="button"><span class="service-icon">▤</span><b>طلباتي</b><small>متابعة الحالة</small></button>
         </div>
         <div class="request-shortcuts"><button class="service-action" id="complaintsTab" type="button"><span class="service-icon">✉</span><b>تقديم شكوى</b><small>إرسال شكوى جديدة</small></button><button class="service-action" id="complaintHistoryTab" type="button"><span class="service-icon">☷</span><b>شكاوي</b><small>متابعة الشكاوى والردود</small></button></div>
@@ -111,7 +111,7 @@
           <button id="submitLeave" class="primary-btn submit-action">إرسال طلب الإذن</button>
         </div>
         <div id="cashForm" class="request-form hidden">
-          <div class="form-title"><span class="form-title-icon">ج.م</span><div><h3>طلب سلفة / عهدة مالية</h3><p>اكتب المبلغ المطلوب ثم أرسل الطلب</p></div></div>
+          <div class="form-title"><span class="form-title-icon">ج.م</span><div><h3>طلب سلفة شخصية</h3><p>يُسجل في سجل السلف ويرسل للإدارة للمراجعة</p></div></div>
           <div class="notice-soft"><span>ⓘ</span> تقديم الطلب لا يعني الموافقة أو صرف المبلغ.</div>
           <label>المبلغ بالجنيه<input id="cashAmount" type="number" min="1" max="1000000" step="0.01" inputmode="decimal" placeholder="مثال: 750"></label>
           <button id="submitCash" class="primary-btn submit-action">إرسال طلب السلفة</button>
@@ -122,7 +122,7 @@
         <div class="section-head"><h2>مراجعة الطلبات والأذونات</h2><button id="refreshReviews" class="text-btn">تحديث</button></div>
         <div id="reviewBody" class="review-list">اضغط تحديث لعرض الطلبات المعلقة.</div>
       </section>
-      <section id="cashReviewCenter" class="management hidden"><div class="section-head"><h2>مراجعة السلف والعهد</h2><button id="refreshCashReviews" class="text-btn">تحديث</button></div><div id="cashReviewBody" class="review-list">اضغط تحديث لعرض طلبات السلف.</div></section>
+      <section id="cashReviewCenter" class="management hidden"><div class="section-head"><h2>مراجعة السلف والعهد</h2><button id="refreshCashReviews" class="text-btn">تحديث</button></div><div id="cashReviewBody" class="review-list">اضغط تحديث لعرض السلف والعهد في قائمتين منفصلتين.</div></section>
 
 
       <section id="financeCenter" class="request-panel hidden">

@@ -406,12 +406,38 @@
         content.querySelectorAll('[data-toggle-employee]').forEach(b=>b.addEventListener('click',async()=>{if(!confirm(`تأكيد ${b.dataset.nextStatus==='موقوف'?'إيقاف':'تفعيل'} حساب المهندس؟`))return;b.disabled=true;try{await api('employee_status',{employeeId:b.dataset.toggleEmployee,status:b.dataset.nextStatus});await loadManagerDashboard();closeModal();openManagerModule('staff');}catch(e){if(tg?.showAlert)tg.showAlert(e.message);b.disabled=false;}}));
         const search=content.querySelector('#managerEmployeeSearch'); search.addEventListener('input',()=>{const q=search.value.trim().toLowerCase();content.querySelectorAll('.manager-employee-row').forEach(row=>row.classList.toggle('hidden',!row.textContent.toLowerCase().includes(q)));});
       } else if(module==='devices') {
-        const [rows,movements,employees]=await Promise.all([api('list',{entity:'devices'}),api('list',{entity:'deviceMovements'}),api('list',{entity:'employees'})]);
-        const activeEmployees=employees.filter(e=>String(e['الحالة']||'نشط')==='نشط'&&String(e['حالة الحساب']||'نشط')==='نشط');
+        const [rows,employees]=await Promise.all([api('device_list'),api('device_staff')]);
         const statuses=['تم الاستلام','قيد الفحص','يحتاج قطعة غيار','يحتاج التواصل مع العميل','بانتظار رد العميل','لم يتم الرد','قيد الإصلاح','مراجعة الجودة','يحتاج إعادة فحص','جاهز للتسليم','تم التسليم'];
         const locations=['قسم الاستلام','ترابيزة الهاردوير','درج الفحص 1','درج الفحص 2','درج مراجعة الجودة','درج انتظار قطع الغيار','درج انتظار العميل','درج جاهز للتسليم','مكان آخر'];
-        content.innerHTML=`<div class="manager-mini-kpis"><div><b>${rows.length}</b><small>أجهزة مسجلة</small></div><div><b>${movements.length}</b><small>حركات مسجلة</small></div></div><h4>الأجهزة وسجل المتابعة</h4>`+(rows.length?rows.map((r,i)=>`<article class="manager-row"><div><b>${escapeHtml(r['رقم الطلب']||r['اسم الجهاز']||'جهاز')}</b><small>${escapeHtml(r['اسم الجهاز']||'')} · العميل: ${escapeHtml(r['اسم العميل']||'')}</small></div><span class="status-pill">${escapeHtml(r['حالة الجهاز']||'غير محدد')}</span><small>المسؤول: ${escapeHtml(r['الموظف المسؤول']||'—')} · المكان: ${escapeHtml(r['مكان الجهاز']||'—')}</small><button class="secondary-btn" type="button" data-device-edit="${i}">تحديث الحالة / المسؤول</button></article>`).join(''):'<p class="muted">لا توجد أجهزة مسجلة.</p>')+`<h4>آخر حركات الأجهزة</h4>${movements.slice(-20).reverse().map(m=>`<article class="manager-row"><b>${escapeHtml(m['رقم الطلب']||'جهاز')} · ${escapeHtml(m['نوع الحركة']||'حركة')}</b><small>${escapeHtml(m['الحالة']||'')} · ${escapeHtml(m['المكان']||'')} · ${escapeHtml(m['التاريخ والوقت']||'')}</small><small>${escapeHtml(m['ملاحظات']||'')}</small></article>`).join('')||'<p class="muted">لا توجد حركات مسجلة.</p>'}`;
-        content.querySelectorAll('[data-device-edit]').forEach(btn=>btn.addEventListener('click',()=>{const r=rows[Number(btn.dataset.deviceEdit)];const formHtml=`<form id="managerDeviceForm" class="manager-staff-form"><label>رقم الطلب<input value="${escapeHtml(r['رقم الطلب']||'')}" disabled></label><label>حالة الجهاز<select name="status">${statuses.map(s=>`<option ${s===r['حالة الجهاز']?'selected':''}>${s}</option>`).join('')}</select></label><label>مكان الجهاز<select name="location">${locations.map(s=>`<option ${s===r['مكان الجهاز']?'selected':''}>${s}</option>`).join('')}</select></label><label>المهندس المسؤول<select name="employeeId"><option value="">بدون تغيير المسؤول</option>${activeEmployees.map(e=>`<option value="${escapeHtml(e['Chat ID'])}" ${String(e['Chat ID'])===String(r['الموظف المسؤول Chat ID'])?'selected':''}>${escapeHtml(e['اسم الموظف']||e['Chat ID'])}</option>`).join('')}</select></label><label>ملاحظات الحركة<textarea name="note" rows="3" maxlength="500"></textarea></label><button type="submit" class="primary-btn">حفظ التحديث</button></form>`;const p=managerPanel('تحديث بيانات الجهاز',formHtml);p.querySelector('form').addEventListener('submit',async ev=>{ev.preventDefault();const f=ev.currentTarget,b=f.querySelector('button');b.disabled=true;try{const fd=new FormData(f);await api('device_update',{orderId:r['رقم الطلب'],...Object.fromEntries(fd.entries())});closeModal();closeModal();openManagerModule('devices');await loadManagerDashboard();}catch(e){if(tg?.showAlert)tg.showAlert(e.message);b.disabled=false;}});}));
+        content.innerHTML=`<div class="manager-mini-kpis"><div><b>${rows.length}</b><small>أجهزة ظاهرة حسب الصلاحية</small></div><div><b>${employees.length}</b><small>فنيون نشطون</small></div></div><div class="manager-module-toolbar"><input id="deviceModuleSearch" type="search" placeholder="ابحث برقم الطلب أو الجهاز أو الفني"><button type="button" class="secondary-btn" id="deviceInspectionCatalog">كتالوج الفحص</button></div><h4>الأجهزة وسجل المتابعة</h4>`+(rows.length?rows.map((r,i)=>`<article class="manager-row"><div><b>${escapeHtml(r.orderId||'جهاز')}</b><small>${escapeHtml(r.deviceName||'')} · العميل: ${escapeHtml(r.customerName||'')}</small></div><span class="status-pill">${escapeHtml(r.status||'غير محدد')}</span><small>المسؤول: ${escapeHtml(r.employeeName||'—')} · المكان: ${escapeHtml(r.location||'—')}</small><div class="manager-row-actions"><button class="secondary-btn" type="button" data-device-detail="${i}">التفاصيل والسجل</button><button class="secondary-btn" type="button" data-device-edit="${i}">تحديث الحالة</button><button class="secondary-btn" type="button" data-device-transfer="${i}">تحويل لفني</button></div></article>`).join(''):'<p class="muted">لا توجد أجهزة مسجلة أو لا توجد أجهزة ضمن صلاحيات حسابك.</p>') ;
+        const search=content.querySelector('#deviceModuleSearch');
+        search.addEventListener('input',()=>{const q=search.value.trim().toLowerCase();content.querySelectorAll('.manager-row').forEach(row=>row.classList.toggle('hidden',!row.textContent.toLowerCase().includes(q)));});
+        content.querySelector('#deviceInspectionCatalog').addEventListener('click',async()=>{
+          try {
+            const catalog=await api('device_inspection_catalog');
+            const html=Object.entries(catalog).map(([key,d])=>`<section class="inspection-device-group"><h4>${escapeHtml(d.name)} (${d.items.length})</h4>${d.items.map((it,i)=>`<details class="inspection-item"><summary>${i+1}. ${escapeHtml(it.name)}</summary><p>${escapeHtml(it.instruction||'')}</p></details>`).join('')}</section>`).join('');
+            managerPanel('كتالوج فحص الأجهزة',html);
+          } catch(e) { if(tg?.showAlert) tg.showAlert(e.message); }
+        });
+        content.querySelectorAll('[data-device-detail]').forEach(btn=>btn.addEventListener('click',async()=>{
+          const r=rows[Number(btn.dataset.deviceDetail)];
+          try {
+            const d=await api('device_detail',{orderId:r.orderId});
+            const x=d.device;
+            const history=(d.history||[]).map(h=>`<article class="manager-row"><b>${escapeHtml(h['نوع الحركة']||'حركة')}</b><small>${escapeHtml(h['التاريخ والوقت']||'')} · ${escapeHtml(h['من الموظف']||'')} ← ${escapeHtml(h['إلى الموظف']||'')}</small><small>${escapeHtml(h['الحالة']||'')} · ${escapeHtml(h['المكان']||'')}</small><small>${escapeHtml(h['ملاحظات']||'')}</small></article>`).join('')||'<p class="muted">لا يوجد سجل حركة لهذا الجهاز.</p>';
+            managerPanel('تفاصيل الجهاز',`<div class="manager-device-detail"><h4>${escapeHtml(x.orderId)}</h4><p><b>الجهاز:</b> ${escapeHtml(x.deviceName||'—')}</p><p><b>العميل:</b> ${escapeHtml(x.customerName||'—')}</p><p><b>المشكلة:</b> ${escapeHtml(x.issue||'—')}</p><p><b>الحالة:</b> ${escapeHtml(x.status||'—')}</p><p><b>المكان:</b> ${escapeHtml(x.location||'—')}</p><p><b>المهندس:</b> ${escapeHtml(x.employeeName||'—')}</p><h4>سجل الحركة</h4>${history}</div>`);
+          } catch(e) { if(tg?.showAlert) tg.showAlert(e.message); }
+        }));
+        content.querySelectorAll('[data-device-edit]').forEach(btn=>btn.addEventListener('click',()=>{
+          const r=rows[Number(btn.dataset.deviceEdit)];
+          const formHtml=`<form id="managerDeviceForm" class="manager-staff-form"><label>رقم الطلب<input value="${escapeHtml(r.orderId||'')}" disabled></label><label>حالة الجهاز<select name="status">${statuses.map(s=>`<option ${s===r.status?'selected':''}>${s}</option>`).join('')}</select></label><label>مكان الجهاز<select name="location">${locations.map(s=>`<option ${s===r.location?'selected':''}>${s}</option>`).join('')}</select></label><label>ملاحظات الحركة<textarea name="note" rows="3" maxlength="500"></textarea></label><button type="submit" class="primary-btn">حفظ التحديث</button></form>`;
+          const p=managerPanel('تحديث حالة الجهاز',formHtml);p.querySelector('form').addEventListener('submit',async ev=>{ev.preventDefault();const f=ev.currentTarget,b=f.querySelector('button');b.disabled=true;try{const fd=new FormData(f);await api('device_status_update',{orderId:r.orderId,...Object.fromEntries(fd.entries())});closeModal();openManagerModule('devices');}catch(e){if(tg?.showAlert)tg.showAlert(e.message);b.disabled=false;}});
+        }));
+        content.querySelectorAll('[data-device-transfer]').forEach(btn=>btn.addEventListener('click',()=>{
+          const r=rows[Number(btn.dataset.deviceTransfer)];
+          const formHtml=`<form id="deviceTransferForm" class="manager-staff-form"><label>رقم الطلب<input value="${escapeHtml(r.orderId)}" disabled></label><label>المهندس الجديد<select name="employeeId" required><option value="">اختر المهندس</option>${employees.map(e=>`<option value="${escapeHtml(e.chatId)}">${escapeHtml(e.name)} — ${escapeHtml(e.job)}</option>`).join('')}</select></label><button type="submit" class="primary-btn">تأكيد التحويل</button></form>`;
+          const p=managerPanel('تحويل مسؤولية الجهاز',formHtml);p.querySelector('form').addEventListener('submit',async ev=>{ev.preventDefault();const f=ev.currentTarget,b=f.querySelector('button');b.disabled=true;try{const fd=new FormData(f);await api('device_transfer',{orderId:r.orderId,...Object.fromEntries(fd.entries())});closeModal();openManagerModule('devices');}catch(e){if(tg?.showAlert)tg.showAlert(e.message);b.disabled=false;}});
+        }));
       } else if(module==='system') {
         const d=managerDashboardCache||await api('manager_dashboard'); const r=d.monthlyReport||{};
         content.innerHTML=`<div class="manager-mini-kpis"><div><b>${Number(r.checkins)||0}</b><small>مرات تسجيل الحضور</small></div><div><b>${Number(r.checkouts)||0}</b><small>مرات تسجيل الانصراف</small></div><div><b>${Number(r.lateDays)||0}</b><small>أيام بها تأخير</small></div><div><b>${Number(r.lateMinutes)||0}</b><small>دقائق التأخير</small></div><div><b>${Number(r.confirmedAbsences)||0}</b><small>غياب مؤكد</small></div><div><b>${Number(r.pendingAbsences)||0}</b><small>غياب قيد المراجعة</small></div><div><b>${Number(r.leaveCount)||0}</b><small>طلبات أذونات خلال الشهر</small></div></div><p class="manager-note">تقرير تشغيلي عام لشهر ${escapeHtml(r.month||d.month||'')}، مجمع من سجلات الحضور والغياب والأذونات في Google Sheets، وليس تقريرًا فرديًا لمهندس واحد.</p>`;
@@ -658,31 +684,50 @@
   }
   async function submitCash(){
     const b=$('submitCash'); b.disabled=true; $('requestMessage').classList.add('hidden');
-    try { const result=await api('cash_create',{amount:$('cashAmount').value}); $('cashAmount').value=''; messageRequest(`${result.message} رقم الطلب: ${result.requestId}`); await showList('cash'); }
+    try { const result=await api('cash_create',{amount:$('cashAmount').value}); $('cashAmount').value=''; messageRequest(`${result.message} رقم الطلب: ${result.requestId}`); await showList('requests'); }
     catch(e){messageRequest(e.message,true);} finally{b.disabled=false;}
   }
   async function loadCashReviews(){
-    const box=$('cashReviewBody'); box.textContent='جاري تحميل طلبات السلف والتسويات...';
+    const box=$('cashReviewBody');
+    box.textContent='جاري تحميل طلبات السلف والعهد كلٌ في قسم مستقل...';
     try {
-      const rows=await api('list',{entity:'cash'});
-      const cards=[];
-      rows.forEach(r=>{
-        const status=String(r['الحالة']||'');
-        const payout=String(r['حالة الصرف']||'');
-        const custody=String(r['حالة العهدة']||'');
-        const settlement=String(r['حالة التسوية']||'');
-        const base=`<p>${escapeHtml(r['اسم الموظف']||'')} · ${escapeHtml(r['المبلغ المطلوب بالجنيه']||'—')} جنيه<br>${escapeHtml(r['التاريخ والوقت']||'')}</p>`;
-        if(status==='قيد المراجعة') cards.push(`<article class="review-item"><strong>${escapeHtml(r['رقم الطلب']||'طلب سلفة')} · طلب جديد</strong>${base}<div class="review-actions"><button class="primary-btn" data-cash-row="${r.__row}" data-cash-decision="مقبول">موافقة</button><button class="secondary-btn" data-cash-row="${r.__row}" data-cash-decision="مرفوض">رفض</button></div></article>`);
-        if(status==='تمت الموافقة' && payout!=='تم الصرف') cards.push(`<article class="review-item"><strong>${escapeHtml(r['رقم الطلب']||'طلب سلفة')} · بانتظار الصرف</strong>${base}<div class="review-actions"><button class="primary-btn" data-cash-row="${r.__row}" data-cash-decision="تم الصرف">تأكيد صرف العهدة</button></div></article>`);
-        if(settlement==='بانتظار مراجعة التسوية') cards.push(`<article class="review-item"><strong>${escapeHtml(r['رقم الطلب']||'عهدة')} · مراجعة التسوية</strong><p>${escapeHtml(r['اسم الموظف']||'')}<br>المعتمد: ${escapeHtml(r['المبلغ المعتمد بالجنيه']||'—')} جنيه<br>المصروف: ${escapeHtml(r['المصروف الفعلي بالجنيه']||'—')} جنيه<br>المطلوب إرجاعه: ${escapeHtml(r['المبلغ المطلوب إرجاعه بالجنيه']||'—')} جنيه<br>ملاحظات: ${escapeHtml(r['ملاحظات التسوية']||'—')}</p><div class="review-actions"><button class="primary-btn" data-settle-review="${r.__row}" data-settle-decision="مقبول">اعتماد التسوية</button><button class="secondary-btn" data-settle-review="${r.__row}" data-settle-decision="مرفوض">إرجاع للتصحيح</button></div></article>`);
-        if(custody==='بانتظار تأكيد استلام المتبقي') cards.push(`<article class="review-item"><strong>${escapeHtml(r['رقم الطلب']||'عهدة')} · استلام المتبقي</strong><p>${escapeHtml(r['اسم الموظف']||'')}<br>المبلغ المطلوب استلامه: ${escapeHtml(r['المبلغ المطلوب إرجاعه بالجنيه']||'—')} جنيه</p><div class="review-actions"><button class="primary-btn" data-return-confirm="${r.__row}">تأكيد استلام المبلغ</button></div></article>`);
+      const [advanceRows,custodyRows]=await Promise.all([
+        api('list',{entity:'requests'}), api('list',{entity:'cash'})
+      ]);
+      const advances=advanceRows.filter(r=>String(r['نوع الطلب']||'').trim()==='سلفة');
+      const pendingAdvances=advances.filter(r=>String(r['القرار']||'').trim()==='قيد الانتظار');
+      const advanceCards=pendingAdvances.map(r=>`
+        <article class="review-item">
+          <strong>💵 طلب سلفة · ${escapeHtml(r['اسم الموظف']||'')}</strong>
+          <p>المبلغ: ${escapeHtml(r['مبلغ السلفة بالجنيه']||r['التفاصيل']||'—')} جنيه<br>
+          التاريخ: ${escapeHtml(r['التاريخ والوقت']||'')}<br>الحالة: ${escapeHtml(r['القرار']||'قيد الانتظار')}</p>
+          <div class="review-actions">
+            <button class="primary-btn" data-advance-row="${r.__row}" data-decision="مقبول">موافقة على السلفة</button>
+            <button class="secondary-btn" data-advance-row="${r.__row}" data-decision="مرفوض">رفض السلفة</button>
+          </div>
+        </article>`).join('');
+      const custodyCards=[];
+      custodyRows.forEach(r=>{
+        const status=String(r['الحالة']||''), payout=String(r['حالة الصرف']||'');
+        const custody=String(r['حالة العهدة']||''), settlement=String(r['حالة التسوية']||'');
+        const base=`<p>${escapeHtml(r['اسم الموظف']||'')} · ${escapeHtml(r['المبلغ المطلوب بالجنيه']||'—')} جنيه<br>${escapeHtml(r['التاريخ والوقت']||'')}<br>الغرض: ${escapeHtml(r['الغرض']||'—')}</p>`;
+        if(status==='قيد المراجعة') custodyCards.push(`<article class="review-item"><strong>🧾 طلب سحب / عهدة · ${escapeHtml(r['رقم الطلب']||'')}</strong>${base}<div class="review-actions"><button class="primary-btn" data-cash-row="${r.__row}" data-cash-decision="مقبول">موافقة</button><button class="secondary-btn" data-cash-row="${r.__row}" data-cash-decision="مرفوض">رفض</button></div></article>`);
+        if(status==='تمت الموافقة'&&payout!=='تم الصرف') custodyCards.push(`<article class="review-item"><strong>🧾 عهدة بانتظار الصرف · ${escapeHtml(r['رقم الطلب']||'')}</strong>${base}<div class="review-actions"><button class="primary-btn" data-cash-row="${r.__row}" data-cash-decision="تم الصرف">تأكيد صرف العهدة</button></div></article>`);
+        if(settlement==='بانتظار مراجعة التسوية') custodyCards.push(`<article class="review-item"><strong>🧾 مراجعة تسوية عهدة · ${escapeHtml(r['رقم الطلب']||'')}</strong><p>${escapeHtml(r['اسم الموظف']||'')}<br>المعتمد: ${escapeHtml(r['المبلغ المعتمد بالجنيه']||'—')} جنيه<br>المصروف: ${escapeHtml(r['المصروف الفعلي بالجنيه']||'—')} جنيه<br>المطلوب إرجاعه: ${escapeHtml(r['المبلغ المطلوب إرجاعه بالجنيه']||'—')} جنيه<br>ملاحظات: ${escapeHtml(r['ملاحظات التسوية']||'—')}</p><div class="review-actions"><button class="primary-btn" data-settle-review="${r.__row}" data-settle-decision="مقبول">اعتماد التسوية</button><button class="secondary-btn" data-settle-review="${r.__row}" data-settle-decision="مرفوض">إرجاع للتصحيح</button></div></article>`);
+        if(custody==='بانتظار تأكيد استلام المتبقي') custodyCards.push(`<article class="review-item"><strong>🧾 تأكيد استلام المتبقي · ${escapeHtml(r['رقم الطلب']||'')}</strong><p>${escapeHtml(r['اسم الموظف']||'')}<br>المبلغ المطلوب استلامه: ${escapeHtml(r['المبلغ المطلوب إرجاعه بالجنيه']||'—')} جنيه</p><div class="review-actions"><button class="primary-btn" data-return-confirm="${r.__row}">تأكيد استلام المبلغ</button></div></article>`);
       });
-      box.innerHTML=cards.length?cards.join(''):'لا توجد طلبات سلف أو تسويات معلقة.';
+      box.innerHTML=`
+        <section class="finance-queue"><h3>💵 طلبات السلف (${pendingAdvances.length} معلّق)</h3>
+          ${advanceCards||'<p class="muted">لا توجد طلبات سلف معلقة.</p>'}</section>
+        <section class="finance-queue"><h3>🧾 طلبات السحب والعهد والتسويات (${custodyCards.length} إجراء معلق)</h3>
+          ${custodyCards.join('')||'<p class="muted">لا توجد طلبات سحب أو تسويات معلقة.</p>'}</section>`;
+      box.querySelectorAll('[data-advance-row]').forEach(b=>b.addEventListener('click',()=>decide('request_decide',b.dataset.advanceRow,b.dataset.decision)));
       box.querySelectorAll('[data-cash-row]').forEach(b=>b.addEventListener('click',()=>decideCash(b.dataset.cashRow,b.dataset.cashDecision)));
       box.querySelectorAll('[data-settle-review]').forEach(b=>b.addEventListener('click',()=>reviewCashSettlement(b.dataset.settleReview,b.dataset.settleDecision)));
       box.querySelectorAll('[data-return-confirm]').forEach(b=>b.addEventListener('click',()=>confirmCashReturn(b.dataset.returnConfirm)));
     } catch(e){box.textContent=e.message;}
   }
+
   async function reviewCashSettlement(row,decision){
     const note=prompt(decision==='مقبول'?'ملاحظات اعتماد التسوية (اختياري):':'سبب إرجاع التسوية للتصحيح:')||'';
     if(decision==='مرفوض'&&!note.trim()){messageRequest('اكتب سبب إرجاع التسوية للتصحيح.',true);return;}

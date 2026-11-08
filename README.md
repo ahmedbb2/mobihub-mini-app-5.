@@ -1,8 +1,8 @@
-# MobiHub Mini App — V1.10.3 Manager Operations
+# MobiHub Mini App — V1.10.4 Manager Operations
 
 ## What this release adds
 
-This is a continuation of the V1.10.3 manager workspace. It keeps the existing V40 bot as the operational reference and uses the same Google Sheets workbook for manager operations.
+This is a continuation of the V1.10.4 manager workspace. It keeps the existing V40 bot as the operational reference and uses the same Google Sheets workbook for manager operations.
 
 ### Device operations
 - Device register list with current state, assigned engineer and storage location.
@@ -34,7 +34,7 @@ This is a continuation of the V1.10.3 manager workspace. It keeps the existing V
 ## Files
 
 - `index.html`, `styles.css`, `app.js`: Mini App frontend.
-- `Code.gs`: Apps Script API V1.10.3.
+- `Code.gs`: Apps Script API V1.10.4.
 - `assets/`: MobiHub logo PNG/WebP.
 - `MobiHub_Attendance_v40_REFERENCE.gs`: read-only reference copy of the legacy V40 bot. Do not deploy this file over the active bot project.
 - `_headers`: Cloudflare Pages security headers.
