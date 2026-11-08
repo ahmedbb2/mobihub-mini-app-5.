@@ -1,7 +1,7 @@
 (() => {
   'use strict';
   const tg = window.Telegram?.WebApp;
-  const API_URL = 'https://mobihub-telegram-proxy.ahmedmtarek20.workers.dev/';
+  const API_URL = 'https://mobihub-telegram-proxy-v2.ahmedmtarek20.workers.dev/';
   const $ = (id) => document.getElementById(id);
   const titles = { requests: 'الطلبات العامة', leaves: 'طلبات الأذونات', complaints: 'شكاوي', cash: 'السلف والعهد', deductions: 'خصوماتي', devices: 'حالة الأجهزة', attendance: 'سجل الحضور والانصراف' };
   let initData = '';
