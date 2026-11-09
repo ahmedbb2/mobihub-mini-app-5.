@@ -101,7 +101,8 @@
     ABSENCE_ALREADY_REVIEWED: 'تمت مراجعة حالة الغياب بالفعل.',
     ABSENCE_NOT_FOUND: 'حالة الغياب غير موجودة.',
     OVERTIME_SHIFT_TIME_INVALID: 'تعذر تحديد وقت نهاية الوردية. راجع إعدادات الوردية.',
-    OVERTIME_NOT_FOUND: 'طلب الأوفر تايم غير موجود.'
+    OVERTIME_NOT_FOUND: 'طلب الأوفر تايم غير موجود.',
+    INVALID_SHIFT_ID: 'معرّف الوردية غير صحيح.', INVALID_SHIFT_NAME: 'اسم الوردية مطلوب وبحد أقصى 60 حرفًا.', INVALID_SHIFT_TIME: 'أدخل وقت حضور وانصراف صحيحًا بصيغة HH:mm.', INVALID_SHIFT_GRACE: 'فترة السماح يجب أن تكون من 0 إلى 180 دقيقة.', SHIFT_ALREADY_EXISTS: 'معرّف الوردية مستخدم بالفعل.', FLEX_SHIFT_ALREADY_EXISTS: 'وردية بدون ميعاد ثابت موجودة بالفعل.', SHIFT_NOT_FOUND: 'الوردية غير موجودة.', INVALID_SHIFT_STATUS: 'حالة الوردية غير صحيحة.', SHIFT_HAS_ACTIVE_ASSIGNMENTS: 'لا يمكن إيقاف الوردية قبل إنهاء التعيينات النشطة المرتبطة بها.', INVALID_SHIFT_DAYS: 'أيام العمل غير صحيحة.'
   };
 
   function fail(message) {
@@ -335,7 +336,7 @@
   }
 
   const managerModuleTitles = {
-    daily:'المتابعة اليومية', staff:'شؤون المهندسين', requests:'طلبات المهندسين والتواصل',
+    daily:'المتابعة اليومية', staff:'شؤون المهندسين', shifts:'إدارة الورديات', requests:'طلبات المهندسين والتواصل',
     finance:'الإدارة المالية', overtime:'الأوفر تايم', devices:'الأجهزة والصيانة', system:'التقارير والنظام', notifications:'مركز الإشعارات', managers:'إدارة المديرين'
   };
   let managerDashboardCache = null;
@@ -437,6 +438,24 @@
         const canReviewAbsence=['super_admin','admin','supervisor'].includes(currentRole);
         content.innerHTML=`<div class="manager-mini-kpis"><div><b>${records.filter(r=>String(r['النوع'])==='حضور').length}</b><small>حضور مفتوح حسب آخر حركة</small></div><div><b>${absences.filter(r=>/انتظار|مراجعة|معلق/.test(String(r['الحالة']||r['قرار المدير']||''))).length}</b><small>حالات غياب للمراجعة</small></div><div><b>${overtimeRows.filter(r=>String(r['الحالة']||'')==='بانتظار موافقة المدير').length}</b><small>طلبات أوفر تايم معلقة</small></div></div><h4>حركات اليوم</h4>${records.length?records.map(r=>`<article class="manager-row"><b>${escapeHtml(r['اسم الموظف']||'مهندس')}</b><span>${escapeHtml(r['النوع']||'')}</span><small>${escapeHtml(r['الوقت']||'')} · ${escapeHtml(r['حالة الحضور']||'')}</small></article>`).join(''):'<p class="muted">لا توجد حركات حضور مسجلة اليوم.</p>'}<h4>مراجعة الغياب</h4>${absences.slice(-20).reverse().map(r=>{const pending=String(r['الحالة']||'').trim()==='بانتظار مراجعة المدير';return `<article class="manager-row"><b>${escapeHtml(r['اسم الموظف']||'مهندس')}</b><span>${escapeHtml(r['الحالة']||r['قرار المدير']||'غير محدد')}</span><small>${escapeHtml(r['التاريخ']||'')} · موعد الحضور: ${escapeHtml(r['موعد الحضور']||'—')} · اكتشاف: ${escapeHtml(r['وقت اكتشاف الحالة']||'—')}</small>${pending&&canReviewAbsence?`<div class="manager-row-actions"><button type="button" class="primary-btn" data-absence-decision="confirm" data-absence-chat="${escapeHtml(r['Chat ID']||'')}" data-absence-date="${escapeHtml(String(r['التاريخ']||'').slice(0,10))}">تأكيد الغياب</button><button type="button" class="secondary-btn" data-absence-decision="excuse" data-absence-chat="${escapeHtml(r['Chat ID']||'')}" data-absence-date="${escapeHtml(String(r['التاريخ']||'').slice(0,10))}">ليس غائبًا</button></div>`:''}</article>`;}).join('')||'<p class="muted">لا توجد سجلات غياب.</p>'}<h4>آخر طلبات الأوفر تايم</h4>${overtimeRows.slice(-10).reverse().map(r=>`<article class="manager-row"><b>${escapeHtml(r['اسم المهندس']||'مهندس')}</b><span>${escapeHtml(r['الحالة']||'')}</span><small>${escapeHtml(r['تاريخ الوردية']||'')} · ${Number(r['دقائق الأوفر تايم'])||0} دقيقة · ${Number(r['المبلغ بالجنيه'])||0} جنيه</small></article>`).join('')||'<p class="muted">لا توجد طلبات أوفر تايم.</p>'}`;
         content.querySelectorAll('[data-absence-decision]').forEach(btn=>btn.addEventListener('click',async()=>{btn.disabled=true;try{await api('absence_decide',{chatId:btn.dataset.absenceChat,date:btn.dataset.absenceDate,decision:btn.dataset.absenceDecision});if(tg?.showAlert)tg.showAlert(btn.dataset.absenceDecision==='confirm'?'تم تأكيد الغياب وإبلاغ الموظف.':'تم تسجيل القرار: ليس غائبًا.');closeModal();await loadManagerDashboard();openManagerModule('daily');}catch(e){if(tg?.showAlert)tg.showAlert(e.message);btn.disabled=false;}}));
+      } else if(module==='shifts') {
+        const renderShifts = async () => {
+          const [shifts,assignments] = await Promise.all([api('list',{entity:'shifts'}),api('list',{entity:'assignments'})]);
+          const today = managerDashboardCache?.date || new Date().toISOString().slice(0,10);
+          const activeCount = id => assignments.filter(a => String(a['Shift ID']||'').trim()===id && String(a['الحالة']||'نشط').trim()==='نشط' && (!String(a['تاريخ النهاية']||'').trim() || String(a['تاريخ النهاية']).slice(0,10)>=today)).length;
+          content.innerHTML = `<button type="button" class="primary-btn" id="managerAddShift">＋ إضافة وردية</button><p class="manager-note">إدارة الورديات الثابتة والمرنة. لا يمكن إيقاف وردية مرتبطة بتعيينات سارية أو مستقبلية.</p><div class="manager-list-head"><b>${shifts.length} وردية مسجلة</b></div>${shifts.map(r=>{const id=String(r['Shift ID']||'');const active=String(r['الحالة']||'نشط').trim()==='نشط';const flex=id==='FLEX_NO_FIXED_TIME'||(!String(r['موعد الحضور']||'').trim()&&!String(r['موعد الانصراف']||'').trim());return `<article class="manager-row"><div><b>${escapeHtml(r['اسم الوردية']||id)}</b><small>المعرّف: ${escapeHtml(id)}<br>${flex?'بدون موعد ثابت':`${escapeHtml(r['موعد الحضور']||'—')} إلى ${escapeHtml(r['موعد الانصراف']||'—')}`} · سماح ${Number(r['فترة السماح بالدقائق'])||0} دقيقة<br>التعيينات النشطة: ${activeCount(id)}</small></div><span class="status-pill">${active?'نشط':'غير نشط'}</span><div class="manager-row-actions"><button type="button" class="secondary-btn" data-shift-edit="${escapeHtml(id)}">تعديل</button><button type="button" class="secondary-btn" data-shift-toggle="${escapeHtml(id)}" data-next-status="${active?'غير نشط':'نشط'}">${active?'إيقاف':'تفعيل'}</button></div></article>`;}).join('')||'<p class="muted">لا توجد ورديات مسجلة بعد.</p>'}`;
+          const reopenShiftCenter = async () => { closeModal(); await loadManagerDashboard(); openManagerModule('shifts'); };
+          content.querySelector('#managerAddShift').addEventListener('click',()=>openManagerShiftForm('create',null,reopenShiftCenter));
+          content.querySelectorAll('[data-shift-edit]').forEach(btn=>btn.addEventListener('click',()=>openManagerShiftForm('edit',shifts.find(x=>String(x['Shift ID'])===btn.dataset.shiftEdit),reopenShiftCenter))); 
+          content.querySelectorAll('[data-shift-toggle]').forEach(btn=>btn.addEventListener('click',async()=>{
+            const next=btn.dataset.nextStatus;
+            if(next==='غير نشط'&&!confirm('تأكيد إيقاف الوردية؟ لن يمكن إيقافها إذا كان لها تعيين ساري.')) return;
+            btn.disabled=true;
+            try { await api('shift_status',{shiftId:btn.dataset.shiftToggle,status:next}); await renderShifts(); if(tg?.showAlert)tg.showAlert(next==='نشط'?'تم تفعيل الوردية.':'تم إيقاف الوردية.'); }
+            catch(e){if(tg?.showAlert)tg.showAlert(e.message);btn.disabled=false;}
+          }));
+        };
+        await renderShifts();
       } else if(module==='staff') {
         const [rows,assignments,shifts]=await Promise.all([api('list',{entity:'employees'}),api('list',{entity:'assignments'}),api('list',{entity:'shifts'})]);
         const shiftNames=Object.fromEntries(shifts.map(x=>[String(x['Shift ID']||''),String(x['اسم الوردية']||x['اسم الشيفت']||x['الاسم']||'وردية')]));
@@ -550,13 +569,58 @@
     } catch(e) { content.innerHTML=`<div class="manager-load-error">${escapeHtml(e.message)}</div>`; }
   }
 
+  function openManagerShiftForm(mode, shift, onSaved) {
+    const r = shift || {};
+    const id = String(r['Shift ID'] || '');
+    const flexible = id === 'FLEX_NO_FIXED_TIME' || (!String(r['موعد الحضور'] || '').trim() && !String(r['موعد الانصراف'] || '').trim());
+    const title = mode === 'create' ? 'إضافة وردية جديدة' : 'تعديل بيانات الوردية';
+    const html = `<form id="managerShiftForm" class="manager-staff-form">
+      ${mode==='create'?`<label>نوع الوردية<select name="shiftType" id="managerShiftType"><option value="fixed">وردية بمواعيد ثابتة</option><option value="flexible">وردية بدون موعد ثابت</option></select></label><label>معرّف الوردية<input name="shiftId" id="managerShiftId" maxlength="30" pattern="[A-Za-z0-9_-]{2,30}" placeholder="مثال MORNING" required></label>`:`<div class="manager-note">معرّف الوردية: ${escapeHtml(id)}</div>`}
+      <label>اسم الوردية<input name="name" maxlength="60" value="${escapeHtml(r['اسم الوردية']||'')}" required></label>
+      <div id="managerShiftTimes" ${mode==='edit'&&flexible?'class="hidden"':''}><label>موعد الحضور<input name="startTime" type="time" value="${escapeHtml(r['موعد الحضور']||'09:00')}" ${mode==='create'?'required':''}></label><label>موعد الانصراف<input name="endTime" type="time" value="${escapeHtml(r['موعد الانصراف']||'17:00')}" ${mode==='create'?'required':''}></label></div>
+      <label>فترة السماح بالدقائق<input name="graceMinutes" type="number" min="0" max="180" step="1" value="${escapeHtml(r['فترة السماح بالدقائق'] ?? 15)}" required></label>
+      <button type="submit" class="primary-btn">${mode==='create'?'إنشاء الوردية':'حفظ التعديلات'}</button>
+    </form>`;
+    const panel = managerPanel(title, html);
+    const form = panel.querySelector('#managerShiftForm');
+    if (mode === 'create') {
+      const type = form.querySelector('#managerShiftType'), idField = form.querySelector('#managerShiftId'), times = form.querySelector('#managerShiftTimes');
+      const updateType = () => {
+        const flex = type.value === 'flexible';
+        if (flex) { idField.value = 'FLEX_NO_FIXED_TIME'; idField.readOnly = true; times.classList.add('hidden'); form.elements.startTime.required=false; form.elements.endTime.required=false; if(form.elements.graceMinutes.value==='15')form.elements.graceMinutes.value='0'; }
+        else { if(idField.value==='FLEX_NO_FIXED_TIME')idField.value=''; idField.readOnly=false; times.classList.remove('hidden'); form.elements.startTime.required=true; form.elements.endTime.required=true; if(form.elements.graceMinutes.value==='0')form.elements.graceMinutes.value='15'; }
+      };
+      type.addEventListener('change',updateType); updateType();
+    }
+    form.addEventListener('submit', async ev => {
+      ev.preventDefault();
+      const button=form.querySelector('button[type="submit"]'); button.disabled=true;
+      const data=Object.fromEntries(new FormData(form).entries());
+      try {
+        if (mode==='create') {
+          const flexible=data.shiftType==='flexible';
+          await api('shift_create',{shiftId:flexible?'FLEX_NO_FIXED_TIME':data.shiftId,name:data.name,flexible:flexible,startTime:data.startTime||'',endTime:data.endTime||'',graceMinutes:data.graceMinutes});
+        } else {
+          const payload={shiftId:id,name:data.name,graceMinutes:data.graceMinutes};
+          if(!flexible){payload.startTime=data.startTime;payload.endTime=data.endTime;}
+          await api('shift_update',payload);
+        }
+        closeModal();
+        if(typeof onSaved==='function') await onSaved();
+        if(tg?.HapticFeedback)tg.HapticFeedback.notificationOccurred('success');
+        if(tg?.showAlert)tg.showAlert(mode==='create'?'تم إنشاء الوردية بنجاح.':'تم تحديث الوردية بنجاح.');
+      } catch(e) { if(tg?.showAlert)tg.showAlert(e.message); else {let msg=form.querySelector('.manager-form-error');if(!msg){msg=document.createElement('p');msg.className='manager-form-error';form.appendChild(msg);}msg.textContent=e.message;} button.disabled=false; }
+    });
+  }
+
   function openManagerEmployeeForm(mode, employee, shifts) {
     const e=employee||{}; const id=String(e['Chat ID']||'');
     const title=mode==='create'?'إضافة مهندس جديد':mode==='edit'?'تعديل بيانات المهندس':'تعيين وردية للمهندس';
     let html='';
     if(mode==='assign') {
       const activeShifts=shifts.filter(x=>String(x['الحالة']||'نشط')==='نشط');
-      html=`<form id="managerStaffForm" class="manager-staff-form"><label>الوردية<select name="shiftId" required>${activeShifts.map(x=>`<option value="${escapeHtml(x['Shift ID'])}">${escapeHtml(x['اسم الوردية']||x['Shift ID'])} · ${escapeHtml(x['موعد الحضور']||'مرن')} - ${escapeHtml(x['موعد الانصراف']||'')}</option>`).join('')}</select></label><label>تاريخ البداية<input name="startDate" type="date" value="${escapeHtml(managerDashboardCache?.date || new Date().toISOString().slice(0,10))}" required></label><label>تاريخ النهاية (اختياري)<input name="endDate" type="date"></label><label>أيام العمل<input name="days" value="0,1,2,3,4,6" required><small>الأيام بالأرقام: الأحد 0، الاثنين 1، ... السبت 6. افصل بفاصلة.</small></label><button class="primary-btn" type="submit">حفظ تعيين الوردية</button></form>`;
+      const dayOptions=[['0','الأحد'],['1','الاثنين'],['2','الثلاثاء'],['3','الأربعاء'],['4','الخميس'],['5','الجمعة'],['6','السبت']];
+      html=`<form id="managerStaffForm" class="manager-staff-form"><label>الوردية<select name="shiftId" required>${activeShifts.map(x=>`<option value="${escapeHtml(x['Shift ID'])}">${escapeHtml(x['اسم الوردية']||x['Shift ID'])} · ${escapeHtml(x['موعد الحضور']||'مرن')} - ${escapeHtml(x['موعد الانصراف']||'')}</option>`).join('')}</select></label><label>تاريخ البداية<input name="startDate" type="date" value="${escapeHtml(managerDashboardCache?.date || new Date().toISOString().slice(0,10))}" required></label><label>تاريخ النهاية (اختياري)<input name="endDate" type="date"></label><fieldset class="manager-workdays"><legend>أيام العمل</legend><div>${dayOptions.map(([v,n])=>`<label><input type="checkbox" name="workDays" value="${v}" ${v!=='5'?'checked':''}> ${n}</label>`).join('')}</div><small>الوردية الثابتة لا تُسند يوم الجمعة. الوردية المرنة يمكن إسنادها لأي يوم.</small></fieldset><button class="primary-btn" type="submit">حفظ تعيين الوردية</button></form>`;
     } else {
       html=`<form id="managerStaffForm" class="manager-staff-form">${mode==='create'?'<label>Telegram Chat ID<input name="chatId" inputmode="numeric" pattern="[0-9]{5,20}" required></label>':''}<label>اسم المهندس<input name="name" maxlength="80" value="${escapeHtml(e['اسم الموظف']||'')}" required></label><label>الوظيفة<input name="job" maxlength="80" value="${escapeHtml(e['الوظيفة']||'مهندس')}" required></label><label>رقم الهاتف<input name="phone" maxlength="30" value="${escapeHtml(e['رقم الهاتف']||'')}"></label><button class="primary-btn" type="submit">${mode==='create'?'إضافة الحساب':'حفظ التعديلات'}</button></form>`;
     }
@@ -565,7 +629,7 @@
       try { const fd=new FormData(form), data=Object.fromEntries(fd.entries());
         if(mode==='create') await api('employee_create',data);
         else if(mode==='edit') await api('employee_update',{employeeId:id,...data});
-        else await api('shift_assign',{employeeId:id,...data});
+        else { const selectedDays=fd.getAll('workDays'); if(!selectedDays.length) throw new Error('اختار يوم عمل واحدًا على الأقل.'); data.days=selectedDays.join(','); await api('shift_assign',{employeeId:id,...data}); }
         closeModal(); if(tg?.HapticFeedback)tg.HapticFeedback.notificationOccurred('success');
         await loadManagerDashboard();
         openManagerModule('staff');
@@ -697,6 +761,7 @@
       return;
     }
     if(action==='history'){showAttendanceHistory();return;}
+    if(action==='my-shifts'){await showMyShifts();return;}
     if(action==='leave'){openRequestForm('leave');return;}
     if(action==='cash'){openRequestForm('cash');return;}
     if(action==='withdraw'){openModal('طلب سحب مبلغ', $('withdrawForm')); return;}
@@ -710,6 +775,16 @@
     if(action==='devices'){showList('devices');return;}
     if(action==='device-register'){openDeviceRegistration();return;}
     if(action==='refresh'){refreshEmployeeWorkspace();return;}
+  }
+
+  async function showMyShifts() {
+    const panel = managerPanel('جدول الورديات','<div class="manager-loading">جاري تحميل جدولك...</div>');
+    const content = panel.querySelector('.manager-module-content');
+    try {
+      const data = await api('my_shifts');
+      const rows = data.assignments || [];
+      content.innerHTML = `<p class="manager-note">اليوم: ${escapeHtml(data.today||'')} · يعرض الجدول جميع التعيينات النشطة المسجلة لحسابك.</p>${rows.map(r=>`<article class="manager-row"><div><b>${escapeHtml(r.name||r.shiftId)}</b><small>${r.flexible?'بدون موعد ثابت':`${escapeHtml(r.startTime||'—')} إلى ${escapeHtml(r.endTime||'—')} · سماح ${Number(r.graceMinutes)||0} دقيقة`}<br>أيام العمل: ${escapeHtml((r.dayNames||[]).join('، ')||'غير محددة')}<br>من ${escapeHtml(r.startDate||'بلا تاريخ بداية')} إلى ${escapeHtml(r.endDate||'مفتوح')}</small></div><span class="status-pill">${r.current?'ساري اليوم':'تعيين نشط'}</span></article>`).join('')||'<div class="manager-empty-state"><b>لا يوجد جدول ورديات مسجل لك</b><p>راجع الإدارة لتعيين ورديتك.</p></div>'}`;
+    } catch(e) { content.innerHTML=`<div class="manager-load-error">${escapeHtml(e.message)}</div>`; }
   }
 
   async function refreshEmployeeWorkspace(){

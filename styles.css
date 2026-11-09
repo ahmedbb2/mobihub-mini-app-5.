@@ -191,3 +191,11 @@ body.modal-open{overflow:hidden;touch-action:none}
 .inspection-form-item label,.device-inspection-form>label{display:flex;flex-direction:column;gap:5px;font-size:.9rem}
 .inspection-form-item select,.inspection-form-item textarea,.device-inspection-form select{width:100%;box-sizing:border-box}
 .inspection-form-item textarea{resize:vertical;min-height:48px}
+
+/* V1.10.8 — shift day selector */
+.manager-workdays{border:1px solid var(--line,#e7e9ed);border-radius:14px;padding:12px;margin:0 0 12px}
+.manager-workdays legend{padding:0 6px;font-weight:700}
+.manager-workdays>div{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:4px 0 8px}
+.manager-workdays label{display:flex;align-items:center;gap:7px;font-size:14px}
+.manager-workdays input{width:18px;height:18px;accent-color:var(--accent,#f28c28)}
+.manager-workdays small{display:block;color:var(--muted,#727983);line-height:1.6}

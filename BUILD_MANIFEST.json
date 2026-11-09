@@ -1,33 +1,32 @@
 {
-  "version": "1.10.7",
-  "base": "MobiHub Mini App V1.10.6 TEST",
-  "purpose": "V46 overtime lifecycle and absence review migration for TEST",
+  "version": "1.10.8",
+  "base": "MobiHub Mini App V1.10.7 TEST",
+  "purpose": "V46 shift management, assignment day picker, and employee schedule display for TEST",
   "new_api_actions": [
-    "overtime_status",
-    "overtime_request",
-    "overtime_decide",
-    "absence_decide"
+    "shift_create",
+    "shift_update",
+    "shift_status",
+    "my_shifts"
   ],
-  "existing_features_preserved": [
-    "Telegram initData authentication and role-aware workspaces",
-    "attendance GPS check-in and check-out",
-    "employee and manager workflows",
-    "requests and leave",
-    "cash custody and settlement",
-    "complaints and conversation threads",
-    "deductions and rewards",
-    "device registry and movement history",
-    "persistent device inspection sessions",
-    "notification settings and sending"
+  "preserved_features": [
+    "Overtime request, approval, and checkout settlement",
+    "Absence review",
+    "Attendance GPS and uniform confirmation",
+    "Employee requests, leave, cash custody, settlement, and withdrawals",
+    "Complaints and threaded messages",
+    "Deductions, rewards, and hygiene ratings",
+    "Device registry, movements, and persistent inspection sessions",
+    "Notification settings and manager/employee workspaces"
   ],
   "validation": {
     "apps_script_node_check": "passed",
     "app_js_node_check": "passed",
     "html_duplicate_ids": "none",
-    "overtime_helpers_unit_checks": "passed",
+    "shift_unit_tests": "passed",
+    "server_side_role_and_ownership_checks": "present",
     "api_routes_present": true
   },
   "not_live_tested": true,
   "production_changed": false,
-  "build": "TEST - overtime and absence review migration"
+  "build": "TEST - shift management and employee schedule"
 }

@@ -10,7 +10,7 @@
  */
 
 const MH = Object.freeze({
-  VERSION: '1.10.7',
+  VERSION: '1.10.8',
   TZ: 'Africa/Cairo',
   AUTH_MAX_AGE_SECONDS: 300,
   SHEETS: {
@@ -118,6 +118,21 @@ function doPost(e) {
         data = managerAssignShift_(profile, body);
         break;
 
+      case 'shift_create':
+        data = managerCreateShift_(profile, body);
+        break;
+
+      case 'shift_update':
+        data = managerUpdateShift_(profile, body);
+        break;
+
+      case 'shift_status':
+        data = managerSetShiftStatus_(profile, body);
+        break;
+
+      case 'my_shifts':
+        data = employeeMyShifts_(profile);
+        break;
 
       case 'device_update':
         data = managerUpdateDevice_(profile, body);
@@ -631,6 +646,7 @@ function managerDashboard_(profile) {
   const modules = {
     daily: ['super_admin','admin','supervisor'].includes(role),
     staff: ['super_admin','admin'].includes(role),
+    shifts: ['super_admin','admin'].includes(role),
     devices: ['super_admin','admin'].includes(role),
     requests: ['super_admin','admin','supervisor'].includes(role),
     finance: ['super_admin','finance'].includes(role),
@@ -785,6 +801,123 @@ function managerAssignShift_(profile, body) {
     sh.appendRow([employeeId,shiftId,start,end,days.join(','),'نشط']);
     return {assigned:true,employeeId:employeeId,shiftId:shiftId,startDate:start,endDate:end,days:days};
   } finally {lock.releaseLock();}
+}
+
+/* SHIFT MANAGEMENT + EMPLOYEE SCHEDULE — V1.10.8 */
+function mhValidClock_(value) {
+  const s = String(value || '').trim();
+  const m = s.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+  return m ? ('0' + m[1]).slice(-2) + ':' + m[2] : '';
+}
+function mhShiftRow_(shiftId) {
+  const sh = mhSheet_(MH.SHEETS.shifts);
+  mhAssertHeaders_(sh, MH_MANAGER_STAFF.SHIFT_HEADERS);
+  const rows = sh.getDataRange().getDisplayValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0] || '').trim() === String(shiftId || '').trim()) {
+      return {sheet:sh, row:i + 1, values:rows[i]};
+    }
+  }
+  throw new Error('SHIFT_NOT_FOUND');
+}
+function managerCreateShift_(profile, body) {
+  mhRequireRole_(profile, ['super_admin','admin']);
+  const shiftId = String(body.shiftId || '').trim();
+  const name = String(body.name || '').trim();
+  const flexible = body.flexible === true || body.flexible === 'true' || shiftId === 'FLEX_NO_FIXED_TIME';
+  const start = flexible ? '' : mhValidClock_(body.startTime);
+  const end = flexible ? '' : mhValidClock_(body.endTime);
+  const graceRaw = String(body.graceMinutes == null ? '15' : body.graceMinutes).trim();
+  const grace = Number(graceRaw);
+  if (!/^[A-Za-z0-9_-]{2,30}$/.test(shiftId) || (flexible && shiftId !== 'FLEX_NO_FIXED_TIME') || (!flexible && shiftId === 'FLEX_NO_FIXED_TIME')) throw new Error('INVALID_SHIFT_ID');
+  if (!name || name.length > 60) throw new Error('INVALID_SHIFT_NAME');
+  if (!flexible && (!start || !end)) throw new Error('INVALID_SHIFT_TIME');
+  if (!/^\d{1,3}$/.test(graceRaw) || !Number.isInteger(grace) || grace < 0 || grace > 180) throw new Error('INVALID_SHIFT_GRACE');
+  const lock = LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    const sh = mhSheet_(MH.SHEETS.shifts);
+    mhAssertHeaders_(sh, MH_MANAGER_STAFF.SHIFT_HEADERS);
+    const existing = mhRowsObjects_(sh);
+    if (flexible && existing.some(r => String(r['Shift ID'] || '').trim() === 'FLEX_NO_FIXED_TIME')) throw new Error('FLEX_SHIFT_ALREADY_EXISTS');
+    if (existing.some(r => String(r['Shift ID'] || '').trim() === shiftId)) throw new Error('SHIFT_ALREADY_EXISTS');
+    sh.appendRow([shiftId, name, start, end, grace, 'نشط']);
+    return {created:true, shift:{id:shiftId,name:name,startTime:start,endTime:end,graceMinutes:grace,isFlexible:flexible,status:'نشط'}};
+  } finally { lock.releaseLock(); }
+}
+function managerUpdateShift_(profile, body) {
+  mhRequireRole_(profile, ['super_admin','admin']);
+  const shiftId = String(body.shiftId || '').trim();
+  if (!shiftId) throw new Error('SHIFT_NOT_FOUND');
+  const lock = LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    const found = mhShiftRow_(shiftId), vals = found.values;
+    const flexible = shiftId === 'FLEX_NO_FIXED_TIME' || String(vals[2] || '').trim() === '' && String(vals[3] || '').trim() === '';
+    const name = Object.prototype.hasOwnProperty.call(body,'name') ? String(body.name || '').trim() : String(vals[1] || '').trim();
+    const graceRaw = Object.prototype.hasOwnProperty.call(body,'graceMinutes') ? String(body.graceMinutes).trim() : String(vals[4] || '15').trim();
+    const grace = Number(graceRaw);
+    if (!name || name.length > 60) throw new Error('INVALID_SHIFT_NAME');
+    if (!/^\d{1,3}$/.test(graceRaw) || !Number.isInteger(grace) || grace < 0 || grace > 180) throw new Error('INVALID_SHIFT_GRACE');
+    let start = String(vals[2] || '').trim(), end = String(vals[3] || '').trim();
+    if (!flexible) {
+      if (Object.prototype.hasOwnProperty.call(body,'startTime')) start = mhValidClock_(body.startTime);
+      if (Object.prototype.hasOwnProperty.call(body,'endTime')) end = mhValidClock_(body.endTime);
+      if (!start || !end) throw new Error('INVALID_SHIFT_TIME');
+    } else {
+      start = ''; end = '';
+    }
+    found.sheet.getRange(found.row,2,1,4).setValues([[name,start,end,grace]]);
+    return {updated:true,shift:{id:shiftId,name:name,startTime:start,endTime:end,graceMinutes:grace,isFlexible:flexible}};
+  } finally { lock.releaseLock(); }
+}
+function managerSetShiftStatus_(profile, body) {
+  mhRequireRole_(profile, ['super_admin','admin']);
+  const shiftId = String(body.shiftId || '').trim();
+  const status = String(body.status || '').trim();
+  if (!['نشط','غير نشط'].includes(status)) throw new Error('INVALID_SHIFT_STATUS');
+  const lock = LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    const found = mhShiftRow_(shiftId);
+    if (status === 'غير نشط') {
+      const assignmentRows = mhRowsObjects_(mhSheet_(MH.SHEETS.assignments));
+      const today = mhToday_();
+      const hasCurrentOrFutureAssignment = assignmentRows.some(r =>
+        String(r['Shift ID'] || '').trim() === shiftId &&
+        String(r['الحالة'] || 'نشط').trim() === 'نشط' &&
+        (!mhIsoDate_(r['تاريخ النهاية']) || mhIsoDate_(r['تاريخ النهاية']) >= today)
+      );
+      if (hasCurrentOrFutureAssignment) throw new Error('SHIFT_HAS_ACTIVE_ASSIGNMENTS');
+    }
+    found.sheet.getRange(found.row,6).setValue(status);
+    return {updated:true,shiftId:shiftId,status:status};
+  } finally { lock.releaseLock(); }
+}
+function employeeMyShifts_(profile) {
+  if (profile.role !== 'employee') throw new Error('EMPLOYEE_ONLY');
+  const ss = spreadsheet_();
+  const assignments = mhRows_(ss, MH.SHEETS.assignments)
+    .filter(r => String(r['Chat ID'] || '').trim() === String(profile.chatId) && String(r['الحالة'] || 'نشط').trim() === 'نشط');
+  const shifts = mhRows_(ss, MH.SHEETS.shifts);
+  const today = mhToday_();
+  const dayNames = ['الأحد','الاثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت'];
+  const items = assignments.map(a => {
+    const id = String(a['Shift ID'] || '').trim();
+    const shift = shifts.find(s => String(s['Shift ID'] || '').trim() === id && String(s['الحالة'] || 'نشط').trim() === 'نشط');
+    if (!shift) return null;
+    const flexible = id === 'FLEX_NO_FIXED_TIME' || String(shift['موعد الحضور'] || '').trim() === '' && String(shift['موعد الانصراف'] || '').trim() === '';
+    const days = String(a['أيام العمل'] || '0,1,2,3,4,6').split(/[،,]/).map(x => Number(String(x).trim())).filter(x => Number.isInteger(x) && x >= 0 && x <= 6);
+    const todayDay = new Date(today + 'T12:00:00').getDay();
+    const startDate = mhIsoDate_(a['تاريخ البداية']) || '';
+    const endDate = mhIsoDate_(a['تاريخ النهاية']) || '';
+    return {
+      shiftId:id, name:String(shift['اسم الوردية'] || id),
+      startTime:flexible?'':mhTime_(shift['موعد الحضور']), endTime:flexible?'':mhTime_(shift['موعد الانصراف']),
+      graceMinutes:flexible?0:Number(shift['فترة السماح بالدقائق'] || 15), flexible:flexible,
+      startDate:startDate, endDate:endDate, days:days, dayNames:days.map(d=>dayNames[d]),
+      current:(!startDate || startDate <= today) && (!endDate || endDate >= today) && days.includes(todayDay)
+    };
+  }).filter(Boolean).sort((a,b)=>String(a.startDate).localeCompare(String(b.startDate)));
+  const current = items.filter(x => x.current);
+  return {today:today, assignments:items, current:current, dayNames:dayNames};
 }
 
 /* DEVICE INTAKE + ASSIGNMENT — V1.9
