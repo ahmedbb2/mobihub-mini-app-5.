@@ -209,3 +209,165 @@ body.modal-open{overflow:hidden;touch-action:none}
 .my-device-row{margin:9px 0}
 .manager-module-toolbar .primary-btn{white-space:nowrap}
 @media(max-width:480px){.repair-price-list .manager-row{align-items:flex-start;flex-direction:column}.repair-price-list .manager-row strong{white-space:normal}}
+
+
+/* =========================================================
+   MOBIHUB SERVICE CENTER — V2 visual foundation
+   Presentation-only layer. Existing IDs/classes/API hooks preserved.
+   ========================================================= */
+:root{
+  color-scheme:light;
+  --bg:#f4f6f8; --panel:#ffffff; --panel-strong:#ffffff;
+  --line:#e5e9ee; --muted:#697586; --text:#18212b;
+  --orange:#f28a24; --orange-soft:#fff2e5; --orange-glow:rgba(242,138,36,.12);
+  --glass:#fff; --glass-hi:#fff; --glass-line:#e5e9ee;
+  --radius:18px;
+  font-family:'Cairo',system-ui,-apple-system,"Segoe UI",sans-serif;
+  color:#18212b;background:#f4f6f8;
+}
+html,body{
+  background:#f4f6f8!important;color:#18212b!important;
+  font-family:'Cairo',system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+body{
+  background:linear-gradient(180deg,#f8f9fb 0%,#f1f3f6 100%)!important;
+  min-height:100vh;
+}
+.app-shell{max-width:1120px;padding:18px 20px 42px}
+.topbar{
+  position:sticky;top:8px;z-index:30;height:66px;padding:0 18px;
+  background:#fff!important;border:1px solid #e7ebef!important;
+  border-radius:16px;box-shadow:0 3px 14px rgba(20,32,45,.045)!important;
+  backdrop-filter:none!important;-webkit-backdrop-filter:none!important;
+}
+.topbar strong{color:#17212b;font-size:16px}
+.topbar small{color:#788492!important;letter-spacing:.2px!important}
+.brand-mark{box-shadow:none}
+.brand-logo{box-shadow:none;border:1px solid #f0a04e}
+.status{background:#f4f7f5!important;color:#52645a!important;border:1px solid #e3ebe5!important}
+.status i{box-shadow:none}
+.welcome{
+  margin:18px 0 16px;padding:23px 25px;min-height:118px;
+  background:#fff!important;border:1px solid #e7ebef!important;
+  border-radius:18px;box-shadow:0 3px 14px rgba(20,32,45,.035)!important;
+  backdrop-filter:none!important;-webkit-backdrop-filter:none!important;
+}
+.welcome .eyebrow{color:#d87516!important}
+.welcome h1{color:#18212b;font-size:25px}
+.welcome .muted{color:#6b7785!important}
+.welcome-mark{color:#f3eee8!important}
+.workspace-nav{gap:8px;padding:2px 1px 12px}
+.workspace-nav button{
+  background:#fff!important;color:#536170!important;border:1px solid #e4e8ed!important;
+  border-radius:11px;box-shadow:none!important;backdrop-filter:none!important;
+}
+.workspace-nav button.active,.workspace-nav button:focus{
+  color:#a9570d!important;background:#fff3e7!important;border-color:#f3bd88!important;
+}
+section.attendance-panel,section.request-panel,section.management,
+.workspace-layout>.stats,.workspace-layout>.results,#homeActions,
+.manager-dashboard{
+  background:#fff!important;color:#18212b!important;
+  border:1px solid #e6eaee!important;border-radius:18px;
+  box-shadow:0 3px 14px rgba(20,32,45,.035)!important;
+  backdrop-filter:none!important;-webkit-backdrop-filter:none!important;
+}
+.section-head h2,.section-head h3,.form-title h3,
+.manager-dashboard h2,.manager-dashboard h3{color:#18212b!important}
+.muted,.section-head .muted,.request-heading p{color:#758190!important}
+.stat,.finance-stat,.manager-metric,.record,.review-item,
+.manager-row,.manager-complaint,.record-rich,.monthly-report,
+.attendance-state,.shift-info,.uniform-box,.notice-soft{
+  background:#f8fafb!important;color:#263342!important;
+  border:1px solid #e8edf1!important;box-shadow:none!important;
+}
+.stat b,.finance-stat b,.manager-metric>b,.report-stat b{color:#d87516!important}
+.stat span,.finance-stat small,.manager-metric>small{color:#687686!important}
+.home-card,.picker-card,.manager-module,.service-action{
+  background:#fff!important;color:#25313d!important;
+  border:1px solid #e4e9ee!important;border-radius:14px;
+  box-shadow:none!important;backdrop-filter:none!important;
+}
+.home-card:hover,.picker-card:hover,.manager-module:hover,.service-action:hover,
+.service-action.active{
+  background:#fff5eb!important;border-color:#f2b77f!important;
+  color:#27313c!important;box-shadow:none!important;
+}
+.home-card b,.picker-card b,.manager-module>b,.service-action b{color:#25313d!important}
+.home-card small,.picker-card small,.manager-module>small,
+.service-action small{color:#738091!important}
+.home-icon,.service-icon,.section-icon,.manager-module>span,
+.form-title-icon,.manager-metric-icon{
+  background:#fff0e1!important;color:#d87516!important;
+}
+input,select,textarea,
+.request-form input,.request-form select,.request-form textarea,
+.cash-settlement input,.cash-settlement textarea{
+  background:#fff!important;color:#1d2935!important;
+  border:1px solid #dce3e9!important;border-radius:10px!important;
+  box-shadow:none!important;
+}
+input::placeholder,textarea::placeholder{color:#9aa4ae!important}
+label{color:#465362!important}
+.request-form{background:#fafbfc!important;border:1px solid #e8edf1!important}
+.primary-btn,button.primary-btn{
+  background:#ef8a2b!important;color:#fff!important;border:0!important;
+  box-shadow:none!important;border-radius:11px;font-weight:800;
+}
+.secondary-btn,button.secondary-btn{
+  background:#f1f4f6!important;color:#354353!important;
+  border:1px solid #e0e6eb!important;box-shadow:none!important;
+}
+.text-btn,button.text-btn{color:#bd6417!important}
+.inline-message{background:#edf8f1!important;color:#287449!important}
+.error,.inline-message.is-error{background:#fff0f0!important;color:#a52d2d!important}
+.manager-hero{
+  background:#fff8f1!important;border:1px solid #f3e3d3!important;
+}
+.manager-hero h2{color:#18212b!important}
+.manager-hero p,.manager-dashboard-head p,.manager-section-head p{color:#738091!important}
+.manager-hero-mark{color:#f2e4d7!important}
+.manager-loading,.manager-load-error,.manager-empty{
+  background:#f8fafb!important;color:#687686!important;border:1px solid #e8edf1!important;
+}
+.manager-load-error{color:#a52d2d!important;background:#fff1f1!important}
+.manager-complaint b,.manager-row b{color:#25313d!important}
+.manager-complaint small,.manager-row small,.manager-complaint p{color:#687686!important}
+.status-pill,.pill-status{background:#fff1e3!important;color:#a9570d!important;border:1px solid #f4dfca!important}
+
+/* One clean modal layer; no glass/dark nested visual treatment. */
+.app-modal{z-index:10000}
+.modal-backdrop{
+  background:rgba(22,32,43,.38)!important;
+  backdrop-filter:none!important;-webkit-backdrop-filter:none!important;
+}
+.modal-sheet{
+  background:#fff!important;color:#18212b!important;
+  border:1px solid #e3e8ed!important;border-radius:20px 20px 0 0!important;
+  box-shadow:0 12px 40px rgba(20,32,45,.18)!important;
+  backdrop-filter:none!important;-webkit-backdrop-filter:none!important;
+}
+.modal-header{border-bottom:1px solid #edf0f3!important}
+.modal-header h2{color:#18212b!important}
+.modal-header small{color:#c56a19!important}
+.modal-close{background:#f2f4f6!important;color:#263442!important;border:1px solid #e2e7eb!important}
+.modal-body>.request-form,.modal-body>.request-panel,
+.modal-body>.results,.modal-body>.request-picker{background:transparent!important}
+body.modal-open{touch-action:pan-y}
+@media(min-width:700px){
+ .modal-sheet{border-radius:20px!important;max-height:86vh}
+}
+@media(max-width:620px){
+ .app-shell{padding:10px 12px 30px}
+ .topbar{top:4px;height:58px;padding:0 11px}
+ .welcome{padding:17px;margin-top:13px}
+ .welcome h1{font-size:21px}
+ .workspace-layout{grid-template-columns:minmax(0,1fr)}
+ .stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .manager-modules{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .manager-module{min-height:94px}
+ .modal-sheet{max-height:90dvh;padding-inline:15px}
+}
+@media(prefers-reduced-motion:reduce){
+ *,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;transition-duration:.01ms!important}
+}
