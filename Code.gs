@@ -10,7 +10,7 @@
  */
 
 const MH = Object.freeze({
-  VERSION: '1.10.8',
+  VERSION: '1.10.9',
   TZ: 'Africa/Cairo',
   AUTH_MAX_AGE_SECONDS: 300,
   SHEETS: {
@@ -266,6 +266,19 @@ function doPost(e) {
         break;
       case 'device_inspection_save':
         data = deviceInspectionSaveMiniV106_(profile, body);
+        break;
+
+      case 'repair_price_categories':
+        data = repairPriceCategoriesMini_();
+        break;
+      case 'repair_price_models':
+        data = repairPriceModelsMini_(body);
+        break;
+      case 'repair_price_search':
+        data = repairPriceSearchMini_(body);
+        break;
+      case 'repair_price_issues':
+        data = repairPriceIssuesMini_(body);
         break;
 
       case 'complaint_create':
@@ -2786,4 +2799,104 @@ function deviceInspectionSaveMiniV106_(profile, body) {
     untested:normalized.filter(x=>x.result==='لم يختبر').length,
     pending:normalized.filter(x=>!x.result).length
   };
+}
+
+
+/* REPAIR PRICE BOOK — Mini App parity port from V46.
+ * Read-only access to the separate linked price workbook. It never writes prices.
+ */
+const MH_REPAIR_PRICE_SOURCE_ID_ = '1VgJBb-159r5J7oQB2Xt1Q_IMQOHiUBBAcYL5ekMQhEM';
+const MH_REPAIR_PRICE_PROPERTY_ = 'MOBIHUB_REPAIR_PRICE_SPREADSHEET_ID';
+const MH_REPAIR_PRICE_CATEGORIES_ = [
+  {key:'iphone', label:'iPhone – قطع الغيار', sheet:'Price list', title:'iPhone – قطع الغيار', startRow:2, endRow:70, headerRow:1},
+  {key:'board', label:'iPhone – أعطال البوردة', sheet:'Mother board', title:'iPhone – أعطال البوردة', startRow:2, endRow:40, headerRow:1},
+  {key:'watch', label:'Apple Watch', sheet:'Apple Watch ', title:'Apple Watch', startRow:2, endRow:220, headerRow:1},
+  {key:'airpods', label:'AirPods – أسعار الأفراد', sheet:'AirPods', title:'AirPods – أسعار الأفراد', startRow:2, endRow:10, headerRow:1},
+  {key:'airpods_commercial', label:'AirPods – الأسعار التجارية', sheet:'AirPods', title:'AirPods – الأسعار التجارية', startRow:13, endRow:220, headerRow:12}
+];
+function repairPriceConfigMini_(category) {
+  const cfg = MH_REPAIR_PRICE_CATEGORIES_.find(x => x.key === String(category || '').trim());
+  if (!cfg) throw new Error('INVALID_REPAIR_PRICE_CATEGORY');
+  return cfg;
+}
+function repairPriceBookMini_() {
+  const id = PropertiesService.getScriptProperties().getProperty(MH_REPAIR_PRICE_PROPERTY_) || MH_REPAIR_PRICE_SOURCE_ID_;
+  if (!id) throw new Error('REPAIR_PRICE_SOURCE_NOT_CONFIGURED');
+  try { return SpreadsheetApp.openById(id); }
+  catch (e) { console.error('Repair price workbook unavailable: ' + String(e && e.message || e)); throw new Error('REPAIR_PRICE_SOURCE_UNAVAILABLE'); }
+}
+function repairPriceSheetMini_(book, cfg) {
+  const expected = String(cfg.sheet || '').trim().toLowerCase();
+  const sh = book.getSheets().find(x => String(x.getName() || '').trim().toLowerCase() === expected);
+  if (!sh) throw new Error('REPAIR_PRICE_SHEET_MISSING');
+  return sh;
+}
+function repairPriceNormalizeMini_(value) {
+  return String(value || '').toLowerCase().replace(/[\u200e\u200f\uFEFF]/g,'').replace(/[–—_.,،؛:()[\]{}]/g,' ').replace(/\s+/g,' ').trim();
+}
+function repairPriceModelsMiniForCategory_(book, cfg) {
+  const sh = repairPriceSheetMini_(book, cfg);
+  const last = Math.min(sh.getLastRow(), cfg.endRow);
+  if (last < cfg.startRow) return [];
+  const width = sh.getLastColumn();
+  if (width < 2) return [];
+  const headers = sh.getRange(cfg.headerRow,1,1,width).getDisplayValues()[0];
+  const values = sh.getRange(cfg.startRow,1,last-cfg.startRow+1,width).getDisplayValues();
+  const models=[];
+  values.forEach((row,index)=>{
+    const name=String(row[0]||'').replace(/[\u200e\u200f\uFEFF]/g,'').replace(/\uF8FF/g,'Apple').trim();
+    if(!name || name.indexOf('device\\')===0 || name.indexOf('AirPod\\')===0 || name.indexOf('Watch\\')===0) return;
+    const hasPrice=row.some((v,col)=>col>0 && String(headers[col]||'').trim()!=='' && String(v||'').trim()!=='');
+    if(hasPrice) models.push({row:cfg.startRow+index,name:name});
+  });
+  return models;
+}
+function repairPriceCategoriesMini_() {
+  return {categories:MH_REPAIR_PRICE_CATEGORIES_.map(c=>({key:c.key,label:c.label})),searchAvailable:true};
+}
+function repairPriceModelsMini_(body) {
+  const cfg=repairPriceConfigMini_(body.category), book=repairPriceBookMini_();
+  const models=repairPriceModelsMiniForCategory_(book,cfg);
+  const pageSize=12, totalPages=Math.max(1,Math.ceil(models.length/pageSize));
+  const page=Math.max(0,Math.min(Number(body.page)||0,totalPages-1));
+  return {category:cfg.key,label:cfg.label,models:models.slice(page*pageSize,(page+1)*pageSize),page,total:models.length,totalPages,pageSize};
+}
+function repairPriceSearchMini_(body) {
+  const query=String(body.query||'').trim();
+  if(query.length<2 || query.length>100) throw new Error('INVALID_REPAIR_PRICE_QUERY');
+  const needle=repairPriceNormalizeMini_(query);
+  const book=repairPriceBookMini_(), results=[];
+  MH_REPAIR_PRICE_CATEGORIES_.forEach(cfg=>repairPriceModelsMiniForCategory_(book,cfg).forEach(model=>{
+    const hay=repairPriceNormalizeMini_(model.name);
+    if(hay.indexOf(needle)!==-1 || needle.split(' ').every(part=>hay.indexOf(part)!==-1)) results.push({category:cfg.key,categoryLabel:cfg.label,row:model.row,name:model.name});
+  }));
+  const pageSize=10,totalPages=Math.max(1,Math.ceil(results.length/pageSize));
+  const page=Math.max(0,Math.min(Number(body.page)||0,totalPages-1));
+  return {query:query,results:results.slice(page*pageSize,(page+1)*pageSize),page,total:results.length,totalPages,pageSize};
+}
+function repairPriceIssuesMini_(body) {
+  const cfg=repairPriceConfigMini_(body.category), rowNum=Number(body.row);
+  if(!Number.isInteger(rowNum) || rowNum<cfg.startRow || rowNum>cfg.endRow) throw new Error('REPAIR_PRICE_MODEL_NOT_FOUND');
+  const book=repairPriceBookMini_(), sh=repairPriceSheetMini_(book,cfg);
+  const allowed=repairPriceModelsMiniForCategory_(book,cfg).some(x=>x.row===rowNum);
+  if(!allowed) throw new Error('REPAIR_PRICE_MODEL_NOT_FOUND');
+  const width=sh.getLastColumn();
+  const headers=sh.getRange(cfg.headerRow,1,1,width).getDisplayValues()[0];
+  const values=sh.getRange(rowNum,1,1,width).getDisplayValues()[0];
+  const issues=[];
+  for(let col=1;col<width;col++) {
+    const issue=String(headers[col]||'').replace(/[\u200e\u200f\uFEFF]/g,'').trim();
+    const price=String(values[col]||'').replace(/[\u200e\u200f\uFEFF]/g,'').trim();
+    if(issue && price) issues.push({issue:issue,price:price});
+  }
+  return {category:cfg.key,label:cfg.label,row:rowNum,model:String(values[0]||'').replace(/\uF8FF/g,'Apple').trim(),issues:issues};
+}
+function configureRepairPriceSourceOnceMini_() {
+  const book=SpreadsheetApp.openById(MH_REPAIR_PRICE_SOURCE_ID_);
+  const required=['Price list','Mother board','Apple Watch','AirPods'];
+  const names=book.getSheets().map(x=>String(x.getName()).trim().toLowerCase());
+  const missing=required.filter(x=>names.indexOf(x.trim().toLowerCase())<0);
+  if(missing.length) throw new Error('REPAIR_PRICE_SHEETS_MISSING:' + missing.join(','));
+  PropertiesService.getScriptProperties().setProperty(MH_REPAIR_PRICE_PROPERTY_,MH_REPAIR_PRICE_SOURCE_ID_);
+  return {configured:true,workbook:book.getName()};
 }

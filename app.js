@@ -469,7 +469,8 @@
         const [rows,employees]=await Promise.all([api('device_list'),api('device_staff')]);
         const statuses=['تم الاستلام','قيد الفحص','يحتاج قطعة غيار','يحتاج التواصل مع العميل','بانتظار رد العميل','لم يتم الرد','قيد الإصلاح','مراجعة الجودة','يحتاج إعادة فحص','جاهز للتسليم','تم التسليم'];
         const locations=['قسم الاستلام','ترابيزة الهاردوير','درج الفحص 1','درج الفحص 2','درج مراجعة الجودة','درج انتظار قطع الغيار','درج انتظار العميل','درج جاهز للتسليم','مكان آخر'];
-        content.innerHTML=`<div class="manager-mini-kpis"><div><b>${rows.length}</b><small>أجهزة ظاهرة حسب الصلاحية</small></div><div><b>${employees.length}</b><small>فنيون نشطون</small></div></div><div class="manager-module-toolbar"><input id="deviceModuleSearch" type="search" placeholder="ابحث برقم الطلب أو الجهاز أو الفني"><button type="button" class="secondary-btn" id="deviceInspectionCatalog">كتالوج الفحص</button></div><h4>الأجهزة وسجل المتابعة</h4>`+(rows.length?rows.map((r,i)=>`<article class="manager-row"><div><b>${escapeHtml(r.orderId||'جهاز')}</b><small>${escapeHtml(r.deviceName||'')} · العميل: ${escapeHtml(r.customerName||'')}</small></div><span class="status-pill">${escapeHtml(r.status||'غير محدد')}</span><small>المسؤول: ${escapeHtml(r.employeeName||'—')} · المكان: ${escapeHtml(r.location||'—')}</small><div class="manager-row-actions"><button class="secondary-btn" type="button" data-device-detail="${i}">التفاصيل والسجل</button><button class="secondary-btn" type="button" data-device-edit="${i}">تحديث الحالة</button><button class="secondary-btn" type="button" data-device-transfer="${i}">تحويل لفني</button><button class="secondary-btn" type="button" data-device-inspection="${i}">فحص الجهاز</button></div></article>`).join(''):'<p class="muted">لا توجد أجهزة مسجلة أو لا توجد أجهزة ضمن صلاحيات حسابك.</p>') ;
+        content.innerHTML=`<div class="manager-mini-kpis"><div><b>${rows.length}</b><small>أجهزة ظاهرة حسب الصلاحية</small></div><div><b>${employees.length}</b><small>فنيون نشطون</small></div></div><div class="manager-module-toolbar"><input id="deviceModuleSearch" type="search" placeholder="ابحث برقم الطلب أو الجهاز أو الفني"><button type="button" class="secondary-btn" id="deviceInspectionCatalog">كتالوج الفحص</button><button type="button" class="secondary-btn" id="managerRepairPrices">أسعار الإصلاح</button></div><h4>الأجهزة وسجل المتابعة</h4>`+(rows.length?rows.map((r,i)=>`<article class="manager-row"><div><b>${escapeHtml(r.orderId||'جهاز')}</b><small>${escapeHtml(r.deviceName||'')} · العميل: ${escapeHtml(r.customerName||'')}</small></div><span class="status-pill">${escapeHtml(r.status||'غير محدد')}</span><small>المسؤول: ${escapeHtml(r.employeeName||'—')} · المكان: ${escapeHtml(r.location||'—')}</small><div class="manager-row-actions"><button class="secondary-btn" type="button" data-device-detail="${i}">التفاصيل والسجل</button><button class="secondary-btn" type="button" data-device-edit="${i}">تحديث الحالة</button><button class="secondary-btn" type="button" data-device-transfer="${i}">تحويل لفني</button><button class="secondary-btn" type="button" data-device-inspection="${i}">فحص الجهاز</button></div></article>`).join(''):'<p class="muted">لا توجد أجهزة مسجلة أو لا توجد أجهزة ضمن صلاحيات حسابك.</p>') ;
+        content.querySelector('#managerRepairPrices').addEventListener('click',()=>openRepairPriceBook());
         const search=content.querySelector('#deviceModuleSearch');
         search.addEventListener('input',()=>{const q=search.value.trim().toLowerCase();content.querySelectorAll('.manager-row').forEach(row=>row.classList.toggle('hidden',!row.textContent.toLowerCase().includes(q)));});
         content.querySelector('#deviceInspectionCatalog').addEventListener('click',async()=>{
@@ -772,7 +773,8 @@
     if(action==='deductions'){showList('deductions');return;}
     if(action==='rewards'){ $('financeCenter').classList.remove('hidden'); openModal('مكافآتي', $('financeCenter')); loadFinanceSummary(); return;}
     if(action==='monthly'){loadMonthlySummary();return;}
-    if(action==='devices'){showList('devices');return;}
+    if(action==='devices'){await openEmployeeDevices();return;}
+    if(action==='repair-prices'){await openRepairPriceBook();return;}
     if(action==='device-register'){openDeviceRegistration();return;}
     if(action==='refresh'){refreshEmployeeWorkspace();return;}
   }
@@ -799,6 +801,105 @@
     }catch(e){if(tg&&typeof tg.showAlert==='function') tg.showAlert(e.message);else fail(e.message);}
     finally{if(btn)btn.disabled=false;}
   }
+  const DEVICE_STATUS_OPTIONS = ['تم الاستلام','قيد الفحص','يحتاج قطعة غيار','يحتاج التواصل مع العميل','بانتظار رد العميل','لم يتم الرد','قيد الإصلاح','مراجعة الجودة','يحتاج إعادة فحص','جاهز للتسليم','تم التسليم'];
+  const DEVICE_LOCATION_OPTIONS = ['قسم الاستلام','ترابيزة الهاردوير','درج الفحص 1','درج الفحص 2','درج مراجعة الجودة','درج انتظار قطع الغيار','درج انتظار العميل','درج جاهز للتسليم','مكان آخر'];
+
+  async function openEmployeeDevices(){
+    const panel=managerPanel('أجهزتي','<div class="manager-loading">جاري تحميل الأجهزة المسندة إليك...</div>');
+    const content=panel.querySelector('.manager-module-content');
+    try{
+      const rows=await api('device_list');
+      if(!rows.length){content.innerHTML='<div class="manager-empty-state"><b>لا توجد أجهزة مسندة لحسابك حاليًا</b><p>ستظهر هنا الأجهزة التي تم إسنادها إليك أو استلامها بواسطة حسابك.</p></div>';return;}
+      content.innerHTML=`<p class="manager-note">تعرض هذه القائمة الأجهزة المسندة إليك أو المسجلة بواسطة حساب الاستلام الخاص بك فقط.</p><div class="manager-module-toolbar"><input id="myDeviceSearch" type="search" placeholder="ابحث برقم الطلب أو الحالة أو المكان"><button type="button" class="secondary-btn" id="refreshMyDevices">تحديث</button></div>${rows.map((r,i)=>`<article class="manager-row my-device-row"><div><b>${escapeHtml(r.orderId)}</b><small>${escapeHtml(r.deviceName||'جهاز مسجل برقم طلب')} · آخر تحديث: ${escapeHtml(r.updatedAt||'—')}</small></div><span class="status-pill">${escapeHtml(r.status||'غير محدد')}</span><small>المكان: ${escapeHtml(r.location||'—')} · مسؤول الجهاز: ${escapeHtml(r.employeeName||'—')}</small><div class="manager-row-actions"><button type="button" class="secondary-btn" data-my-device-detail="${i}">التفاصيل والحركة</button><button type="button" class="secondary-btn" data-my-device-status="${i}">تحديث الحالة</button><button type="button" class="primary-btn" data-my-device-inspect="${i}">فحص الجهاز</button></div></article>`).join('')}`;
+      content.querySelector('#refreshMyDevices').addEventListener('click',()=>openEmployeeDevices());
+      content.querySelector('#myDeviceSearch').addEventListener('input',ev=>{const q=ev.target.value.toLowerCase();content.querySelectorAll('.my-device-row').forEach(el=>el.classList.toggle('hidden',!el.textContent.toLowerCase().includes(q)));});
+      content.querySelectorAll('[data-my-device-detail]').forEach(btn=>btn.addEventListener('click',()=>showEmployeeDeviceDetail(content,rows[Number(btn.dataset.myDeviceDetail)])));
+      content.querySelectorAll('[data-my-device-status]').forEach(btn=>btn.addEventListener('click',()=>showEmployeeDeviceStatus(content,rows[Number(btn.dataset.myDeviceStatus)])));
+      content.querySelectorAll('[data-my-device-inspect]').forEach(btn=>btn.addEventListener('click',()=>openEmployeeDeviceInspection(rows[Number(btn.dataset.myDeviceInspect)])));
+    }catch(e){content.innerHTML=`<div class="manager-load-error">${escapeHtml(e.message)}</div>`;}
+  }
+
+  async function showEmployeeDeviceDetail(content,row){
+    content.innerHTML='<div class="manager-loading">جاري تحميل تفاصيل الجهاز وسجل الحركة...</div>';
+    try{
+      const d=await api('device_detail',{orderId:row.orderId}),x=d.device||{};
+      content.innerHTML=`<button type="button" class="secondary-btn" id="backMyDevices">رجوع للأجهزة</button><div class="manager-device-detail"><h4>طلب ${escapeHtml(x.orderId||row.orderId)}</h4><p><b>الجهاز:</b> ${escapeHtml(x.deviceName||'غير محدد')}</p><p><b>المشكلة المسجلة:</b> ${escapeHtml(x.issue||'—')}</p><p><b>الحالة:</b> ${escapeHtml(x.status||'—')}</p><p><b>المكان:</b> ${escapeHtml(x.location||'—')}</p><p><b>مسؤول الاستلام:</b> ${escapeHtml(x.intakeName||'—')}</p><p><b>الفني المسؤول:</b> ${escapeHtml(x.employeeName||'—')}</p><p><b>تاريخ الاستلام:</b> ${escapeHtml(x.receivedAt||'—')}</p><h4>سجل الحركة</h4>${(d.history||[]).map(h=>`<article class="manager-row"><b>${escapeHtml(h['نوع الحركة']||'حركة')}</b><small>${escapeHtml(h['التاريخ والوقت']||'')} · ${escapeHtml(h['منفذ الحركة']||'')}</small><small>الحالة: ${escapeHtml(h['الحالة']||'—')} · المكان: ${escapeHtml(h['المكان']||'—')}</small>${h['ملاحظات']?`<p>${escapeHtml(h['ملاحظات'])}</p>`:''}</article>`).join('')||'<p class="muted">لا توجد حركات مسجلة حتى الآن.</p>'}</div>`;
+      content.querySelector('#backMyDevices').addEventListener('click',()=>openEmployeeDevices());
+    }catch(e){content.innerHTML=`<button type="button" class="secondary-btn" id="backMyDevices">رجوع للأجهزة</button><p class="manager-load-error">${escapeHtml(e.message)}</p>`;content.querySelector('#backMyDevices').addEventListener('click',()=>openEmployeeDevices());}
+  }
+
+  function showEmployeeDeviceStatus(content,row){
+    content.innerHTML=`<button type="button" class="secondary-btn" id="backMyDevices">رجوع للأجهزة</button><form id="myDeviceStatusForm" class="manager-staff-form"><h4>تحديث حالة الجهاز ${escapeHtml(row.orderId)}</h4><label>الحالة<select name="status">${DEVICE_STATUS_OPTIONS.map(x=>`<option ${x===row.status?'selected':''}>${x}</option>`).join('')}</select></label><label>المكان<select name="location">${DEVICE_LOCATION_OPTIONS.map(x=>`<option ${x===row.location?'selected':''}>${x}</option>`).join('')}</select></label><label>ملاحظات الحركة<textarea name="note" rows="3" maxlength="500" placeholder="اكتب ملاحظة مختصرة"></textarea></label><button type="submit" class="primary-btn">حفظ التحديث</button></form>`;
+    content.querySelector('#backMyDevices').addEventListener('click',()=>openEmployeeDevices());
+    content.querySelector('#myDeviceStatusForm').addEventListener('submit',async ev=>{ev.preventDefault();const form=ev.currentTarget,btn=form.querySelector('button[type=submit]');btn.disabled=true;try{const fd=new FormData(form);await api('device_status_update',{orderId:row.orderId,...Object.fromEntries(fd.entries())});if(tg?.showAlert)tg.showAlert('تم تحديث حالة الجهاز وتسجيل الحركة.');await openEmployeeDevices();}catch(e){if(tg?.showAlert)tg.showAlert(e.message);btn.disabled=false;}});
+  }
+
+  async function openEmployeeDeviceInspection(row){
+    const panel=managerPanel('فحص الجهاز','<div class="manager-loading">جاري تحميل كتالوج الفحص...</div>');
+    const content=panel.querySelector('.manager-module-content');
+    try{
+      const catalog=await api('device_inspection_catalog');
+      const guess=(name)=>{const v=String(name||'').toLowerCase();if(v.includes('ipad'))return 'ipad';if(v.includes('mac'))return 'macbook';if(v.includes('watch'))return 'watch';if(v.includes('airpods')||v.includes('airpod'))return 'airpods';return 'iphone';};
+      const initial=guess(row.deviceName);
+      await renderEmployeeInspectionForm(content,row,catalog,initial);
+    }catch(e){content.innerHTML=`<div class="manager-load-error">${escapeHtml(e.message)}</div>`;}
+  }
+
+  async function renderEmployeeInspectionForm(content,row,catalog,type){
+    const d=catalog[type];
+    const saved=await api('device_inspection_get',{orderId:row.orderId,deviceType:type});
+    const old={};(saved.items||[]).forEach(x=>old[x.index]=x);
+    const items=d.items.map((it,i)=>{const v=old[i]||{};return `<article class="inspection-form-item"><div class="inspection-form-title"><b>${i+1}. ${escapeHtml(it.name)}</b><details><summary>تعليمات الاختبار</summary><p>${escapeHtml(it.instruction||'')}</p></details></div><label>النتيجة<select name="result_${i}"><option value="" ${!v.result?'selected':''}>لم يتم التقييم</option><option value="سليم" ${v.result==='سليم'?'selected':''}>سليم</option><option value="مشكلة" ${v.result==='مشكلة'?'selected':''}>مشكلة</option><option value="لم يختبر" ${v.result==='لم يختبر'?'selected':''}>لم يختبر</option></select></label><label>ملاحظات<textarea name="note_${i}" rows="2" maxlength="500">${escapeHtml(v.note||'')}</textarea></label></article>`;}).join('');
+    content.innerHTML=`<div class="inspection-form-meta"><b>رقم الطلب: ${escapeHtml(row.orderId)}</b><span>${escapeHtml(d.name)} · ${d.items.length} اختبار</span>${saved.updatedAt?`<small>آخر حفظ: ${escapeHtml(saved.updatedAt)}</small>`:''}</div><label>نوع الجهاز<select id="employeeInspectionType">${Object.entries(catalog).map(([k,v])=>`<option value="${k}" ${k===type?'selected':''}>${escapeHtml(v.name)}</option>`).join('')}</select></label><form id="employeeDeviceInspectionForm" class="device-inspection-form"><div class="inspection-form-items">${items}</div><button type="submit" class="primary-btn">حفظ نتائج الفحص</button></form>`;
+    content.querySelector('#employeeInspectionType').addEventListener('change',ev=>renderEmployeeInspectionForm(content,row,catalog,ev.target.value).catch(e=>{content.innerHTML=`<p class="manager-load-error">${escapeHtml(e.message)}</p>`;}));
+    content.querySelector('#employeeDeviceInspectionForm').addEventListener('submit',async ev=>{ev.preventDefault();const form=ev.currentTarget,btn=form.querySelector('button[type=submit]');btn.disabled=true;try{const typeNow=content.querySelector('#employeeInspectionType').value, count=catalog[typeNow].items.length,fd=new FormData(form),items=[];for(let i=0;i<count;i++)items.push({index:i,result:String(fd.get('result_'+i)||''),note:String(fd.get('note_'+i)||'')});const result=await api('device_inspection_save',{orderId:row.orderId,deviceType:typeNow,items});if(tg?.showAlert)tg.showAlert(`تم حفظ الفحص. مكتمل: ${result.completed} · مشاكل: ${result.issues} · لم يختبر: ${result.untested}`);closeModal();await openEmployeeDevices();}catch(e){if(tg?.showAlert)tg.showAlert(e.message);btn.disabled=false;}});
+  }
+
+  async function openRepairPriceBook(){
+    const panel=managerPanel('أسعار الإصلاح','<div class="manager-loading">جاري تحميل أقسام الأسعار...</div>');
+    const content=panel.querySelector('.manager-module-content');
+    await renderRepairPriceHome(content);
+  }
+  async function renderRepairPriceHome(content){
+    content.innerHTML='<div class="manager-loading">جاري تحميل الأقسام...</div>';
+    try{
+      const d=await api('repair_price_categories');
+      content.innerHTML=`<p class="manager-note">الأسعار معروضة كما هي من ملف الأسعار المرتبط. لا يتم تعديل ملف الأسعار من التطبيق.</p><form id="repairPriceSearchForm" class="manager-module-toolbar"><input name="query" minlength="2" maxlength="100" placeholder="ابحث عن موديل في كل الأقسام" required><button type="submit" class="primary-btn">بحث</button></form><h4>الأقسام</h4><div class="repair-price-categories">${d.categories.map(c=>`<button type="button" class="manager-action-card" data-price-category="${c.key}"><b>${escapeHtml(c.label)}</b><small>عرض الموديلات والأسعار</small></button>`).join('')}</div>`;
+      content.querySelector('#repairPriceSearchForm').addEventListener('submit',ev=>{ev.preventDefault();const q=new FormData(ev.currentTarget).get('query');renderRepairPriceSearch(content,q,0);});
+      content.querySelectorAll('[data-price-category]').forEach(b=>b.addEventListener('click',()=>renderRepairPriceModels(content,b.dataset.priceCategory,0)));
+    }catch(e){content.innerHTML=`<div class="manager-load-error">${escapeHtml(e.message)}<p>تأكد من إتاحة ملف الأسعار لحساب Google Apps Script وتشغيل إعداد ربط الأسعار في بيئة TEST.</p></div>`;}
+  }
+  async function renderRepairPriceModels(content,category,page){
+    content.innerHTML='<div class="manager-loading">جاري تحميل الموديلات...</div>';
+    try{
+      const d=await api('repair_price_models',{category,page});
+      content.innerHTML=`<button type="button" class="secondary-btn" id="priceBackHome">الأقسام الرئيسية</button><h4>${escapeHtml(d.label)}</h4><p class="manager-note">الصفحة ${d.page+1} من ${d.totalPages} · ${d.total} موديل</p>${d.models.map(m=>`<button type="button" class="manager-action-card repair-price-model" data-price-row="${m.row}" data-price-category="${category}"><b>${escapeHtml(m.name)}</b><small>عرض الأعطال والأسعار</small></button>`).join('')||'<p class="muted">لا توجد موديلات بأسعار مسجلة في هذا القسم.</p>'}<div class="manager-row-actions">${d.page>0?'<button type="button" class="secondary-btn" id="pricePrev">السابق</button>':''}${d.page+1<d.totalPages?'<button type="button" class="secondary-btn" id="priceNext">التالي</button>':''}</div>`;
+      content.querySelector('#priceBackHome').addEventListener('click',()=>renderRepairPriceHome(content));
+      if(content.querySelector('#pricePrev'))content.querySelector('#pricePrev').addEventListener('click',()=>renderRepairPriceModels(content,category,d.page-1));
+      if(content.querySelector('#priceNext'))content.querySelector('#priceNext').addEventListener('click',()=>renderRepairPriceModels(content,category,d.page+1));
+      content.querySelectorAll('[data-price-row]').forEach(b=>b.addEventListener('click',()=>renderRepairPriceIssues(content,category,Number(b.dataset.priceRow))));
+    }catch(e){content.innerHTML=`<button type="button" class="secondary-btn" id="priceBackHome">الأقسام الرئيسية</button><p class="manager-load-error">${escapeHtml(e.message)}</p>`;content.querySelector('#priceBackHome').addEventListener('click',()=>renderRepairPriceHome(content));}
+  }
+  async function renderRepairPriceSearch(content,query,page){
+    content.innerHTML='<div class="manager-loading">جاري البحث في جميع الأقسام...</div>';
+    try{
+      const d=await api('repair_price_search',{query,page});
+      content.innerHTML=`<button type="button" class="secondary-btn" id="priceBackHome">الأقسام الرئيسية</button><h4>نتائج البحث: ${escapeHtml(d.query)}</h4><p class="manager-note">${d.total} نتيجة · الصفحة ${d.page+1} من ${d.totalPages}</p>${d.results.map(r=>`<button type="button" class="manager-action-card repair-price-model" data-price-row="${r.row}" data-price-category="${r.category}"><b>${escapeHtml(r.name)}</b><small>${escapeHtml(r.categoryLabel)}</small></button>`).join('')||'<p class="muted">لا توجد نتائج مطابقة. جرّب جزءًا مختلفًا من اسم الموديل.</p>'}<div class="manager-row-actions">${d.page>0?'<button type="button" class="secondary-btn" id="pricePrev">السابق</button>':''}${d.page+1<d.totalPages?'<button type="button" class="secondary-btn" id="priceNext">التالي</button>':''}</div>`;
+      content.querySelector('#priceBackHome').addEventListener('click',()=>renderRepairPriceHome(content));
+      if(content.querySelector('#pricePrev'))content.querySelector('#pricePrev').addEventListener('click',()=>renderRepairPriceSearch(content,query,d.page-1));
+      if(content.querySelector('#priceNext'))content.querySelector('#priceNext').addEventListener('click',()=>renderRepairPriceSearch(content,query,d.page+1));
+      content.querySelectorAll('[data-price-row]').forEach(b=>b.addEventListener('click',()=>renderRepairPriceIssues(content,b.dataset.priceCategory,Number(b.dataset.priceRow))));
+    }catch(e){content.innerHTML=`<button type="button" class="secondary-btn" id="priceBackHome">الأقسام الرئيسية</button><p class="manager-load-error">${escapeHtml(e.message)}</p>`;content.querySelector('#priceBackHome').addEventListener('click',()=>renderRepairPriceHome(content));}
+  }
+  async function renderRepairPriceIssues(content,category,row){
+    content.innerHTML='<div class="manager-loading">جاري تحميل الأسعار...</div>';
+    try{
+      const d=await api('repair_price_issues',{category,row});
+      content.innerHTML=`<button type="button" class="secondary-btn" id="priceBackModels">رجوع للموديلات</button><div class="manager-device-detail"><h4>${escapeHtml(d.model)}</h4><p>${escapeHtml(d.label)}</p></div><div class="repair-price-list">${d.issues.map(i=>`<article class="manager-row"><b>${escapeHtml(i.issue)}</b><strong>${escapeHtml(i.price)}</strong></article>`).join('')||'<p class="muted">لا توجد أسعار مسجلة لهذا الموديل.</p>'}</div>`;
+      content.querySelector('#priceBackModels').addEventListener('click',()=>renderRepairPriceModels(content,category,0));
+    }catch(e){content.innerHTML=`<button type="button" class="secondary-btn" id="priceBackModels">رجوع للموديلات</button><p class="manager-load-error">${escapeHtml(e.message)}</p>`;content.querySelector('#priceBackModels').addEventListener('click',()=>renderRepairPriceModels(content,category,0));}
+  }
+
   async function openDeviceRegistration(){
     const panel=$('deviceRegisterPanel');
     panel.classList.remove('hidden');

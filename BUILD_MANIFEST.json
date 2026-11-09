@@ -1,32 +1,87 @@
 {
-  "version": "1.10.8",
-  "base": "MobiHub Mini App V1.10.7 TEST",
-  "purpose": "V46 shift management, assignment day picker, and employee schedule display for TEST",
-  "new_api_actions": [
-    "shift_create",
-    "shift_update",
-    "shift_status",
-    "my_shifts"
-  ],
-  "preserved_features": [
-    "Overtime request, approval, and checkout settlement",
-    "Absence review",
-    "Attendance GPS and uniform confirmation",
-    "Employee requests, leave, cash custody, settlement, and withdrawals",
-    "Complaints and threaded messages",
-    "Deductions, rewards, and hygiene ratings",
-    "Device registry, movements, and persistent inspection sessions",
-    "Notification settings and manager/employee workspaces"
-  ],
-  "validation": {
-    "apps_script_node_check": "passed",
-    "app_js_node_check": "passed",
-    "html_duplicate_ids": "none",
-    "shift_unit_tests": "passed",
-    "server_side_role_and_ownership_checks": "present",
-    "api_routes_present": true
-  },
-  "not_live_tested": true,
-  "production_changed": false,
-  "build": "TEST - shift management and employee schedule"
+  "version": "1.10.9",
+  "base": "1.10.8",
+  "environment": "TEST",
+  "files": {
+    "Code.gs": {
+      "bytes": 176159,
+      "sha256": "9b2df1e13643f0792a09bc7bdc745b3278bfcff4329e174751b33f406ce1464e"
+    },
+    "LEGACY_BOT_MENU_PATCH.gs": {
+      "bytes": 514,
+      "sha256": "51f5b243532e06227920c0e7558a2ca5e835edfad9045dd389d7b9f40830823e"
+    },
+    "LEGACY_BOT_WEBHOOK_REPAIR_V1.10.4.gs": {
+      "bytes": 2829,
+      "sha256": "b2f3a0c991631ee61e296287a32dab8d16262318f75cb0feee6b28f136766196"
+    },
+    "MobiHub_Attendance_v40_REFERENCE.gs": {
+      "bytes": 318479,
+      "sha256": "8c76afc71f6b4c7456b6afd50b9c3d1d63e80471471cbe042069b5d467dac754"
+    },
+    "README.md": {
+      "bytes": 82,
+      "sha256": "351acace08b9f7dec66f6cbaee788de25edbf6f3a9901cbda1701d59a3b86211"
+    },
+    "README_V1.10.4_AR.md": {
+      "bytes": 4276,
+      "sha256": "263a0e4b7035e7dd924440170129c88f332e1d8ce364a3e9a071760dd80d2540"
+    },
+    "README_V1.10.5_AR.md": {
+      "bytes": 4038,
+      "sha256": "6133a0e2f447d3f0ddf7a4835dc743ae0bcee8d41c59fc80879ccc5bd1ab2562"
+    },
+    "README_V1.10.6_AR.md": {
+      "bytes": 3755,
+      "sha256": "05997a854399b408cbc76311f58565b70b3ee8ca31cf2fcc9857f03644157349"
+    },
+    "README_V1.10.7_AR.md": {
+      "bytes": 3204,
+      "sha256": "0ffe171428a597f49e6b4f1a24047f82220e81d617f9c82738eb3e4f87c7ac4d"
+    },
+    "README_V1.10.8_AR.md": {
+      "bytes": 6221,
+      "sha256": "0ca7dd8e3dd2cadb87c86936287a424a76204734048e816099c639cd03553a14"
+    },
+    "README_V1.10.9_AR.md": {
+      "bytes": 5749,
+      "sha256": "9009e94d012f5527b23b3fe40fed23c1fe0a355f4a03720a85920d7821cd1bd6"
+    },
+    "V1.10.2_MIGRATION_NOTES_AR.md": {
+      "bytes": 6747,
+      "sha256": "1582b95d80adbe38215a7bd22a66e2d88985cc65cedfab0e11fbfe1b3c892548"
+    },
+    "_headers": {
+      "bytes": 496,
+      "sha256": "34d0f47afe79fc31fc805acd00814ff316a813f94985961c62970264450df754"
+    },
+    "app.js": {
+      "bytes": 134440,
+      "sha256": "7b7b29994cbf1aecc98dff645c18a75f8c6f2b3678d7cae5c9512da80475cf66"
+    },
+    "assets/mobihub-logo.png": {
+      "bytes": 172554,
+      "sha256": "79ebd40299f9c0365db48bafa7d55bae2fafaae3dfe154e718dbb05cb8d29f58"
+    },
+    "assets/mobihub-logo.webp": {
+      "bytes": 32638,
+      "sha256": "fe5c992585291cfd56be9b720d422175f3dc3855be9dbee61b6543d590441bcc"
+    },
+    "index.html": {
+      "bytes": 340935,
+      "sha256": "c4290a0806b253ef408ff701ecba7f6172dbd82f0b44755a270f9c23c6cf74e9"
+    },
+    "styles.css": {
+      "bytes": 38872,
+      "sha256": "1cb58e5744cf611b5a1386959f19e84adc24cfbc2587f223ffef4dcd07d6fc3d"
+    },
+    "tests/device_and_repair_prices.test.js": {
+      "bytes": 1738,
+      "sha256": "f07c8baa70df2ea3c8528daf4d0aa529c1b9847195ea5f62e6b95b1f59e2df30"
+    },
+    "tests/shift_management.test.js": {
+      "bytes": 4975,
+      "sha256": "fe251a47e1051ab53c203b78f0430f3627263e916a58006d793050c57c8266f1"
+    }
+  }
 }
