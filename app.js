@@ -199,22 +199,24 @@
   async function withLocation(action, button) {
     button.disabled = true;
     const oldText = button.textContent;
-    button.textContent = 'جارٍ تحديد الموقع...';
     $('attendanceMessage').classList.add('hidden');
     try {
-      const location = await getLocation();
       if (action === 'attendance_checkin') {
+        button.textContent = 'جارٍ تحديد الموقع...';
+        const location = await getLocation();
         const result = await api(action, { location });
         pendingUniform = !!result.requiresUniformConfirmation;
         $('uniformBox').classList.toggle('hidden', !pendingUniform);
-        if (pendingUniform) showAttendanceMessage(`تم التحقق من الموقع: ${result.distanceMeters} متر · الدقة ${result.accuracyMeters} متر. أكّد حالة اليونيفورم لإتمام الحضور.`);
+        if (pendingUniform) showAttendanceMessage(`📍 تم التحقق من الموقع: ${result.distanceMeters} متر · الدقة ${result.accuracyMeters} متر. أكّد حالة اليونيفورم لإتمام الحضور.`);
       } else {
-        const result = await api(action, { location });
-        const ot=result.overtime;
-        const otNote=ot&&Number(ot.amount)>0?` · أوفر تايم ${ot.minutes} دقيقة / ${ot.amount} جنيه`:ot?.status?` · ${ot.status}`:'';
-        showAttendanceMessage(`تم تسجيل الانصراف بنجاح · ${result.time || ''} · المسافة ${result.distanceMeters} متر.${otNote}`);
+        button.textContent = 'جارٍ تسجيل الانصراف...';
+        const result = await api('attendance_checkout', {});
+        const ot = result.overtime;
+        const otNote = ot && Number(ot.amount) > 0 ? ` · أوفر تايم ${ot.minutes} دقيقة (${ot.amount} جنيه)` : '';
+        showAttendanceMessage(`✅ تم تسجيل الانصراف بنجاح الساعة ${result.time || ''} بدون طلب الموقع الجغرافي.${otNote}`);
         $('uniformBox').classList.add('hidden');
         await refreshAttendance();
+        if (result.askHygiene) promptCheckoutHygieneModal(result.date);
       }
     } catch (e) {
       showAttendanceMessage(e.message, true);
@@ -224,6 +226,30 @@
       if (currentAttendance) renderAttendance(currentAttendance);
       if (pendingUniform) $('checkinBtn').disabled = true;
     }
+  }
+
+  function promptCheckoutHygieneModal(date) {
+    const panel = managerPanel('🧹 تقييم نظافة مكان العمل', `
+      <div class="attendance-state">
+        <strong>قبل إنهاء يومك: هل تركت مكان العمل نظيفًا ومرتبًا؟</strong>
+        <p class="muted">إجابتك تُسجل ضمن نقاط مكافأة الشهر (500 جنيه). اختيار (لا) يرصد خصم 50 جنيهًا للمراجعة والاعتماد الإداري.</p>
+      </div>
+      <div class="attendance-actions">
+        <button type="button" class="primary-btn" data-hygiene-choice="clean">✅ أيوه، المكان نظيف</button>
+        <button type="button" class="secondary-btn" data-hygiene-choice="notclean">❌ لا، المكان غير نظيف</button>
+      </div>
+    `);
+    panel.querySelectorAll('[data-hygiene-choice]').forEach(btn => btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      try {
+        const res = await api('checkout_hygiene_submit', { choice: btn.dataset.hygieneChoice, date });
+        closeModal();
+        if (tg?.showAlert) tg.showAlert(res.message);
+      } catch (e) {
+        if (tg?.showAlert) tg.showAlert(e.message);
+        btn.disabled = false;
+      }
+    }));
   }
 
   async function confirmUniform(status) {
