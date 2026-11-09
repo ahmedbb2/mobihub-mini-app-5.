@@ -773,7 +773,7 @@
     if(action==='deductions'){showList('deductions');return;}
     if(action==='rewards'){ $('financeCenter').classList.remove('hidden'); openModal('مكافآتي', $('financeCenter')); loadFinanceSummary(); return;}
     if(action==='monthly'){loadMonthlySummary();return;}
-    if(action==='devices'){await openEmployeeDevices();return;}
+    if(action==='devices' || action==='inspection'){await openEmployeeDevices();return;}
     if(action==='repair-prices'){await openRepairPriceBook();return;}
     if(action==='device-register'){openDeviceRegistration();return;}
     if(action==='refresh'){refreshEmployeeWorkspace();return;}
