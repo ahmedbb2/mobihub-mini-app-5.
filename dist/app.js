@@ -17,6 +17,8 @@
     const modal = $('appModal'), body = $('modalBody');
     if (modalRestore) closeModal();
     $('modalTitle').textContent = title || 'التفاصيل';
+    const modalBrand = $('appModal').querySelector('.modal-header small');
+    if (modalBrand) modalBrand.textContent = 'MOBIHUB · مركز الصيانة';
     $('modalMessage').classList.add('hidden');
     if (element) {
       const placeholder = document.createComment('modal-origin');
@@ -34,9 +36,12 @@
     const modal = $('appModal');
     if (modalRestore) {
       const { element, placeholder } = modalRestore;
-      placeholder.parentNode.insertBefore(element, placeholder);
+      if (placeholder.parentNode) placeholder.parentNode.insertBefore(element, placeholder);
       placeholder.remove();
       element.classList.add('hidden');
+      // Dynamic manager panels are disposable; keeping them in <body> caused
+      // stale hidden panels to accumulate and contributed to layered dialogs.
+      if (element.classList.contains('manager-module-panel')) element.remove();
       modalRestore = null;
     }
     $('modalBody').innerHTML = '';
@@ -244,7 +249,9 @@
 
   const MANAGER_ROLES = ['super_admin','admin','finance','supervisor'];
   function buildWorkspace(role, permissions) {
-    const isManager = MANAGER_ROLES.includes(role);
+    // Workspace selection is authoritative for the visible shell. The role
+    // still controls server permissions; it must not decide which shell renders.
+    const isManager = workspaceRole === 'manager' && availableWorkspaces.includes('manager');
     const employee = $('employeeWorkspace'), manager = $('managerWorkspace'), nav = $('workspaceNav');
     const sections = {
       attendance: $('attendance'),
@@ -315,9 +322,12 @@
   }
   function applyWorkspaceProfile(data) {
     currentRole = data.profile.role || 'employee';
-    workspaceRole = data.profile.workspace || (MANAGER_ROLES.includes(currentRole) ? 'manager' : 'employee');
+    const roleDefaultWorkspace = MANAGER_ROLES.includes(currentRole) ? 'manager' : 'employee';
     availableWorkspaces = Array.isArray(data.profile.availableWorkspaces)
-      ? data.profile.availableWorkspaces : [workspaceRole];
+      ? data.profile.availableWorkspaces : [data.profile.workspace || roleDefaultWorkspace];
+    const requestedWorkspace = data.profile.workspace || workspaceRole || roleDefaultWorkspace;
+    workspaceRole = availableWorkspaces.includes(requestedWorkspace)
+      ? requestedWorkspace : roleDefaultWorkspace;
 
     $('userName').textContent = data.profile.name;
     const roleNames = { employee: 'مهندس', supervisor: 'مشرف', admin: 'مدير', finance: 'مالية', super_admin: 'مدير النظام' };
@@ -352,7 +362,13 @@
     $('managerMetrics').innerHTML = tiles.map(([label,value,ico])=>`<article class="manager-metric"><span class="manager-metric-icon">${({users:'♙','user-check':'✓',inbox:'▤',wallet:'ج.م','message-circle':'✉',hourglass:'◷',smartphone:'▣'})[ico]}</span><b>${Number(value)||0}</b><small>${label}</small></article>`).join('');
     const allowed = data.modules || {};
     $('managerModules').querySelectorAll('[data-manager-module]').forEach(btn=>{
-      btn.classList.toggle('hidden', allowed[btn.dataset.managerModule] !== true);
+      const permitted = allowed[btn.dataset.managerModule] === true;
+      // Keep the complete module map visible; unavailable modules are clearly
+      // disabled instead of silently disappearing from the manager dashboard.
+      btn.disabled = !permitted;
+      btn.classList.toggle('is-unavailable', !permitted);
+      btn.setAttribute('aria-disabled', String(!permitted));
+      btn.title = permitted ? '' : 'هذه الوحدة غير متاحة حسب صلاحية الحساب';
     });
     const complaints = data.recentComplaints || [];
     $('managerComplaintSection').classList.toggle('hidden', data.modules?.requests !== true);
