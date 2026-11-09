@@ -52,8 +52,8 @@
       "sha256": "1582b95d80adbe38215a7bd22a66e2d88985cc65cedfab0e11fbfe1b3c892548"
     },
     "_headers": {
-      "bytes": 496,
-      "sha256": "34d0f47afe79fc31fc805acd00814ff316a813f94985961c62970264450df754"
+      "bytes": 495,
+      "sha256": "45da67542f554cf87f8cae5b7e172a10941918129f356aa35fb01a02a1ef253d"
     },
     "app.js": {
       "bytes": 134440,
