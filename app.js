@@ -17,6 +17,8 @@
     const modal = $('appModal'), body = $('modalBody');
     if (modalRestore) closeModal();
     $('modalTitle').textContent = title || 'التفاصيل';
+    const modalBrand = $('appModal').querySelector('.modal-header small');
+    if (modalBrand) modalBrand.textContent = 'MOBIHUB · مركز الصيانة';
     $('modalMessage').classList.add('hidden');
     if (element) {
       const placeholder = document.createComment('modal-origin');
@@ -34,9 +36,12 @@
     const modal = $('appModal');
     if (modalRestore) {
       const { element, placeholder } = modalRestore;
-      placeholder.parentNode.insertBefore(element, placeholder);
+      if (placeholder.parentNode) placeholder.parentNode.insertBefore(element, placeholder);
       placeholder.remove();
       element.classList.add('hidden');
+      // Dynamic manager panels are disposable; keeping them in <body> caused
+      // stale hidden panels to accumulate and contributed to layered dialogs.
+      if (element.classList.contains('manager-module-panel')) element.remove();
       modalRestore = null;
     }
     $('modalBody').innerHTML = '';
@@ -55,7 +60,15 @@
   const errorMessages = {
     UNAUTHORIZED: 'تعذر التحقق من هوية Telegram. أغلق التطبيق وافتحه مرة أخرى.',
     ACCOUNT_INACTIVE: 'الحساب غير نشط أو غير مصرح له باستخدام النظام.',
+    OUTSIDE_ALLOWED_GEOFENCE: 'أنت خارج نطاق موقع العمل المسموح. اقترب من المركز وحاول مرة أخرى.',
+    GPS_ACCURACY_NOT_ACCEPTED: 'دقة تحديد الموقع غير كافية. حاول في مكان مفتوح ثم أعد المحاولة.',
     INVALID_GPS_COORDINATES: 'تعذر قراءة موقعك بشكل صحيح. فعّل خدمات الموقع وحاول مرة أخرى.',
+    DEVICE_NOT_FOUND: 'الجهاز أو رقم الطلب غير موجود.',
+    INVALID_INSPECTION_TYPE: 'نوع الجهاز غير صحيح. ارجع واختر نوع الجهاز مرة أخرى.',
+    INVALID_INSPECTION_ITEMS: 'بيانات الاختبارات غير صحيحة. راجع النتائج وحاول الحفظ مرة أخرى.',
+    INVALID_INSPECTION_RESULT: 'نتيجة أحد الاختبارات غير صحيحة. اختر سليم أو مشكلة أو لم يختبر.',
+    FORBIDDEN: 'ليس لديك صلاحية للوصول إلى هذا الجهاز أو تنفيذ هذا الإجراء.',
+    INTERNAL_ERROR: 'حدث خطأ أثناء تنفيذ الطلب. حاول مرة أخرى، وإذا تكرر أبلغ المسؤول.',
     GPS_ACCURACY_NOT_ACCEPTED: 'دقة الموقع الحالية غير كافية. حاول من مكان مفتوح وأعد المحاولة.',
     NO_ACTIVE_SHIFT_ASSIGNED: 'لا توجد وردية نشطة مسجلة لك اليوم. راجع المسؤول.',
     OPEN_ATTENDANCE_EXISTS: 'لديك حضور مفتوح بالفعل ولم يتم تسجيل الانصراف.',
@@ -120,7 +133,13 @@
     const result = await response.json();
     if (!response.ok || !result.ok) {
       const code = result.error || 'تعذر تنفيذ الطلب';
-      const err = new Error(errorMessages[code] || code);
+      const geofence = /^OUTSIDE_ALLOWED_GEOFENCE(?::(\d+))?$/.exec(code);
+      const friendly = geofence
+        ? `أنت خارج نطاق موقع العمل المسموح. المسافة الحالية ${geofence[1] || 'غير محددة'} متر، والمسموح 50 متر. اقترب من المركز وحاول مرة أخرى.`
+        : (errorMessages[code] || (code === 'INTERNAL_ERROR'
+          ? 'حدث خطأ أثناء تنفيذ الطلب. حاول مرة أخرى، وإذا تكرر أبلغ المسؤول.'
+          : code));
+      const err = new Error(friendly);
       err.code = code;
       err.requestId = result.requestId;
       throw err;
@@ -244,7 +263,9 @@
 
   const MANAGER_ROLES = ['super_admin','admin','finance','supervisor'];
   function buildWorkspace(role, permissions) {
-    const isManager = MANAGER_ROLES.includes(role);
+    // Workspace selection is authoritative for the visible shell. The role
+    // still controls server permissions; it must not decide which shell renders.
+    const isManager = workspaceRole === 'manager' && availableWorkspaces.includes('manager');
     const employee = $('employeeWorkspace'), manager = $('managerWorkspace'), nav = $('workspaceNav');
     const sections = {
       attendance: $('attendance'),
@@ -315,9 +336,12 @@
   }
   function applyWorkspaceProfile(data) {
     currentRole = data.profile.role || 'employee';
-    workspaceRole = data.profile.workspace || (MANAGER_ROLES.includes(currentRole) ? 'manager' : 'employee');
+    const roleDefaultWorkspace = MANAGER_ROLES.includes(currentRole) ? 'manager' : 'employee';
     availableWorkspaces = Array.isArray(data.profile.availableWorkspaces)
-      ? data.profile.availableWorkspaces : [workspaceRole];
+      ? data.profile.availableWorkspaces : [data.profile.workspace || roleDefaultWorkspace];
+    const requestedWorkspace = data.profile.workspace || workspaceRole || roleDefaultWorkspace;
+    workspaceRole = availableWorkspaces.includes(requestedWorkspace)
+      ? requestedWorkspace : roleDefaultWorkspace;
 
     $('userName').textContent = data.profile.name;
     const roleNames = { employee: 'مهندس', supervisor: 'مشرف', admin: 'مدير', finance: 'مالية', super_admin: 'مدير النظام' };
@@ -352,7 +376,13 @@
     $('managerMetrics').innerHTML = tiles.map(([label,value,ico])=>`<article class="manager-metric"><span class="manager-metric-icon">${({users:'♙','user-check':'✓',inbox:'▤',wallet:'ج.م','message-circle':'✉',hourglass:'◷',smartphone:'▣'})[ico]}</span><b>${Number(value)||0}</b><small>${label}</small></article>`).join('');
     const allowed = data.modules || {};
     $('managerModules').querySelectorAll('[data-manager-module]').forEach(btn=>{
-      btn.classList.toggle('hidden', allowed[btn.dataset.managerModule] !== true);
+      const permitted = allowed[btn.dataset.managerModule] === true;
+      // Keep the complete module map visible; unavailable modules are clearly
+      // disabled instead of silently disappearing from the manager dashboard.
+      btn.disabled = !permitted;
+      btn.classList.toggle('is-unavailable', !permitted);
+      btn.setAttribute('aria-disabled', String(!permitted));
+      btn.title = permitted ? '' : 'هذه الوحدة غير متاحة حسب صلاحية الحساب';
     });
     const complaints = data.recentComplaints || [];
     $('managerComplaintSection').classList.toggle('hidden', data.modules?.requests !== true);
@@ -369,7 +399,7 @@
   }
   function managerPanel(title, html) {
     const panel=document.createElement('section'); panel.className='manager-module-panel';
-    panel.innerHTML=`<div class="manager-module-heading"><div><small>MOBIHUB MANAGEMENT</small><h3>${escapeHtml(title)}</h3></div><button type="button" class="modal-close" data-manager-panel-close aria-label="إغلاق">×</button></div><div class="manager-module-content">${html}</div>`;
+    panel.innerHTML=`<div class="manager-module-heading"><div><small>${workspaceRole==='manager'?'MOBIHUB MANAGEMENT':'MOBIHUB WORKSPACE'}</small><h3>${escapeHtml(title)}</h3></div><button type="button" class="modal-close" data-manager-panel-close aria-label="إغلاق">×</button></div><div class="manager-module-content">${html}</div>`;
     panel.querySelector('[data-manager-panel-close]').addEventListener('click',closeModal);
     document.body.appendChild(panel); openModal(title,panel); return panel;
   }
@@ -500,68 +530,9 @@
           const p=managerPanel('تحويل مسؤولية الجهاز',formHtml);p.querySelector('form').addEventListener('submit',async ev=>{ev.preventDefault();const f=ev.currentTarget,b=f.querySelector('button');b.disabled=true;try{const fd=new FormData(f);await api('device_transfer',{orderId:r.orderId,...Object.fromEntries(fd.entries())});closeModal();openManagerModule('devices');}catch(e){if(tg?.showAlert)tg.showAlert(e.message);b.disabled=false;}});
         }));
 
-        content.querySelectorAll('[data-device-inspection]').forEach(btn=>btn.addEventListener('click',async()=>{
+        content.querySelectorAll('[data-device-inspection]').forEach(btn=>btn.addEventListener('click',()=>{
           const r=rows[Number(btn.dataset.deviceInspection)];
-          try {
-            const catalog=await api('device_inspection_catalog');
-            const guess=(name)=>{
-              const n=String(name||'').toLowerCase();
-              if(/iphone|ايفون|آيفون/.test(n))return 'iphone';
-              if(/ipad|ايباد|آيباد/.test(n))return 'ipad';
-              if(/macbook|ماك/.test(n))return 'macbook';
-              if(/watch|ساعة/.test(n))return 'watch';
-              if(/airpods|ايربودز|إيربودز/.test(n))return 'airpods';
-              return 'iphone';
-            };
-            const initialType=guess(r.deviceName);
-            const renderForm=async(type)=>{
-              const saved=await api('device_inspection_get',{orderId:r.orderId,deviceType:type});
-              const d=catalog[type];
-              const previous=new Map((saved.items||[]).map(x=>[Number(x.index),x]));
-              const items=d.items.map((it,i)=>{
-                const old=previous.get(i)||{};
-                return `<article class="inspection-form-item"><div class="inspection-form-title"><b>${i+1}. ${escapeHtml(it.name)}</b><details><summary>تعليمات الاختبار</summary><p>${escapeHtml(it.instruction||'')}</p></details></div><label>النتيجة<select name="result_${i}"><option value="" ${!old.result?'selected':''}>لم يتم التقييم</option><option value="سليم" ${old.result==='سليم'?'selected':''}>سليم</option><option value="مشكلة" ${old.result==='مشكلة'?'selected':''}>مشكلة</option><option value="لم يختبر" ${old.result==='لم يختبر'?'selected':''}>لم يختبر</option></select></label><label>ملاحظات<textarea name="note_${i}" rows="2" maxlength="500">${escapeHtml(old.note||'')}</textarea></label></article>`;
-              }).join('');
-              return `<form id="deviceInspectionForm" class="device-inspection-form"><div class="inspection-form-meta"><b>طلب رقم ${escapeHtml(r.orderId)}</b><span>${escapeHtml(d.name)} · ${d.items.length} اختبار</span>${saved.updatedAt?`<small>آخر حفظ: ${escapeHtml(saved.updatedAt)}</small>`:''}</div><label>نوع الجهاز<select name="deviceType" id="inspectionDeviceType">${Object.entries(catalog).map(([k,v])=>`<option value="${k}" ${k===type?'selected':''}>${escapeHtml(v.name)}</option>`).join('')}</select></label><div class="inspection-form-items">${items}</div><button type="submit" class="primary-btn">حفظ نتائج الفحص</button></form>`;
-            };
-            const first=await renderForm(initialType);
-            const p=managerPanel('فحص الجهاز',first);
-            p.querySelector('#inspectionDeviceType').addEventListener('change',async ev=>{
-              try {
-                const h=await renderForm(ev.target.value);
-                const tmp=document.createElement('div');tmp.innerHTML=h;
-                p.querySelector('#deviceInspectionForm').replaceWith(tmp.firstElementChild);
-                bindTypeSelector();
-                bindForm();
-              } catch(e){if(tg?.showAlert)tg.showAlert(e.message);}
-            });
-            const bindTypeSelector=()=>{
-              const selector=p.querySelector('#inspectionDeviceType');
-              if(selector) selector.addEventListener('change',async ev=>{
-                try {
-                  const h=await renderForm(ev.target.value);
-                  const tmp=document.createElement('div');tmp.innerHTML=h;
-                  p.querySelector('#deviceInspectionForm').replaceWith(tmp.firstElementChild);
-                  bindTypeSelector();bindForm();
-                } catch(e){if(tg?.showAlert)tg.showAlert(e.message);}
-              });
-            };
-            const bindForm=()=>{
-              const form=p.querySelector('#deviceInspectionForm');
-              if(!form)return;
-              form.addEventListener('submit',async ev=>{
-                ev.preventDefault();const b=form.querySelector('button[type="submit"]');b.disabled=true;
-                const type=form.elements.deviceType.value;const count=catalog[type].items.length;
-                const items=Array.from({length:count},(_,i)=>({index:i,result:form.elements[`result_${i}`].value,note:form.elements[`note_${i}`].value}));
-                try {
-                  const saved=await api('device_inspection_save',{orderId:r.orderId,deviceType:type,items});
-                  if(tg?.showAlert)tg.showAlert(`تم حفظ الفحص. تم تقييم ${saved.completed} اختبار، ومشكلات مسجلة: ${saved.issues}.`);
-                  closeModal();openManagerModule('devices');
-                } catch(e){if(tg?.showAlert)tg.showAlert(e.message);b.disabled=false;}
-              });
-            };
-            bindForm();
-          } catch(e) { if(tg?.showAlert) tg.showAlert(e.message); }
+          openEmployeeDeviceInspection(r,content);
         }));
       } else if(module==='system') {
         const d=managerDashboardCache||await api('manager_dashboard'); const r=d.monthlyReport||{};
@@ -774,7 +745,7 @@
     if(action==='rewards'){ $('financeCenter').classList.remove('hidden'); openModal('مكافآتي', $('financeCenter')); loadFinanceSummary(); return;}
     if(action==='monthly'){loadMonthlySummary();return;}
     if(action==='devices'){await openEmployeeDevices();return;}
-    if(action==='inspection'){await openEmployeeInspectionDevices();return;}
+    if(action==='inspection'){await openStandaloneDeviceInspection();return;}
     if(action==='repair-prices'){await openRepairPriceBook();return;}
     if(action==='device-register'){openDeviceRegistration();return;}
     if(action==='refresh'){refreshEmployeeWorkspace();return;}
@@ -805,25 +776,6 @@
   const DEVICE_STATUS_OPTIONS = ['تم الاستلام','قيد الفحص','يحتاج قطعة غيار','يحتاج التواصل مع العميل','بانتظار رد العميل','لم يتم الرد','قيد الإصلاح','مراجعة الجودة','يحتاج إعادة فحص','جاهز للتسليم','تم التسليم'];
   const DEVICE_LOCATION_OPTIONS = ['قسم الاستلام','ترابيزة الهاردوير','درج الفحص 1','درج الفحص 2','درج مراجعة الجودة','درج انتظار قطع الغيار','درج انتظار العميل','درج جاهز للتسليم','مكان آخر'];
 
-  // Dedicated 40-point inspection entry: device selection is separate from the
-  // general device-status workspace. The API supplies only records visible to
-  // the signed-in employee/intake user (or all records for authorized admins).
-  async function openEmployeeInspectionDevices(){
-    const panel=managerPanel('فحص الجهاز — اختيار الجهاز','<div class="manager-loading">جاري تحميل الأجهزة المتاحة للفحص...</div>');
-    const content=panel.querySelector('.manager-module-content');
-    try{
-      const rows=await api('device_list');
-      if(!rows.length){
-        content.innerHTML='<div class="manager-empty-state"><b>لا توجد أجهزة متاحة للفحص حاليًا</b><p>ستظهر هنا الأجهزة المسندة إليك كفني، أو الأجهزة التي استلمتها بصفتك مسؤول الاستلام.</p><p class="manager-note">لإدارة حالة الجهاز ومكانه، استخدم خدمة «حالة الجهاز» من لوحة المهندس.</p></div>';
-        return;
-      }
-      content.innerHTML=`<div class="inspection-device-intro"><b>اختبار الـ 40 نقطة</b><p class="manager-note">اختر الجهاز الذي تريد بدء فحصه. القائمة تقتصر على الأجهزة التي يحق لحسابك الوصول إليها.</p></div><div class="manager-module-toolbar"><input id="inspectionDeviceSearch" type="search" placeholder="ابحث برقم الطلب أو اسم الجهاز"><button type="button" class="secondary-btn" id="refreshInspectionDevices">تحديث</button></div><div class="manager-list-head"><b>${rows.length} جهاز متاح</b></div><div class="inspection-device-list">${rows.map((r,i)=>`<article class="manager-row inspection-device-row"><div><b>${escapeHtml(r.deviceName||'جهاز غير محدد')}</b><small>طلب رقم: ${escapeHtml(r.orderId)} · ${escapeHtml(r.receivedAt||'')}</small>${r.issue?`<small>الشكوى: ${escapeHtml(r.issue)}</small>`:''}</div><span class="status-pill">${escapeHtml(r.status||'غير محدد')}</span><small>مسؤول الجهاز: ${escapeHtml(r.employeeName||'—')}</small><button type="button" class="primary-btn" data-start-device-inspection="${i}">بدء فحص الـ 40 نقطة</button></article>`).join('')}</div>`;
-      content.querySelector('#refreshInspectionDevices').addEventListener('click',()=>openEmployeeInspectionDevices());
-      content.querySelector('#inspectionDeviceSearch').addEventListener('input',ev=>{const q=ev.target.value.toLowerCase();content.querySelectorAll('.inspection-device-row').forEach(el=>el.classList.toggle('hidden',!el.textContent.toLowerCase().includes(q)));});
-      content.querySelectorAll('[data-start-device-inspection]').forEach(btn=>btn.addEventListener('click',()=>openEmployeeDeviceInspection(rows[Number(btn.dataset.startDeviceInspection)])));
-    }catch(e){content.innerHTML=`<div class="manager-load-error">${escapeHtml(e.message)}</div>`;}
-  }
-
   async function openEmployeeDevices(){
     const panel=managerPanel('أجهزتي','<div class="manager-loading">جاري تحميل الأجهزة المسندة إليك...</div>');
     const content=panel.querySelector('.manager-module-content');
@@ -835,7 +787,7 @@
       content.querySelector('#myDeviceSearch').addEventListener('input',ev=>{const q=ev.target.value.toLowerCase();content.querySelectorAll('.my-device-row').forEach(el=>el.classList.toggle('hidden',!el.textContent.toLowerCase().includes(q)));});
       content.querySelectorAll('[data-my-device-detail]').forEach(btn=>btn.addEventListener('click',()=>showEmployeeDeviceDetail(content,rows[Number(btn.dataset.myDeviceDetail)])));
       content.querySelectorAll('[data-my-device-status]').forEach(btn=>btn.addEventListener('click',()=>showEmployeeDeviceStatus(content,rows[Number(btn.dataset.myDeviceStatus)])));
-      content.querySelectorAll('[data-my-device-inspect]').forEach(btn=>btn.addEventListener('click',()=>openEmployeeDeviceInspection(rows[Number(btn.dataset.myDeviceInspect)])));
+      content.querySelectorAll('[data-my-device-inspect]').forEach(btn=>btn.addEventListener('click',()=>openEmployeeDeviceInspection(rows[Number(btn.dataset.myDeviceInspect)],content)));
     }catch(e){content.innerHTML=`<div class="manager-load-error">${escapeHtml(e.message)}</div>`;}
   }
 
@@ -854,25 +806,180 @@
     content.querySelector('#myDeviceStatusForm').addEventListener('submit',async ev=>{ev.preventDefault();const form=ev.currentTarget,btn=form.querySelector('button[type=submit]');btn.disabled=true;try{const fd=new FormData(form);await api('device_status_update',{orderId:row.orderId,...Object.fromEntries(fd.entries())});if(tg?.showAlert)tg.showAlert('تم تحديث حالة الجهاز وتسجيل الحركة.');await openEmployeeDevices();}catch(e){if(tg?.showAlert)tg.showAlert(e.message);btn.disabled=false;}});
   }
 
-  async function openEmployeeDeviceInspection(row){
-    const panel=managerPanel('فحص الجهاز','<div class="manager-loading">جاري تحميل كتالوج الفحص...</div>');
+  async function openStandaloneDeviceInspection(){
+    const panel=managerPanel('فحص الجهاز','<div class="manager-loading">جاري تحميل قوائم فحص الأجهزة...</div>');
     const content=panel.querySelector('.manager-module-content');
     try{
       const catalog=await api('device_inspection_catalog');
-      const guess=(name)=>{const v=String(name||'').toLowerCase();if(v.includes('ipad'))return 'ipad';if(v.includes('mac'))return 'macbook';if(v.includes('watch'))return 'watch';if(v.includes('airpods')||v.includes('airpod'))return 'airpods';return 'iphone';};
-      const initial=guess(row.deviceName);
-      await renderEmployeeInspectionForm(content,row,catalog,initial);
+      renderInspectionTypePicker(content,{orderId:'',deviceName:'فحص مستقل'},catalog,null);
     }catch(e){content.innerHTML=`<div class="manager-load-error">${escapeHtml(e.message)}</div>`;}
   }
 
-  async function renderEmployeeInspectionForm(content,row,catalog,type){
-    const d=catalog[type];
-    const saved=await api('device_inspection_get',{orderId:row.orderId,deviceType:type});
-    const old={};(saved.items||[]).forEach(x=>old[x.index]=x);
-    const items=d.items.map((it,i)=>{const v=old[i]||{};return `<article class="inspection-form-item"><div class="inspection-form-title"><b>${i+1}. ${escapeHtml(it.name)}</b><details><summary>تعليمات الاختبار</summary><p>${escapeHtml(it.instruction||'')}</p></details></div><label>النتيجة<select name="result_${i}"><option value="" ${!v.result?'selected':''}>لم يتم التقييم</option><option value="سليم" ${v.result==='سليم'?'selected':''}>سليم</option><option value="مشكلة" ${v.result==='مشكلة'?'selected':''}>مشكلة</option><option value="لم يختبر" ${v.result==='لم يختبر'?'selected':''}>لم يختبر</option></select></label><label>ملاحظات<textarea name="note_${i}" rows="2" maxlength="500">${escapeHtml(v.note||'')}</textarea></label></article>`;}).join('');
-    content.innerHTML=`<div class="inspection-form-meta"><b>رقم الطلب: ${escapeHtml(row.orderId)}</b><span>${escapeHtml(d.name)} · ${d.items.length} اختبار</span>${saved.updatedAt?`<small>آخر حفظ: ${escapeHtml(saved.updatedAt)}</small>`:''}</div><label>نوع الجهاز<select id="employeeInspectionType">${Object.entries(catalog).map(([k,v])=>`<option value="${k}" ${k===type?'selected':''}>${escapeHtml(v.name)}</option>`).join('')}</select></label><form id="employeeDeviceInspectionForm" class="device-inspection-form"><div class="inspection-form-items">${items}</div><button type="submit" class="primary-btn">حفظ نتائج الفحص</button></form>`;
-    content.querySelector('#employeeInspectionType').addEventListener('change',ev=>renderEmployeeInspectionForm(content,row,catalog,ev.target.value).catch(e=>{content.innerHTML=`<p class="manager-load-error">${escapeHtml(e.message)}</p>`;}));
-    content.querySelector('#employeeDeviceInspectionForm').addEventListener('submit',async ev=>{ev.preventDefault();const form=ev.currentTarget,btn=form.querySelector('button[type=submit]');btn.disabled=true;try{const typeNow=content.querySelector('#employeeInspectionType').value, count=catalog[typeNow].items.length,fd=new FormData(form),items=[];for(let i=0;i<count;i++)items.push({index:i,result:String(fd.get('result_'+i)||''),note:String(fd.get('note_'+i)||'')});const result=await api('device_inspection_save',{orderId:row.orderId,deviceType:typeNow,items});if(tg?.showAlert)tg.showAlert(`تم حفظ الفحص. مكتمل: ${result.completed} · مشاكل: ${result.issues} · لم يختبر: ${result.untested}`);closeModal();await openEmployeeInspectionDevices();}catch(e){if(tg?.showAlert)tg.showAlert(e.message);btn.disabled=false;}});
+  async function openEmployeeDeviceInspection(row, content){
+    const panel=content.closest('.manager-module-panel');
+    if(panel){
+      const heading=panel.querySelector('.manager-module-heading h3');
+      const brand=panel.querySelector('.manager-module-heading small');
+      if(heading) heading.textContent='فحص الجهاز';
+      if(brand) brand.textContent=workspaceRole==='manager'?'MOBIHUB MANAGEMENT':'MOBIHUB WORKSPACE';
+    }
+    content.innerHTML='<div class="manager-loading">جاري تحميل قوائم فحص الأجهزة...</div>';
+    try{
+      const catalog=await api('device_inspection_catalog');
+      const guess=(name)=>{
+        const v=String(name||'').toLowerCase();
+        if(/ipad|ايباد|آيباد/.test(v))return 'ipad';
+        if(/mac|ماك/.test(v))return 'macbook';
+        if(/watch|ساعة/.test(v))return 'watch';
+        if(/airpods|airpod|ايربودز|إيربودز/.test(v))return 'airpods';
+        return 'iphone';
+      };
+      renderInspectionTypePicker(content,row,catalog,guess(row.deviceName));
+    }catch(e){content.innerHTML=`<div class="manager-load-error">${escapeHtml(e.message)}</div>`;}
+  }
+
+  function renderInspectionTypePicker(content,row,catalog,suggestedType){
+    const icons={iphone:'📱',ipad:'📲',macbook:'💻',watch:'⌚',airpods:'🎧'};
+    const order=['iphone','ipad','macbook','watch','airpods'];
+    content.innerHTML=`
+      <div class="inspection-wizard">
+        <div class="inspection-wizard-device">
+          <span class="inspection-wizard-kicker">40-POINT DEVICE INSPECTION</span>
+          <h4>اختيار نوع الجهاز</h4>
+          <p>${row.orderId?`طلب رقم <b>${escapeHtml(row.orderId)}</b> · `:''}${escapeHtml(row.deviceName||'جهاز غير محدد')}</p>
+          <small>اختر نوع الجهاز لعرض قائمة الفحص المطابقة للبوت.</small>
+        </div>
+        <div class="inspection-type-grid">
+          ${order.map(key=>`<button type="button" class="inspection-type-card ${key===suggestedType?'is-suggested':''}" data-inspection-type="${key}">
+            <span>${icons[key]}</span><b>${escapeHtml(catalog[key].name)}</b><small>${catalog[key].items.length} اختبار</small>
+            ${key===suggestedType?'<em>النوع المتوقع</em>':''}
+          </button>`).join('')}
+        </div>
+        <p class="manager-note">الاختيار المقترح مبني على اسم الجهاز المسجل، ويمكنك تغييره قبل بدء الفحص.</p>
+        <button type="button" class="secondary-btn inspection-cancel" id="cancelInspectionWizard">رجوع للأجهزة</button>
+      </div>`;
+    content.querySelectorAll('[data-inspection-type]').forEach(btn=>btn.addEventListener('click',()=>{
+      startInspectionWizard(content,row,catalog,btn.dataset.inspectionType);
+    }));
+    content.querySelector('#cancelInspectionWizard').addEventListener('click',()=>openEmployeeDevices());
+  }
+
+  async function startInspectionWizard(content,row,catalog,type){
+    const device=catalog[type];
+    if(!device)return;
+    content.innerHTML='<div class="manager-loading">جاري استرجاع نتائج الفحص السابق...</div>';
+    try{
+      const saved=await api('device_inspection_get',{orderId:row.orderId,deviceType:type});
+      const results=Array(device.items.length).fill('');
+      const notes=Array(device.items.length).fill('');
+      (saved.items||[]).forEach(x=>{
+        const i=Number(x.index);
+        if(i>=0&&i<results.length){results[i]=x.result||'';notes[i]=x.note||'';}
+      });
+      const state={row,catalog,type,index:0,results,notes,startedAt:new Date().toLocaleString('ar-EG'),savedAt:saved.updatedAt||''};
+      renderInspectionWizardStep(content,state);
+    }catch(e){content.innerHTML=`<div class="manager-load-error">${escapeHtml(e.message)}<button type="button" class="secondary-btn" id="inspectionTypeBack">رجوع لاختيار النوع</button></div>`;content.querySelector('#inspectionTypeBack').addEventListener('click',()=>renderInspectionTypePicker(content,row,catalog,type));}
+  }
+
+  function inspectionResultLabel(value){
+    return value==='سليم'?'سليم':value==='مشكلة'?'به مشكلة':value==='لم يختبر'?'لم يتم الاختبار':'لم يتم التقييم';
+  }
+  function renderInspectionWizardStep(content,state){
+    const d=state.catalog[state.type],total=d.items.length,idx=state.index,item=d.items[idx];
+    const result=state.results[idx]||'';
+    const good=state.results.filter(x=>x==='سليم').length;
+    const bad=state.results.filter(x=>x==='مشكلة').length;
+    const untested=state.results.filter(x=>x==='لم يختبر').length;
+    const pending=total-good-bad-untested;
+    const pct=Math.round(((idx+1)/total)*100);
+    const progress=state.results.filter(Boolean).length;
+    const nav=(label,action,disabled=false)=>`<button type="button" class="secondary-btn" data-inspection-nav="${action}" ${disabled?'disabled':''}>${label}</button>`;
+    content.innerHTML=`
+      <div class="inspection-wizard">
+        <div class="inspection-wizard-top">
+          <button type="button" class="secondary-btn" id="inspectionBackToTypes">تغيير نوع الجهاز</button>
+          <span>${state.row.orderId?`طلب ${escapeHtml(state.row.orderId)}`:'فحص مستقل'}</span>
+        </div>
+        <div class="inspection-progress-card">
+          <div class="inspection-progress-head"><div><small>فحص ${escapeHtml(d.name)}</small><b>الاختبار ${idx+1} من ${total}</b></div><strong>${pct}%</strong></div>
+          <div class="inspection-progress-track"><span style="width:${pct}%"></span></div>
+          <div class="inspection-progress-stats"><span>تم تقييم ${progress}</span><span>متبقي ${pending}</span></div>
+        </div>
+        <article class="inspection-current-test">
+          <span class="inspection-test-number">الاختبار ${String(idx+1).padStart(2,'0')}</span>
+          <h4>${escapeHtml(item.name)}</h4>
+          <div class="inspection-instruction"><b>🛠️ طريقة الاختبار</b><p>${escapeHtml(item.instruction||'نفّذ الاختبار وسجّل النتيجة بعد التأكد.')}</p></div>
+          <div class="inspection-result-label">حدد نتيجة الاختبار</div>
+          <div class="inspection-result-options">
+            <button type="button" data-inspection-result="سليم" class="${result==='سليم'?'selected good':''}">✅<span>سليم</span></button>
+            <button type="button" data-inspection-result="مشكلة" class="${result==='مشكلة'?'selected bad':''}">❌<span>مشكلة</span></button>
+            <button type="button" data-inspection-result="لم يختبر" class="${result==='لم يختبر'?'selected skip':''}">⚪<span>لم يختبر</span></button>
+          </div>
+          <label class="inspection-note-field">ملاحظات الاختبار
+            <textarea id="inspectionCurrentNote" rows="3" maxlength="500" placeholder="اكتب تفاصيل المشكلة أو ملاحظات الفني...">${escapeHtml(state.notes[idx]||'')}</textarea>
+          </label>
+        </article>
+        <div class="inspection-summary-strip">
+          <span>✅ ${good} سليم</span><span>❌ ${bad} مشكلة</span><span>⚪ ${untested} لم يختبر</span>
+        </div>
+        <div class="inspection-navigation">
+          ${nav('⏮ البداية','first',idx===0)}
+          ${nav('السابق','prev',idx===0)}
+          ${nav('التالي','next',idx===total-1)}
+          <button type="button" class="primary-btn" id="inspectionReviewBtn">مراجعة وإنهاء 📋</button>
+        </div>
+      </div>`;
+    content.querySelector('#inspectionBackToTypes').addEventListener('click',()=>renderInspectionTypePicker(content,state.row,state.catalog,state.type));
+    content.querySelectorAll('[data-inspection-result]').forEach(btn=>btn.addEventListener('click',()=>{
+      state.results[idx]=btn.dataset.inspectionResult;
+      if(state.results[idx]!=='مشكلة' && !state.notes[idx]) state.notes[idx]='';
+      renderInspectionWizardStep(content,state);
+    }));
+    content.querySelector('#inspectionCurrentNote').addEventListener('input',ev=>{state.notes[idx]=ev.target.value;});
+    content.querySelectorAll('[data-inspection-nav]').forEach(btn=>btn.addEventListener('click',()=>{
+      const action=btn.dataset.inspectionNav;
+      state.notes[idx]=content.querySelector('#inspectionCurrentNote').value;
+      if(action==='first')state.index=0;
+      if(action==='prev')state.index=Math.max(0,idx-1);
+      if(action==='next')state.index=Math.min(total-1,idx+1);
+      renderInspectionWizardStep(content,state);
+    }));
+    content.querySelector('#inspectionReviewBtn').addEventListener('click',()=>{
+      state.notes[idx]=content.querySelector('#inspectionCurrentNote').value;
+      renderInspectionWizardReview(content,state);
+    });
+  }
+
+  function renderInspectionWizardReview(content,state){
+    const d=state.catalog[state.type];
+    const good=state.results.filter(x=>x==='سليم').length;
+    const bad=state.results.filter(x=>x==='مشكلة').length;
+    const untested=state.results.filter(x=>x==='لم يختبر').length;
+    const missing=state.results.filter(x=>!x).length;
+    content.innerHTML=`
+      <div class="inspection-wizard">
+        <div class="inspection-review-head"><button type="button" class="secondary-btn" id="inspectionReviewBack">رجوع للفحص</button><h4>مراجعة نتائج ${escapeHtml(d.name)}</h4><p>${state.row.orderId?`طلب رقم ${escapeHtml(state.row.orderId)}`:'فحص مستقل'}</p></div>
+        <div class="inspection-summary-strip"><span>✅ ${good} سليم</span><span>❌ ${bad} مشكلة</span><span>⚪ ${untested} لم يختبر</span></div>
+        ${missing?`<div class="inspection-review-warning">متبقي ${missing} اختبار بدون نتيجة. أكملها قبل الحفظ.</div>`:''}
+        <div class="inspection-review-list">
+          ${d.items.map((it,i)=>`<button type="button" class="inspection-review-item" data-review-index="${i}"><span>${i+1}. ${escapeHtml(it.name)}</span><b class="${state.results[i]==='سليم'?'good':state.results[i]==='مشكلة'?'bad':state.results[i]==='لم يختبر'?'skip':''}">${escapeHtml(inspectionResultLabel(state.results[i]))}</b>${state.notes[i]?`<small>${escapeHtml(state.notes[i])}</small>`:''}</button>`).join('')}
+        </div>
+        <button type="button" class="primary-btn inspection-save-btn" id="saveDeviceInspection" ${missing?'disabled':''}>حفظ تقرير الفحص</button>
+      </div>`;
+    content.querySelector('#inspectionReviewBack').addEventListener('click',()=>renderInspectionWizardStep(content,state));
+    content.querySelectorAll('[data-review-index]').forEach(btn=>btn.addEventListener('click',()=>{
+      state.index=Number(btn.dataset.reviewIndex);renderInspectionWizardStep(content,state);
+    }));
+    content.querySelector('#saveDeviceInspection').addEventListener('click',async()=>{
+      const btn=content.querySelector('#saveDeviceInspection');btn.disabled=true;btn.textContent='جاري حفظ التقرير...';
+      try{
+        const items=d.items.map((it,index)=>({index,result:state.results[index],note:state.notes[index]||''}));
+        const result=await api('device_inspection_save',{orderId:state.row.orderId,deviceType:state.type,items});
+        content.innerHTML=`<div class="inspection-success"><div>✅</div><h4>تم حفظ فحص الجهاز بنجاح</h4><p>${state.row.orderId?`طلب ${escapeHtml(state.row.orderId)} · `:''}${escapeHtml(d.name)}</p><div class="inspection-summary-strip"><span>✅ ${result.completed} سليم/مكتمل</span><span>❌ ${result.issues} مشكلة</span><span>⚪ ${result.untested} لم يختبر</span></div><button type="button" class="primary-btn" id="inspectionBackDevices">العودة إلى أجهزتي</button></div>`;
+        content.querySelector('#inspectionBackDevices').addEventListener('click',()=>state.row.orderId?openEmployeeDevices():openStandaloneDeviceInspection());
+        if(tg?.HapticFeedback?.notificationOccurred)tg.HapticFeedback.notificationOccurred('success');
+      }catch(e){if(tg?.showAlert)tg.showAlert(e.message);btn.disabled=false;btn.textContent='حفظ تقرير الفحص';}
+    });
   }
 
   async function openRepairPriceBook(){
