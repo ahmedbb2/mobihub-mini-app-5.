@@ -1,25 +1,33 @@
 {
-  "version": "1.10.5",
-  "base": "MobiHub V1.10.4",
-  "purpose": "Incremental device operations integration for TEST",
+  "version": "1.10.7",
+  "base": "MobiHub Mini App V1.10.6 TEST",
+  "purpose": "V46 overtime lifecycle and absence review migration for TEST",
   "new_api_actions": [
-    "device_list",
-    "device_detail",
-    "device_staff",
-    "device_status_update",
-    "device_transfer",
-    "device_inspection_catalog"
+    "overtime_status",
+    "overtime_request",
+    "overtime_decide",
+    "absence_decide"
   ],
-  "existing_actions_preserved": [
-    "device_registration_options",
-    "device_register",
-    "device_update"
+  "existing_features_preserved": [
+    "Telegram initData authentication and role-aware workspaces",
+    "attendance GPS check-in and check-out",
+    "employee and manager workflows",
+    "requests and leave",
+    "cash custody and settlement",
+    "complaints and conversation threads",
+    "deductions and rewards",
+    "device registry and movement history",
+    "persistent device inspection sessions",
+    "notification settings and sending"
   ],
   "validation": {
     "apps_script_node_check": "passed",
     "app_js_node_check": "passed",
-    "html_duplicate_ids": "none"
+    "html_duplicate_ids": "none",
+    "overtime_helpers_unit_checks": "passed",
+    "api_routes_present": true
   },
   "not_live_tested": true,
-  "production_changed": false
+  "production_changed": false,
+  "build": "TEST - overtime and absence review migration"
 }

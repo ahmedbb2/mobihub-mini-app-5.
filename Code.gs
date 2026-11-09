@@ -1,5 +1,5 @@
 /**
- * MobiHub Mini App API — V1.10.3 Rewards & Telegram Cleanup
+ * MobiHub Mini App API — V1.10.7 Overtime & Absence Review
  * Separate Apps Script project for the TEST spreadsheet.
  *
  * Required Script Properties:
@@ -10,7 +10,7 @@
  */
 
 const MH = Object.freeze({
-  VERSION: '1.10.3',
+  VERSION: '1.10.7',
   TZ: 'Africa/Cairo',
   AUTH_MAX_AGE_SECONDS: 300,
   SHEETS: {
@@ -158,6 +158,22 @@ function doPost(e) {
         data = attendanceCheckout_(profile, body.location || {});
         break;
 
+      case 'overtime_status':
+        data = overtimeStatus_(profile);
+        break;
+
+      case 'overtime_request':
+        data = createOvertimeRequest_(profile);
+        break;
+
+      case 'overtime_decide':
+        data = decideOvertimeRequest_(profile, body);
+        break;
+
+      case 'absence_decide':
+        data = decideAbsence_(profile, body);
+        break;
+
       case 'request_create':
         data = createEmployeeRequest_(profile, body);
         break;
@@ -229,6 +245,12 @@ function doPost(e) {
         break;
       case 'device_inspection_catalog':
         data = deviceInspectionCatalogMini_();
+        break;
+      case 'device_inspection_get':
+        data = deviceInspectionGetMiniV106_(profile, body);
+        break;
+      case 'device_inspection_save':
+        data = deviceInspectionSaveMiniV106_(profile, body);
         break;
 
       case 'complaint_create':
@@ -612,6 +634,7 @@ function managerDashboard_(profile) {
     devices: ['super_admin','admin'].includes(role),
     requests: ['super_admin','admin','supervisor'].includes(role),
     finance: ['super_admin','finance'].includes(role),
+    overtime: ['super_admin','admin','finance'].includes(role),
     system: ['super_admin','admin'].includes(role),
     notifications: ['super_admin','admin','supervisor'].includes(role),
     managers: role === 'super_admin'
@@ -638,6 +661,7 @@ function managerDashboard_(profile) {
   const complaints = safeRows(MH.SHEETS.complaints, modules.requests);
   const devices = safeRows(MH.SHEETS.devices, modules.devices);
   const absences = safeRows(MH.SHEETS.absences, modules.daily);
+  const overtimeRows = safeRows(MH.SHEETS.overtime, modules.overtime);
   const pendingRequests = requests.filter(r => String(r['القرار']||'').trim() === 'قيد الانتظار').length;
   const pendingLeaves = leaves.filter(r => ['بانتظار مراجعة المدير','قيد الانتظار','معلق'].includes(String(r['الحالة']||'').trim()) && String(r['قرار المدير']||'').trim() !== 'مقبول').length;
   const pendingCustody = cash.filter(r => ['قيد المراجعة','طلب جديد','بانتظار مراجعة المدير','بانتظار الصرف','بانتظار مراجعة التسوية','بانتظار تأكيد استلام المتبقي'].includes(String(r['الحالة']||r['حالة التسوية']||'').trim()) || ['بانتظار الصرف','بانتظار مراجعة التسوية','بانتظار تأكيد استلام المتبقي'].includes(String(r['حالة الصرف']||r['حالة التسوية']||'').trim())).length;
@@ -677,7 +701,8 @@ function managerDashboard_(profile) {
       pendingCash:modules.finance?pendingCash:null, pendingAdvances:modules.finance?pendingAdvances:null, pendingCustody:modules.finance?pendingCustody:null,
       openComplaints:modules.requests?openComplaints.length:null,
       activeDevices:modules.devices?activeDevices.length:null,
-      pendingAbsences:modules.daily?pendingAbsences.length:null
+      pendingAbsences:modules.daily?pendingAbsences.length:null,
+      pendingOvertime:modules.overtime?overtimeRows.filter(r=>String(r['الحالة']||'').trim()==='بانتظار موافقة المدير').length:null
     },
     todayAttendance:todayRows.slice(0,30), recentComplaints:recentComplaints, monthlyReport:monthlyReport,
     dataWarnings:dataWarnings
@@ -856,6 +881,228 @@ const MH_ATTENDANCE = Object.freeze({
   HEADERS: ['التاريخ','الوقت','Chat ID','اسم الموظف','النوع','المسافة بالمتر','دقة GPS بالمتر','Latitude','Longitude','حالة الحضور','دقائق التأخير','Shift ID','اليونيفورم']
 });
 
+/* =========================================
+   V1.10.7 — OVERTIME + ABSENCE REVIEW
+   Business rules are ported from the V46 Telegram bot.
+   All decisions and calculations remain server-side.
+========================================= */
+const MH_OVERTIME = Object.freeze({
+  HEADERS: ['رقم الطلب','تاريخ الوردية','Chat ID','اسم المهندس','Shift ID','موعد نهاية الوردية','بداية الأوفر تايم','آخر موعد للموافقة','وقت طلب الموافقة','الحالة','قرار المدير بواسطة','وقت القرار','وقت الانصراف الفعلي','دقائق الأوفر تايم','المبلغ بالجنيه','ملاحظات'],
+  ABSENCE_HEADERS: ['التاريخ','Chat ID','اسم الموظف','Shift ID','موعد الحضور','وقت اكتشاف الحالة','الحالة','قرار المدير','وقت القرار'],
+  GRACE_MINUTES: 30,
+  RATE_PER_MINUTE: 1,
+  MAX_PAID_MINUTES: 120,
+  PENDING: 'بانتظار موافقة المدير'
+});
+
+function mhOvertimeDateTime_(date, time) {
+  const normalized = mhTime_(time);
+  if (!date || !normalized) return null;
+  try { return Utilities.parseDate(String(date) + ' ' + normalized + ':00', MH.TZ, 'yyyy-MM-dd HH:mm:ss'); }
+  catch (e) { return null; }
+}
+function mhOvertimeParseDateTime_(value) {
+  if (value instanceof Date && !isNaN(value.getTime())) return new Date(value.getTime());
+  const text = String(value || '').trim().replace('T', ' ');
+  const match = text.match(/^(\d{4}-\d{2}-\d{2})\s+(\d{1,2}:\d{2}(?::\d{2})?)/);
+  if (!match) return null;
+  const time = match[2].length === 5 ? match[2] + ':00' : match[2];
+  try { return Utilities.parseDate(match[1] + ' ' + time, MH.TZ, 'yyyy-MM-dd HH:mm:ss'); }
+  catch (e) { return null; }
+}
+function mhFindOvertimeRecord_(ss, chatId, date) {
+  const sh = mhSheet_(MH.SHEETS.overtime);
+  mhAssertHeaders_(sh, MH_OVERTIME.HEADERS);
+  const values = sh.getDataRange().getDisplayValues();
+  if (values.length < 2) return null;
+  const headers = values[0].map(x => String(x).trim());
+  const chatIdx = headers.indexOf('Chat ID'), dateIdx = headers.indexOf('تاريخ الوردية');
+  for (let i = values.length - 1; i >= 1; i--) {
+    if (String(values[i][chatIdx] || '').trim() === String(chatId) && mhDate_(values[i][dateIdx]) === String(date)) {
+      const row = {}; headers.forEach((h,j) => row[h] = values[i][j]);
+      return {row:row,rowNum:i+1,sheet:sh};
+    }
+  }
+  return null;
+}
+function mhOvertimeContext_(profile) {
+  if (profile.role !== 'employee') throw new Error('EMPLOYEE_ONLY');
+  const ss = spreadsheet_();
+  const attendanceRows = mhRows_(ss, MH.SHEETS.attendance).filter(r => String(r['Chat ID']).trim() === profile.chatId);
+  const open = mhFindOpenAttendance_(attendanceRows);
+  if (!open) return {canRequest:false,reason:'NO_OPEN_ATTENDANCE'};
+  const shift = mhShiftById_(ss, open.shiftId) || (function(){
+    const assignment = mhAssignmentForDate_(ss, profile.chatId, open.date);
+    return assignment ? mhShiftById_(ss, assignment.shiftId) : null;
+  })();
+  if (!shift || shift.isFlexible || !shift.startTime || !shift.endTime) return {canRequest:false,reason:'OVERTIME_FIXED_SHIFT_ONLY',date:open.date};
+  let shiftEnd = mhOvertimeDateTime_(open.date, shift.endTime);
+  if (!shiftEnd) return {canRequest:false,reason:'OVERTIME_SHIFT_TIME_INVALID',date:open.date};
+  if (mhTimeMinutes_(shift.endTime) <= mhTimeMinutes_(shift.startTime)) shiftEnd = mhOvertimeDateTime_(mhAddDays_(open.date,1), shift.endTime);
+  if (!shiftEnd) return {canRequest:false,reason:'OVERTIME_SHIFT_TIME_INVALID',date:open.date};
+  const overtimeStart = new Date(shiftEnd.getTime() + MH_OVERTIME.GRACE_MINUTES * 60000);
+  const now = new Date();
+  const existing = mhFindOvertimeRecord_(ss, profile.chatId, open.date);
+  const fmt = d => Utilities.formatDate(d, MH.TZ, 'yyyy-MM-dd HH:mm:ss');
+  const status = existing ? String(existing.row['الحالة'] || '') : '';
+  return {
+    canRequest: !existing && now >= shiftEnd && now < overtimeStart,
+    date: open.date,
+    shiftId: shift.id,
+    shiftEnd: fmt(shiftEnd),
+    overtimeStart: fmt(overtimeStart),
+    approvalDeadline: fmt(overtimeStart),
+    existing: existing ? {row:existing.rowNum,id:String(existing.row['رقم الطلب']||''),status:status,minutes:Number(existing.row['دقائق الأوفر تايم']||0),amount:Number(existing.row['المبلغ بالجنيه']||0)} : null,
+    reason: existing ? 'OVERTIME_ALREADY_REQUESTED' : (now < shiftEnd ? 'OVERTIME_WINDOW_NOT_OPEN' : now >= overtimeStart ? 'OVERTIME_WINDOW_EXPIRED' : '')
+  };
+}
+function overtimeStatus_(profile) {
+  const context = mhOvertimeContext_(profile);
+  return Object.assign(context, {
+    graceMinutes:MH_OVERTIME.GRACE_MINUTES,
+    ratePerMinute:MH_OVERTIME.RATE_PER_MINUTE,
+    maxPaidMinutes:MH_OVERTIME.MAX_PAID_MINUTES
+  });
+}
+function createOvertimeRequest_(profile) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    const ss = spreadsheet_();
+    const context = mhOvertimeContext_(profile);
+    if (!context.canRequest) throw new Error(context.reason || 'OVERTIME_WINDOW_NOT_OPEN');
+    const sh = mhSheet_(MH.SHEETS.overtime);
+    mhAssertHeaders_(sh, MH_OVERTIME.HEADERS);
+    // Recheck while holding the lock to prevent duplicate requests.
+    if (mhFindOvertimeRecord_(ss, profile.chatId, context.date)) throw new Error('OVERTIME_ALREADY_REQUESTED');
+    const now = new Date();
+    const stamp = Utilities.formatDate(now, MH.TZ, 'yyyy-MM-dd HH:mm:ss');
+    const shiftEnd = mhOvertimeParseDateTime_(context.shiftEnd);
+    const overtimeStart = new Date(shiftEnd.getTime() + MH_OVERTIME.GRACE_MINUTES * 60000);
+    const fmt = d => Utilities.formatDate(d, MH.TZ, 'yyyy-MM-dd HH:mm:ss');
+    const id = 'OT-' + Utilities.getUuid().slice(0,8).toUpperCase();
+    sh.appendRow([id,context.date,profile.chatId,profile.name,context.shiftId,fmt(shiftEnd),fmt(overtimeStart),fmt(overtimeStart),stamp,MH_OVERTIME.PENDING,'','','',0,0,'']);
+    const message = '⏱️ طلب موافقة على أوفر تايم\n\n👤 المهندس: ' + profile.name + '\n📅 تاريخ الوردية: ' + context.date + '\n🕒 نهاية الوردية: ' + fmt(shiftEnd) + '\n🟢 بداية احتساب الأوفر تايم: ' + fmt(overtimeStart) + '\n⏳ آخر موعد للموافقة: ' + fmt(overtimeStart) + '\n💵 السعر: 1 جنيه لكل دقيقة بعد أول 30 دقيقة.\n⛔ الحد الأقصى: ساعتان مدفوعتان (120 جنيهًا).\n\nيجب اعتماد الطلب قبل بداية احتساب الأوفر تايم.';
+    let notification = {sent:0,failed:0};
+    try { notification = mhNotifyOvertimeAdminsMini_(message,id); } catch(e) { console.error('Overtime request notification failed: '+e); }
+    return {submitted:true,requestId:id,status:MH_OVERTIME.PENDING,message:'تم إرسال طلب الأوفر تايم إلى الإدارة. انتظر الموافقة قبل بداية الحساب.',adminNotificationsSent:notification.sent,adminNotificationsFailed:notification.failed};
+  } finally { lock.releaseLock(); }
+}
+function mhNotifyOvertimeAdminsMini_(message, requestId) {
+  const managers = rowsAsObjects_(spreadsheet_(), MH.SHEETS.managers);
+  const recipients = [];
+  const rootId = String(PropertiesService.getScriptProperties().getProperty('ADMIN_ID') || '9134455704').trim();
+  if (/^\d{5,20}$/.test(rootId)) recipients.push(rootId);
+  managers.forEach(r => {
+    const id=String(r['Chat ID']||'').trim(), role=String(r['الصلاحية']||'').trim();
+    if (id && String(r['الحالة']||'نشط').trim()==='نشط' && ['Super Admin','Admin'].includes(role) && !recipients.includes(id)) recipients.push(id);
+  });
+  let sent=0, failed=0;
+  recipients.forEach(id => {
+    try { mhSendTelegramMini_(id,message+'\n\nمرجع الطلب: '+requestId); sent++; mhAppendNotificationLog_(id,'طلب أوفر تايم','تم الإرسال',''); }
+    catch(e) { failed++; try { mhAppendNotificationLog_(id,'طلب أوفر تايم','فشل',e.message); } catch(logErr) {} }
+  });
+  return {sent:sent,failed:failed};
+}
+function decideOvertimeRequest_(profile, body) {
+  mhRequireRole_(profile, ['super_admin','admin']);
+  const requestId=String(body.requestId||'').trim(), action=String(body.decision||'').trim();
+  if (!requestId || !['approve','reject'].includes(action)) throw new Error('INVALID_DECISION');
+  const lock=LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    const sh=mhSheet_(MH.SHEETS.overtime); mhAssertHeaders_(sh,MH_OVERTIME.HEADERS);
+    const all=sh.getDataRange().getDisplayValues();
+    const headers=all[0].map(x=>String(x).trim());
+    const idIndex=headers.indexOf('رقم الطلب');
+    let rowNum=0, values=[];
+    for(let i=all.length-1;i>=1;i--) if(String(all[i][idIndex]||'').trim()===requestId){rowNum=i+1;values=all[i];break;}
+    if (!rowNum) throw new Error('OVERTIME_NOT_FOUND');
+    const get=k=>values[headers.indexOf(k)];
+    if (String(get('الحالة')||'').trim() !== MH_OVERTIME.PENDING) throw new Error('OVERTIME_ALREADY_REVIEWED');
+    const now=new Date(), stamp=Utilities.formatDate(now,MH.TZ,'yyyy-MM-dd HH:mm:ss');
+    if (action === 'approve') {
+      const deadline=mhOvertimeParseDateTime_(get('آخر موعد للموافقة'));
+      if (!deadline || isNaN(deadline.getTime()) || now >= deadline) {
+        sh.getRange(rowNum,headers.indexOf('الحالة')+1).setValue('انتهت مهلة الموافقة');
+        throw new Error('OVERTIME_APPROVAL_EXPIRED');
+      }
+    }
+    const next=action==='approve'?'معتمد':'مرفوض';
+    sh.getRange(rowNum,headers.indexOf('الحالة')+1).setValue(next);
+    sh.getRange(rowNum,headers.indexOf('قرار المدير بواسطة')+1).setValue(profile.chatId);
+    sh.getRange(rowNum,headers.indexOf('وقت القرار')+1).setValue(stamp);
+    const employeeId=String(get('Chat ID')||'').trim();
+    const note=action==='approve'
+      ? '✅ وافق المدير على طلب الأوفر تايم. يبدأ الحساب من موعد نهاية الوردية +30 دقيقة، بسعر 1 جنيه للدقيقة، وبحد أقصى ساعتين مدفوعتين (120 جنيهًا)، بشرط استمرارك في العمل حتى تسجيل الانصراف.'
+      : '❌ تم رفض طلب الأوفر تايم من الإدارة. لن يتم احتساب وقت إضافي لهذه الوردية.';
+    let employeeNotified=false;
+    if (employeeId) { try { mhSendTelegramMini_(employeeId,note); employeeNotified=true; mhAppendNotificationLog_(employeeId,'قرار أوفر تايم','تم الإرسال',''); } catch(e) { try { mhAppendNotificationLog_(employeeId,'قرار أوفر تايم','فشل',e.message); } catch(logErr) {} } }
+    return {decided:true,status:next,employeeNotified:employeeNotified};
+  } finally { lock.releaseLock(); }
+}
+function finalizeOvertimeAtCheckoutMini_(profile, openAttendance, checkoutAt) {
+  if (!openAttendance || !openAttendance.date) return null;
+  const ss=spreadsheet_(), found=mhFindOvertimeRecord_(ss,profile.chatId,openAttendance.date);
+  if (!found) return null;
+  const row=found.row, rowNum=found.rowNum, current=String(row['الحالة']||'');
+  if (current === MH_OVERTIME.PENDING) {
+    const map=mhHeaderMap_(found.sheet);
+    found.sheet.getRange(rowNum,map['الحالة']).setValue('لم تتم الموافقة قبل الانصراف');
+    return {status:'لم تتم الموافقة قبل الانصراف',minutes:0,amount:0};
+  }
+  if (current !== 'معتمد') return {status:current,minutes:0,amount:0};
+  const startAt=mhOvertimeParseDateTime_(row['بداية الأوفر تايم']);
+  if (!startAt || isNaN(startAt.getTime())) return null;
+  const elapsed=Math.max(0,Math.floor((checkoutAt.getTime()-startAt.getTime())/60000));
+  const minutes=Math.min(elapsed,MH_OVERTIME.MAX_PAID_MINUTES);
+  const amount=minutes*MH_OVERTIME.RATE_PER_MINUTE;
+  const stamp=Utilities.formatDate(checkoutAt,MH.TZ,'yyyy-MM-dd HH:mm:ss');
+  const status=minutes>0?'معتمد - جاهز للتسوية':'معتمد دون وقت إضافي مستحق';
+  const map=mhHeaderMap_(found.sheet);
+  found.sheet.getRange(rowNum,map['الحالة']).setValue(status);
+  found.sheet.getRange(rowNum,map['وقت الانصراف الفعلي']).setValue(stamp);
+  found.sheet.getRange(rowNum,map['دقائق الأوفر تايم']).setValue(minutes);
+  found.sheet.getRange(rowNum,map['المبلغ بالجنيه']).setValue(amount);
+  if (minutes>0) {
+    const capNote=elapsed>MH_OVERTIME.MAX_PAID_MINUTES?'\n⚠️ تم تطبيق الحد الأقصى: ساعتان مدفوعتان.':'';
+    const summary='⏱️ تم إغلاق أوفر تايم معتمد\n\n👤 المهندس: '+profile.name+'\n📅 التاريخ: '+openAttendance.date+'\n⏱️ الدقائق المستحقة: '+minutes+'\n💰 المبلغ: '+amount+' جنيه'+capNote+'\n📌 الحالة: '+status+'.';
+    try { mhNotifyFinanceAdminsMini_(summary,null,String(row['رقم الطلب']||'')); } catch(e) { console.error('Overtime settlement notification failed: '+e); }
+  }
+  return {status:status,minutes:minutes,amount:amount,capped:elapsed>MH_OVERTIME.MAX_PAID_MINUTES};
+}
+function decideAbsence_(profile, body) {
+  mhRequireRole_(profile, ['super_admin','admin','supervisor']);
+  const employeeId=String(body.chatId||'').trim(), date=mhIsoDate_(body.date), decision=String(body.decision||'').trim();
+  if (!/^\d{5,20}$/.test(employeeId) || !date || !['confirm','excuse'].includes(decision)) throw new Error('INVALID_DECISION');
+  const lock=LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    const sh=mhSheet_(MH.SHEETS.absences); mhAssertHeaders_(sh,MH_OVERTIME.ABSENCE_HEADERS);
+    const map=mhHeaderMap_(sh), values=sh.getDataRange().getDisplayValues();
+    const idx=key=>map[key]-1;
+    let rowNum=0, row=null, matched=false;
+    for(let i=values.length-1;i>=1;i--) {
+      if(String(values[i][idx('Chat ID')]||'').trim()===employeeId && mhDate_(values[i][idx('التاريخ')])===date) {
+        matched=true;
+        if(String(values[i][idx('الحالة')]||'').trim()==='بانتظار مراجعة المدير') {rowNum=i+1;row=values[i];break;}
+      }
+    }
+    if(!rowNum) throw new Error(matched?'ABSENCE_ALREADY_REVIEWED':'ABSENCE_NOT_FOUND');
+    const confirmed=decision==='confirm';
+    const nextStatus=confirmed?'غياب مؤكد':'مغلق - ليس غيابًا';
+    const decisionText=confirmed?'تأكيد الغياب':'ليس غائبًا';
+    const stamp=mhNow_();
+    sh.getRange(rowNum,map['الحالة']).setValue(nextStatus);
+    sh.getRange(rowNum,map['قرار المدير']).setValue(decisionText);
+    sh.getRange(rowNum,map['وقت القرار']).setValue(stamp);
+    if (employeeId) {
+      const message=confirmed?'تم تسجيل غيابك لهذا اليوم بعد مراجعة الإدارة. إذا كان هناك خطأ، تواصل مع المدير.':'تمت مراجعة حالة عدم الحضور، ولم يتم اعتمادها كغياب.';
+      try { mhSendTelegramMini_(employeeId,message); mhAppendNotificationLog_(employeeId,'قرار مراجعة غياب','تم الإرسال',''); }
+      catch(e) { try { mhAppendNotificationLog_(employeeId,'قرار مراجعة غياب','فشل',e.message); } catch(logErr) {} }
+    }
+    return {decided:true,status:nextStatus,decision:decisionText,employeeNotified:!!employeeId};
+  } finally { lock.releaseLock(); }
+}
+
 function attendanceStatus_(profile) {
   const ss = spreadsheet_();
   const date = mhToday_();
@@ -872,6 +1119,7 @@ function attendanceStatus_(profile) {
     checkedOutToday: mine.some(r => mhDate_(r['التاريخ']) === date && String(r['النوع']) === 'انصراف'),
     assignment: assignment,
     shift: shift,
+    overtime: profile.role === 'employee' ? (function(){ try { return overtimeStatus_(profile); } catch(e) { console.error('Overtime status unavailable: '+e); return {canRequest:false,reason:'OVERTIME_UNAVAILABLE'}; } })() : null,
     gpsPolicy: { allowedDistanceMeters: MH_ATTENDANCE.MAX_DISTANCE_METERS, maxAccuracyMeters: MH_ATTENDANCE.MAX_ACCURACY_METERS }
   };
 }
@@ -948,10 +1196,14 @@ function attendanceCheckout_(profile, location) {
       ['عهدة مفتوحة','بانتظار مراجعة التسوية','بانتظار تأكيد استلام المتبقي','بانتظار صرف التعويض'].includes(String(r['حالة العهدة'] || '').trim())
     );
     if (openCustody) throw new Error('OPEN_CASH_CUSTODY');
-    const date = mhToday_();
-    const time = mhNow_('HH:mm:ss');
+    const checkoutAt = new Date();
+    const date = Utilities.formatDate(checkoutAt, MH.TZ, 'yyyy-MM-dd');
+    const time = Utilities.formatDate(checkoutAt, MH.TZ, 'HH:mm:ss');
     sheet.appendRow([date, time, profile.chatId, profile.name, 'انصراف', Math.round(gps.distance), gps.accuracy, gps.lat, gps.lon, 'تم تسجيل الانصراف', 0, open.shiftId || '', '']);
-    return { recorded: true, type: 'انصراف', date: date, time: time, distanceMeters: Math.round(gps.distance), accuracyMeters: gps.accuracy, checkinDate: open.date, checkinTime: open.time };
+    let overtime = null;
+    try { overtime = finalizeOvertimeAtCheckoutMini_(profile, open, checkoutAt); }
+    catch(overtimeError) { console.error('Overtime finalization failed after successful checkout: '+overtimeError); overtime = {status:'تعذر إغلاق سجل الأوفر تايم تلقائيًا',warning:true}; }
+    return { recorded: true, type: 'انصراف', date: date, time: time, distanceMeters: Math.round(gps.distance), accuracyMeters: gps.accuracy, checkinDate: open.date, checkinTime: open.time, overtime: overtime };
   } finally { lock.releaseLock(); }
 }
 
@@ -1099,7 +1351,9 @@ function testMiniAppConnection() {
     MH.SHEETS.complaints,
     MH.SHEETS.complaintMessages,
     MH.SHEETS.devices,
-    MH.SHEETS.shifts
+    MH.SHEETS.shifts,
+    MH.SHEETS.absences,
+    MH.SHEETS.overtime
   ];
 
   const existing = ss.getSheets().map(function(sheet) {
@@ -2298,4 +2552,105 @@ function getInspectionInstruction_(deviceType, index) {
 
 function deviceInspectionCatalogMini_(){
   const out={};Object.keys(MH_DEVICE_INSPECTION_CATALOG_).forEach(type=>{const d=MH_DEVICE_INSPECTION_CATALOG_[type];out[type]={name:d.name,items:d.items.map((item,index)=>({name:item,instruction:getInspectionInstruction_(type,index)}))};});return out;
+}
+
+
+/* V1.10.6 persistent device inspection sessions.
+ * Every save is an immutable snapshot; the latest session is loaded for continuation.
+ */
+const MH_DEVICE_INSPECTION_HEADERS_V106_ = [
+  'التاريخ والوقت','معرف جلسة الفحص','رقم الطلب','نوع الجهاز','ترتيب الاختبار',
+  'اسم الاختبار','النتيجة','ملاحظات الاختبار','منفذ الفحص Chat ID','منفذ الفحص'
+];
+
+function mhDeviceInspectionAccessV106_(profile, orderId) {
+  const rows = rowsAsObjects_(spreadsheet_(), MH.SHEETS.devices);
+  const row = rows.find(r => String(r['رقم الطلب'] || '').trim() === String(orderId || '').trim());
+  if (!row) throw new Error('DEVICE_NOT_FOUND');
+  const admin = ['super_admin','admin'].includes(profile.role);
+  const intake = deviceIntakeAllowed_(profile) &&
+    String(row['مسؤول الاستلام Chat ID'] || '').trim() === String(profile.chatId);
+  const assigned = String(row['الموظف المسؤول Chat ID'] || '').trim() === String(profile.chatId);
+  if (!admin && !intake && !assigned) throw new Error('FORBIDDEN');
+  return row;
+}
+
+function deviceInspectionGetMiniV106_(profile, body) {
+  const orderId = String(body.orderId || '').trim();
+  const type = String(body.deviceType || '').trim().toLowerCase();
+  if (!orderId || !MH_DEVICE_INSPECTION_CATALOG_[type]) throw new Error('INVALID_INSPECTION_TYPE');
+  mhDeviceInspectionAccessV106_(profile, orderId);
+  const sh = spreadsheet_().getSheetByName('سجل فحص الأجهزة');
+  if (!sh || sh.getLastRow() < 2) return {orderId,deviceType:type,sessionId:'',items:[]};
+  const values = sh.getDataRange().getValues();
+  const headers = values[0].map(String);
+  const ix = {}; headers.forEach((h,i)=>ix[h]=i);
+  const matches = values.slice(1).filter(r =>
+    String(r[ix['رقم الطلب']] || '').trim() === orderId &&
+    String(r[ix['نوع الجهاز']] || '').trim() === type
+  );
+  if (!matches.length) return {orderId,deviceType:type,sessionId:'',items:[]};
+  const latest = matches[matches.length-1];
+  const sessionId = String(latest[ix['معرف جلسة الفحص']] || '');
+  const sessionRows = matches.filter(r=>String(r[ix['معرف جلسة الفحص']]||'')===sessionId);
+  return {
+    orderId,deviceType:type,sessionId,
+    updatedAt:String(latest[ix['التاريخ والوقت']]||''),
+    items:sessionRows.map(r=>({
+      index:Number(r[ix['ترتيب الاختبار']]),
+      name:String(r[ix['اسم الاختبار']]||''),
+      result:String(r[ix['النتيجة']]||''),
+      note:String(r[ix['ملاحظات الاختبار']]||'')
+    }))
+  };
+}
+
+function deviceInspectionSaveMiniV106_(profile, body) {
+  const orderId = String(body.orderId || '').trim();
+  const type = String(body.deviceType || '').trim().toLowerCase();
+  const catalog = MH_DEVICE_INSPECTION_CATALOG_[type];
+  if (!orderId || !catalog) throw new Error('INVALID_INSPECTION_TYPE');
+  mhDeviceInspectionAccessV106_(profile, orderId);
+  const items = Array.isArray(body.items) ? body.items : [];
+  if (!items.length || items.length > catalog.items.length) throw new Error('INVALID_INSPECTION_ITEMS');
+  const seen = {};
+  const normalized = items.map(item => {
+    const index = Number(item.index);
+    const result = String(item.result || '').trim();
+    if (!Number.isInteger(index) || index < 0 || index >= catalog.items.length || seen[index]) throw new Error('INVALID_INSPECTION_ITEMS');
+    if (result && ['سليم','مشكلة','لم يختبر'].indexOf(result)<0) throw new Error('INVALID_INSPECTION_RESULT');
+    seen[index] = true;
+    return {
+      index,
+      name:catalog.items[index],
+      result,
+      note:String(item.note || '').trim().slice(0,500)
+    };
+  });
+  const ss = spreadsheet_();
+  let sh = ss.getSheetByName('سجل فحص الأجهزة');
+  if (!sh) {
+    sh = ss.insertSheet('سجل فحص الأجهزة');
+    sh.getRange(1,1,1,MH_DEVICE_INSPECTION_HEADERS_V106_.length).setValues([MH_DEVICE_INSPECTION_HEADERS_V106_]);
+    sh.setFrozenRows(1);
+  }
+  mhAssertHeaders_(sh, MH_DEVICE_INSPECTION_HEADERS_V106_);
+  const sessionId = Utilities.getUuid();
+  const now = mhStamp_();
+  const rows = normalized.map(item => [
+    now,sessionId,orderId,type,item.index,item.name,item.result,item.note,
+    String(profile.chatId),String(profile.name || '')
+  ]);
+  const lock = LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    const start = sh.getLastRow()+1;
+    sh.getRange(start,1,rows.length,MH_DEVICE_INSPECTION_HEADERS_V106_.length).setValues(rows);
+  } finally { lock.releaseLock(); }
+  return {
+    saved:true,orderId,deviceType:type,sessionId,updatedAt:now,
+    completed:normalized.filter(x=>x.result).length,
+    issues:normalized.filter(x=>x.result==='مشكلة').length,
+    untested:normalized.filter(x=>x.result==='لم يختبر').length,
+    pending:normalized.filter(x=>!x.result).length
+  };
 }

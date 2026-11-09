@@ -1,7 +1,7 @@
 (() => {
   'use strict';
   const tg = window.Telegram?.WebApp;
-const API_URL = 'https://mobihub-telegram-proxy-v2.ahmedmtarek20.workers.dev/';
+  const API_URL = 'https://mobihub-telegram-proxy-v2.ahmedmtarek20.workers.dev/';
   const $ = (id) => document.getElementById(id);
   const titles = { requests: 'الطلبات العامة', leaves: 'طلبات الأذونات', complaints: 'شكاوي', cash: 'السلف والعهد', deductions: 'خصوماتي', devices: 'حالة الأجهزة', attendance: 'سجل الحضور والانصراف' };
   let initData = '';
@@ -82,6 +82,7 @@ const API_URL = 'https://mobihub-telegram-proxy-v2.ahmedmtarek20.workers.dev/';
     INVALID_REWARD_REASON: 'اكتب سبب المكافأة من 3 إلى 250 حرفًا.',
     INVALID_HYGIENE_RATING: 'بيانات تقييم النظافة غير صحيحة.',
     HYGIENE_ALREADY_RATED: 'تم تسجيل تقييم النظافة لهذا المهندس في هذا اليوم بالفعل.',
+    OVERTIME_UNAVAILABLE: 'خدمة الأوفر تايم غير جاهزة حاليًا. تم الحفاظ على تسجيل الحضور والانصراف.',
     EMPLOYEE_NOT_FOUND: 'المهندس غير موجود أو حسابه غير نشط.',
     INVALID_MONTH: 'صيغة الشهر غير صحيحة.',
     INVALID_DEDUCTION: 'راجع نوع الخصم والسبب والمبلغ.',
@@ -90,7 +91,17 @@ const API_URL = 'https://mobihub-telegram-proxy-v2.ahmedmtarek20.workers.dev/';
     DEDUCTION_ALREADY_REVIEWED: 'تمت مراجعة الخصم بالفعل.',
     INVALID_REWARD_REASON: 'اكتب سبب المكافأة من 3 إلى 250 حرفًا.',
     INVALID_HYGIENE_RATING: 'بيانات تقييم النظافة غير صحيحة.',
-    HYGIENE_ALREADY_RATED: 'تم تسجيل تقييم النظافة لهذا المهندس في هذا اليوم بالفعل.'
+    HYGIENE_ALREADY_RATED: 'تم تسجيل تقييم النظافة لهذا المهندس في هذا اليوم بالفعل.',
+    OVERTIME_WINDOW_NOT_OPEN: 'طلب الأوفر تايم متاح فقط من وقت نهاية الوردية.',
+    OVERTIME_WINDOW_EXPIRED: 'انتهت مهلة طلب الأوفر تايم بعد مرور 30 دقيقة من نهاية الوردية.',
+    OVERTIME_FIXED_SHIFT_ONLY: 'طلب الأوفر تايم متاح للورديات ذات موعد الانصراف المحدد فقط.',
+    OVERTIME_ALREADY_REQUESTED: 'يوجد طلب أوفر تايم مسجل لهذه الوردية بالفعل.',
+    OVERTIME_APPROVAL_EXPIRED: 'انتهت مهلة موافقة المدير؛ لا يمكن اعتماد أوفر تايم بأثر رجعي.',
+    OVERTIME_ALREADY_REVIEWED: 'تمت مراجعة طلب الأوفر تايم بالفعل.',
+    ABSENCE_ALREADY_REVIEWED: 'تمت مراجعة حالة الغياب بالفعل.',
+    ABSENCE_NOT_FOUND: 'حالة الغياب غير موجودة.',
+    OVERTIME_SHIFT_TIME_INVALID: 'تعذر تحديد وقت نهاية الوردية. راجع إعدادات الوردية.',
+    OVERTIME_NOT_FOUND: 'طلب الأوفر تايم غير موجود.'
   };
 
   function fail(message) {
@@ -139,6 +150,17 @@ const API_URL = 'https://mobihub-telegram-proxy-v2.ahmedmtarek20.workers.dev/';
     $('shiftInfo').textContent = shift ? `الوردية: ${shift.name || shift.id}${shift.isFlexible ? ' · بدون موعد ثابت' : ` · ${shift.startTime || '--:--'} إلى ${shift.endTime || '--:--'} · سماح ${shift.graceMinutes} دقيقة`}` : 'لا توجد وردية محددة لليوم.';
     $('checkinBtn').disabled = open || !!data.checkedInToday || !data.assignment || !shift;
     $('checkoutBtn').disabled = !open;
+    const overtime=data.overtime||null;
+    const overtimePanel=$('overtimePanel');
+    const overtimeButton=$('requestOvertimeBtn');
+    if(overtimePanel&&overtimeButton){
+      const existing=overtime?.existing;
+      const canRequest=!!overtime?.canRequest;
+      overtimePanel.classList.toggle('hidden',!canRequest&&!existing);
+      overtimeButton.classList.toggle('hidden',!canRequest);
+      overtimeButton.disabled=false;
+      $('overtimeMessage').textContent=existing?`حالة الطلب: ${existing.status} · الدقائق: ${existing.minutes||0} · المستحق: ${existing.amount||0} جنيه`:canRequest?`متاح الآن. يجب اعتماد الطلب خلال ${overtime.graceMinutes||30} دقيقة من نهاية الوردية، ثم يبدأ الحساب بحد أقصى ${overtime.maxPaidMinutes||120} دقيقة.`:'';
+    }
     if (open) $('checkinBtn').textContent = 'تم تسجيل الحضور';
     else $('checkinBtn').textContent = data.checkedInToday ? 'الحضور مسجل اليوم' : 'تسجيل حضور';
   }
@@ -168,7 +190,9 @@ const API_URL = 'https://mobihub-telegram-proxy-v2.ahmedmtarek20.workers.dev/';
         if (pendingUniform) showAttendanceMessage(`تم التحقق من الموقع: ${result.distanceMeters} متر · الدقة ${result.accuracyMeters} متر. أكّد حالة اليونيفورم لإتمام الحضور.`);
       } else {
         const result = await api(action, { location });
-        showAttendanceMessage(`تم تسجيل الانصراف بنجاح · ${result.time || ''} · المسافة ${result.distanceMeters} متر.`);
+        const ot=result.overtime;
+        const otNote=ot&&Number(ot.amount)>0?` · أوفر تايم ${ot.minutes} دقيقة / ${ot.amount} جنيه`:ot?.status?` · ${ot.status}`:'';
+        showAttendanceMessage(`تم تسجيل الانصراف بنجاح · ${result.time || ''} · المسافة ${result.distanceMeters} متر.${otNote}`);
         $('uniformBox').classList.add('hidden');
         await refreshAttendance();
       }
@@ -312,7 +336,7 @@ const API_URL = 'https://mobihub-telegram-proxy-v2.ahmedmtarek20.workers.dev/';
 
   const managerModuleTitles = {
     daily:'المتابعة اليومية', staff:'شؤون المهندسين', requests:'طلبات المهندسين والتواصل',
-    finance:'الإدارة المالية', devices:'الأجهزة والصيانة', system:'التقارير والنظام', notifications:'مركز الإشعارات', managers:'إدارة المديرين'
+    finance:'الإدارة المالية', overtime:'الأوفر تايم', devices:'الأجهزة والصيانة', system:'التقارير والنظام', notifications:'مركز الإشعارات', managers:'إدارة المديرين'
   };
   let managerDashboardCache = null;
   function renderManagerDashboard(data) {
@@ -322,9 +346,9 @@ const API_URL = 'https://mobihub-telegram-proxy-v2.ahmedmtarek20.workers.dev/';
     const tiles = [
       ['المهندسون النشطون',m.activeEmployees,'users','staff'],['الموجودون الآن',m.presentNow,'user-check','daily'],
       ['طلبات معلقة',m.pendingRequests + m.pendingLeaves,'inbox','requests'],['طلبات مالية معلقة',m.pendingCash,'wallet','finance'],
-      ['شكاوى مفتوحة',m.openComplaints,'message-circle','requests'],['أجهزة تحت المتابعة',m.activeDevices,'smartphone','devices']
+      ['أوفر تايم بانتظار الموافقة',m.pendingOvertime,'hourglass','overtime'],['شكاوى مفتوحة',m.openComplaints,'message-circle','requests'],['أجهزة تحت المتابعة',m.activeDevices,'smartphone','devices']
     ].filter(item => data.modules?.[item[3]] === true);
-    $('managerMetrics').innerHTML = tiles.map(([label,value,ico])=>`<article class="manager-metric"><span class="manager-metric-icon">${({users:'♙','user-check':'✓',inbox:'▤',wallet:'ج.م','message-circle':'✉',smartphone:'▣'})[ico]}</span><b>${Number(value)||0}</b><small>${label}</small></article>`).join('');
+    $('managerMetrics').innerHTML = tiles.map(([label,value,ico])=>`<article class="manager-metric"><span class="manager-metric-icon">${({users:'♙','user-check':'✓',inbox:'▤',wallet:'ج.م','message-circle':'✉',hourglass:'◷',smartphone:'▣'})[ico]}</span><b>${Number(value)||0}</b><small>${label}</small></article>`).join('');
     const allowed = data.modules || {};
     $('managerModules').querySelectorAll('[data-manager-module]').forEach(btn=>{
       btn.classList.toggle('hidden', allowed[btn.dataset.managerModule] !== true);
@@ -364,6 +388,21 @@ const API_URL = 'https://mobihub-telegram-proxy-v2.ahmedmtarek20.workers.dev/';
       panel.querySelector('#managerOpenFinance').addEventListener('click',async()=>{closeModal();$('financeCenter').classList.remove('hidden');openModal('الخصومات والمكافآت',$('financeCenter'));$('deductionAdminTab').click();});
       return;
     }
+    if(module==='overtime') {
+      const panel=managerPanel(title,'<p class="muted">جاري تحميل سجل الأوفر تايم...</p>');
+      const content=panel.querySelector('.manager-module-content');
+      try {
+        const rows=await api('list',{entity:'overtime'});
+        const canDecide=['super_admin','admin'].includes(currentRole);
+        content.innerHTML=`<div class="manager-mini-kpis"><div><b>${rows.filter(r=>String(r['الحالة']||'')==='بانتظار موافقة المدير').length}</b><small>طلبات بانتظار الموافقة</small></div><div><b>${rows.reduce((sum,r)=>sum+(Number(r['المبلغ بالجنيه'])||0),0)}</b><small>إجمالي المبالغ المسجلة بالجنيه</small></div></div><p class="manager-note">حسب قواعد V46: أول 30 دقيقة بعد نهاية الوردية غير مدفوعة، ثم 1 جنيه لكل دقيقة، بحد أقصى 120 دقيقة. الاعتماد يجب أن يتم قبل بداية احتساب الوقت الإضافي.</p><h4>سجل الأوفر تايم</h4>${rows.slice().reverse().map(r=>{const pending=String(r['الحالة']||'')==='بانتظار موافقة المدير';return `<article class="manager-row"><div><b>${escapeHtml(r['اسم المهندس']||'مهندس')} · ${escapeHtml(r['رقم الطلب']||'')}</b><small>${escapeHtml(r['تاريخ الوردية']||'')} · نهاية الوردية ${escapeHtml(r['موعد نهاية الوردية']||'—')}</small></div><span class="status-pill">${escapeHtml(r['الحالة']||'غير محدد')}</span><small>الدقائق: ${Number(r['دقائق الأوفر تايم'])||0} · المبلغ: ${Number(r['المبلغ بالجنيه'])||0} جنيه</small>${pending&&canDecide?`<div class="manager-row-actions"><button type="button" class="primary-btn" data-overtime-decision="approve" data-overtime-id="${escapeHtml(r['رقم الطلب']||'')}">موافقة</button><button type="button" class="secondary-btn" data-overtime-decision="reject" data-overtime-id="${escapeHtml(r['رقم الطلب']||'')}">رفض</button></div>`:''}</article>`;}).join('')||'<p class="muted">لا توجد طلبات أوفر تايم مسجلة.</p>'}`;
+        content.querySelectorAll('[data-overtime-decision]').forEach(btn=>btn.addEventListener('click',async()=>{
+          btn.disabled=true;
+          try { await api('overtime_decide',{requestId:btn.dataset.overtimeId,decision:btn.dataset.overtimeDecision}); if(tg?.showAlert)tg.showAlert(btn.dataset.overtimeDecision==='approve'?'تم اعتماد طلب الأوفر تايم.':'تم رفض طلب الأوفر تايم.'); closeModal(); await loadManagerDashboard(); openManagerModule('overtime'); }
+          catch(e){if(tg?.showAlert)tg.showAlert(e.message);btn.disabled=false;}
+        }));
+      } catch(e) { content.innerHTML=`<div class="manager-load-error">${escapeHtml(e.message)}</div>`; }
+      return;
+    }
     if(module==='notifications') {
       const canManageNotifications=['super_admin','admin'].includes(currentRole);
       const panel=managerPanel(title,'<p class="muted">جاري تحميل سجل الإشعارات والإعدادات...</p>'); const content=panel.querySelector('.manager-module-content');
@@ -391,11 +430,13 @@ const API_URL = 'https://mobihub-telegram-proxy-v2.ahmedmtarek20.workers.dev/';
     const content=panel.querySelector('.manager-module-content');
     try {
       if(module==='daily') {
-        const dash=managerDashboardCache||{}; const [rows,absences]=await Promise.all([api('list',{entity:'attendance'}),api('list',{entity:'absences'})]);
+        const dash=managerDashboardCache||{}; const [rows,absences,overtimeRows]=await Promise.all([api('list',{entity:'attendance'}),api('list',{entity:'absences'}),api('list',{entity:'overtime'})]);
         const day=dash.date; const today=rows.filter(r=>String(r['التاريخ']||'').slice(0,10)===day).reverse();
         const latest={}; today.forEach(r=>{const id=String(r['Chat ID']||'');if(id&&!latest[id])latest[id]=r;});
         const records=Object.values(latest);
-        content.innerHTML=`<div class="manager-mini-kpis"><div><b>${records.filter(r=>String(r['النوع'])==='حضور').length}</b><small>حضور مفتوح حسب آخر حركة</small></div><div><b>${absences.filter(r=>/انتظار|مراجعة|معلق/.test(String(r['الحالة']||r['قرار المدير']||''))).length}</b><small>حالات غياب للمراجعة</small></div></div><h4>حركات اليوم</h4>${records.length?records.map(r=>`<article class="manager-row"><b>${escapeHtml(r['اسم الموظف']||'مهندس')}</b><span>${escapeHtml(r['النوع']||'')}</span><small>${escapeHtml(r['الوقت']||'')} · ${escapeHtml(r['حالة الحضور']||'')}</small></article>`).join(''):'<p class="muted">لا توجد حركات حضور مسجلة اليوم.</p>'}<h4>مراجعة الغياب</h4>${absences.slice(-15).reverse().map(r=>`<article class="manager-row"><b>${escapeHtml(r['اسم الموظف']||'مهندس')}</b><span>${escapeHtml(r['الحالة']||r['قرار المدير']||'غير محدد')}</span><small>${escapeHtml(r['التاريخ']||'')} · ${escapeHtml(r['ملاحظات المدير']||'')}</small></article>`).join('')||'<p class="muted">لا توجد سجلات غياب.</p>'}`;
+        const canReviewAbsence=['super_admin','admin','supervisor'].includes(currentRole);
+        content.innerHTML=`<div class="manager-mini-kpis"><div><b>${records.filter(r=>String(r['النوع'])==='حضور').length}</b><small>حضور مفتوح حسب آخر حركة</small></div><div><b>${absences.filter(r=>/انتظار|مراجعة|معلق/.test(String(r['الحالة']||r['قرار المدير']||''))).length}</b><small>حالات غياب للمراجعة</small></div><div><b>${overtimeRows.filter(r=>String(r['الحالة']||'')==='بانتظار موافقة المدير').length}</b><small>طلبات أوفر تايم معلقة</small></div></div><h4>حركات اليوم</h4>${records.length?records.map(r=>`<article class="manager-row"><b>${escapeHtml(r['اسم الموظف']||'مهندس')}</b><span>${escapeHtml(r['النوع']||'')}</span><small>${escapeHtml(r['الوقت']||'')} · ${escapeHtml(r['حالة الحضور']||'')}</small></article>`).join(''):'<p class="muted">لا توجد حركات حضور مسجلة اليوم.</p>'}<h4>مراجعة الغياب</h4>${absences.slice(-20).reverse().map(r=>{const pending=String(r['الحالة']||'').trim()==='بانتظار مراجعة المدير';return `<article class="manager-row"><b>${escapeHtml(r['اسم الموظف']||'مهندس')}</b><span>${escapeHtml(r['الحالة']||r['قرار المدير']||'غير محدد')}</span><small>${escapeHtml(r['التاريخ']||'')} · موعد الحضور: ${escapeHtml(r['موعد الحضور']||'—')} · اكتشاف: ${escapeHtml(r['وقت اكتشاف الحالة']||'—')}</small>${pending&&canReviewAbsence?`<div class="manager-row-actions"><button type="button" class="primary-btn" data-absence-decision="confirm" data-absence-chat="${escapeHtml(r['Chat ID']||'')}" data-absence-date="${escapeHtml(String(r['التاريخ']||'').slice(0,10))}">تأكيد الغياب</button><button type="button" class="secondary-btn" data-absence-decision="excuse" data-absence-chat="${escapeHtml(r['Chat ID']||'')}" data-absence-date="${escapeHtml(String(r['التاريخ']||'').slice(0,10))}">ليس غائبًا</button></div>`:''}</article>`;}).join('')||'<p class="muted">لا توجد سجلات غياب.</p>'}<h4>آخر طلبات الأوفر تايم</h4>${overtimeRows.slice(-10).reverse().map(r=>`<article class="manager-row"><b>${escapeHtml(r['اسم المهندس']||'مهندس')}</b><span>${escapeHtml(r['الحالة']||'')}</span><small>${escapeHtml(r['تاريخ الوردية']||'')} · ${Number(r['دقائق الأوفر تايم'])||0} دقيقة · ${Number(r['المبلغ بالجنيه'])||0} جنيه</small></article>`).join('')||'<p class="muted">لا توجد طلبات أوفر تايم.</p>'}`;
+        content.querySelectorAll('[data-absence-decision]').forEach(btn=>btn.addEventListener('click',async()=>{btn.disabled=true;try{await api('absence_decide',{chatId:btn.dataset.absenceChat,date:btn.dataset.absenceDate,decision:btn.dataset.absenceDecision});if(tg?.showAlert)tg.showAlert(btn.dataset.absenceDecision==='confirm'?'تم تأكيد الغياب وإبلاغ الموظف.':'تم تسجيل القرار: ليس غائبًا.');closeModal();await loadManagerDashboard();openManagerModule('daily');}catch(e){if(tg?.showAlert)tg.showAlert(e.message);btn.disabled=false;}}));
       } else if(module==='staff') {
         const [rows,assignments,shifts]=await Promise.all([api('list',{entity:'employees'}),api('list',{entity:'assignments'}),api('list',{entity:'shifts'})]);
         const shiftNames=Object.fromEntries(shifts.map(x=>[String(x['Shift ID']||''),String(x['اسم الوردية']||x['اسم الشيفت']||x['الاسم']||'وردية')]));
@@ -409,7 +450,7 @@ const API_URL = 'https://mobihub-telegram-proxy-v2.ahmedmtarek20.workers.dev/';
         const [rows,employees]=await Promise.all([api('device_list'),api('device_staff')]);
         const statuses=['تم الاستلام','قيد الفحص','يحتاج قطعة غيار','يحتاج التواصل مع العميل','بانتظار رد العميل','لم يتم الرد','قيد الإصلاح','مراجعة الجودة','يحتاج إعادة فحص','جاهز للتسليم','تم التسليم'];
         const locations=['قسم الاستلام','ترابيزة الهاردوير','درج الفحص 1','درج الفحص 2','درج مراجعة الجودة','درج انتظار قطع الغيار','درج انتظار العميل','درج جاهز للتسليم','مكان آخر'];
-        content.innerHTML=`<div class="manager-mini-kpis"><div><b>${rows.length}</b><small>أجهزة ظاهرة حسب الصلاحية</small></div><div><b>${employees.length}</b><small>فنيون نشطون</small></div></div><div class="manager-module-toolbar"><input id="deviceModuleSearch" type="search" placeholder="ابحث برقم الطلب أو الجهاز أو الفني"><button type="button" class="secondary-btn" id="deviceInspectionCatalog">كتالوج الفحص</button></div><h4>الأجهزة وسجل المتابعة</h4>`+(rows.length?rows.map((r,i)=>`<article class="manager-row"><div><b>${escapeHtml(r.orderId||'جهاز')}</b><small>${escapeHtml(r.deviceName||'')} · العميل: ${escapeHtml(r.customerName||'')}</small></div><span class="status-pill">${escapeHtml(r.status||'غير محدد')}</span><small>المسؤول: ${escapeHtml(r.employeeName||'—')} · المكان: ${escapeHtml(r.location||'—')}</small><div class="manager-row-actions"><button class="secondary-btn" type="button" data-device-detail="${i}">التفاصيل والسجل</button><button class="secondary-btn" type="button" data-device-edit="${i}">تحديث الحالة</button><button class="secondary-btn" type="button" data-device-transfer="${i}">تحويل لفني</button></div></article>`).join(''):'<p class="muted">لا توجد أجهزة مسجلة أو لا توجد أجهزة ضمن صلاحيات حسابك.</p>') ;
+        content.innerHTML=`<div class="manager-mini-kpis"><div><b>${rows.length}</b><small>أجهزة ظاهرة حسب الصلاحية</small></div><div><b>${employees.length}</b><small>فنيون نشطون</small></div></div><div class="manager-module-toolbar"><input id="deviceModuleSearch" type="search" placeholder="ابحث برقم الطلب أو الجهاز أو الفني"><button type="button" class="secondary-btn" id="deviceInspectionCatalog">كتالوج الفحص</button></div><h4>الأجهزة وسجل المتابعة</h4>`+(rows.length?rows.map((r,i)=>`<article class="manager-row"><div><b>${escapeHtml(r.orderId||'جهاز')}</b><small>${escapeHtml(r.deviceName||'')} · العميل: ${escapeHtml(r.customerName||'')}</small></div><span class="status-pill">${escapeHtml(r.status||'غير محدد')}</span><small>المسؤول: ${escapeHtml(r.employeeName||'—')} · المكان: ${escapeHtml(r.location||'—')}</small><div class="manager-row-actions"><button class="secondary-btn" type="button" data-device-detail="${i}">التفاصيل والسجل</button><button class="secondary-btn" type="button" data-device-edit="${i}">تحديث الحالة</button><button class="secondary-btn" type="button" data-device-transfer="${i}">تحويل لفني</button><button class="secondary-btn" type="button" data-device-inspection="${i}">فحص الجهاز</button></div></article>`).join(''):'<p class="muted">لا توجد أجهزة مسجلة أو لا توجد أجهزة ضمن صلاحيات حسابك.</p>') ;
         const search=content.querySelector('#deviceModuleSearch');
         search.addEventListener('input',()=>{const q=search.value.trim().toLowerCase();content.querySelectorAll('.manager-row').forEach(row=>row.classList.toggle('hidden',!row.textContent.toLowerCase().includes(q)));});
         content.querySelector('#deviceInspectionCatalog').addEventListener('click',async()=>{
@@ -437,6 +478,70 @@ const API_URL = 'https://mobihub-telegram-proxy-v2.ahmedmtarek20.workers.dev/';
           const r=rows[Number(btn.dataset.deviceTransfer)];
           const formHtml=`<form id="deviceTransferForm" class="manager-staff-form"><label>رقم الطلب<input value="${escapeHtml(r.orderId)}" disabled></label><label>المهندس الجديد<select name="employeeId" required><option value="">اختر المهندس</option>${employees.map(e=>`<option value="${escapeHtml(e.chatId)}">${escapeHtml(e.name)} — ${escapeHtml(e.job)}</option>`).join('')}</select></label><button type="submit" class="primary-btn">تأكيد التحويل</button></form>`;
           const p=managerPanel('تحويل مسؤولية الجهاز',formHtml);p.querySelector('form').addEventListener('submit',async ev=>{ev.preventDefault();const f=ev.currentTarget,b=f.querySelector('button');b.disabled=true;try{const fd=new FormData(f);await api('device_transfer',{orderId:r.orderId,...Object.fromEntries(fd.entries())});closeModal();openManagerModule('devices');}catch(e){if(tg?.showAlert)tg.showAlert(e.message);b.disabled=false;}});
+        }));
+
+        content.querySelectorAll('[data-device-inspection]').forEach(btn=>btn.addEventListener('click',async()=>{
+          const r=rows[Number(btn.dataset.deviceInspection)];
+          try {
+            const catalog=await api('device_inspection_catalog');
+            const guess=(name)=>{
+              const n=String(name||'').toLowerCase();
+              if(/iphone|ايفون|آيفون/.test(n))return 'iphone';
+              if(/ipad|ايباد|آيباد/.test(n))return 'ipad';
+              if(/macbook|ماك/.test(n))return 'macbook';
+              if(/watch|ساعة/.test(n))return 'watch';
+              if(/airpods|ايربودز|إيربودز/.test(n))return 'airpods';
+              return 'iphone';
+            };
+            const initialType=guess(r.deviceName);
+            const renderForm=async(type)=>{
+              const saved=await api('device_inspection_get',{orderId:r.orderId,deviceType:type});
+              const d=catalog[type];
+              const previous=new Map((saved.items||[]).map(x=>[Number(x.index),x]));
+              const items=d.items.map((it,i)=>{
+                const old=previous.get(i)||{};
+                return `<article class="inspection-form-item"><div class="inspection-form-title"><b>${i+1}. ${escapeHtml(it.name)}</b><details><summary>تعليمات الاختبار</summary><p>${escapeHtml(it.instruction||'')}</p></details></div><label>النتيجة<select name="result_${i}"><option value="" ${!old.result?'selected':''}>لم يتم التقييم</option><option value="سليم" ${old.result==='سليم'?'selected':''}>سليم</option><option value="مشكلة" ${old.result==='مشكلة'?'selected':''}>مشكلة</option><option value="لم يختبر" ${old.result==='لم يختبر'?'selected':''}>لم يختبر</option></select></label><label>ملاحظات<textarea name="note_${i}" rows="2" maxlength="500">${escapeHtml(old.note||'')}</textarea></label></article>`;
+              }).join('');
+              return `<form id="deviceInspectionForm" class="device-inspection-form"><div class="inspection-form-meta"><b>طلب رقم ${escapeHtml(r.orderId)}</b><span>${escapeHtml(d.name)} · ${d.items.length} اختبار</span>${saved.updatedAt?`<small>آخر حفظ: ${escapeHtml(saved.updatedAt)}</small>`:''}</div><label>نوع الجهاز<select name="deviceType" id="inspectionDeviceType">${Object.entries(catalog).map(([k,v])=>`<option value="${k}" ${k===type?'selected':''}>${escapeHtml(v.name)}</option>`).join('')}</select></label><div class="inspection-form-items">${items}</div><button type="submit" class="primary-btn">حفظ نتائج الفحص</button></form>`;
+            };
+            const first=await renderForm(initialType);
+            const p=managerPanel('فحص الجهاز',first);
+            p.querySelector('#inspectionDeviceType').addEventListener('change',async ev=>{
+              try {
+                const h=await renderForm(ev.target.value);
+                const tmp=document.createElement('div');tmp.innerHTML=h;
+                p.querySelector('#deviceInspectionForm').replaceWith(tmp.firstElementChild);
+                bindTypeSelector();
+                bindForm();
+              } catch(e){if(tg?.showAlert)tg.showAlert(e.message);}
+            });
+            const bindTypeSelector=()=>{
+              const selector=p.querySelector('#inspectionDeviceType');
+              if(selector) selector.addEventListener('change',async ev=>{
+                try {
+                  const h=await renderForm(ev.target.value);
+                  const tmp=document.createElement('div');tmp.innerHTML=h;
+                  p.querySelector('#deviceInspectionForm').replaceWith(tmp.firstElementChild);
+                  bindTypeSelector();bindForm();
+                } catch(e){if(tg?.showAlert)tg.showAlert(e.message);}
+              });
+            };
+            const bindForm=()=>{
+              const form=p.querySelector('#deviceInspectionForm');
+              if(!form)return;
+              form.addEventListener('submit',async ev=>{
+                ev.preventDefault();const b=form.querySelector('button[type="submit"]');b.disabled=true;
+                const type=form.elements.deviceType.value;const count=catalog[type].items.length;
+                const items=Array.from({length:count},(_,i)=>({index:i,result:form.elements[`result_${i}`].value,note:form.elements[`note_${i}`].value}));
+                try {
+                  const saved=await api('device_inspection_save',{orderId:r.orderId,deviceType:type,items});
+                  if(tg?.showAlert)tg.showAlert(`تم حفظ الفحص. تم تقييم ${saved.completed} اختبار، ومشكلات مسجلة: ${saved.issues}.`);
+                  closeModal();openManagerModule('devices');
+                } catch(e){if(tg?.showAlert)tg.showAlert(e.message);b.disabled=false;}
+              });
+            };
+            bindForm();
+          } catch(e) { if(tg?.showAlert) tg.showAlert(e.message); }
         }));
       } else if(module==='system') {
         const d=managerDashboardCache||await api('manager_dashboard'); const r=d.monthlyReport||{};
@@ -924,6 +1029,12 @@ const API_URL = 'https://mobihub-telegram-proxy-v2.ahmedmtarek20.workers.dev/';
   $('refreshCashReviews').addEventListener('click',loadCashReviews);
   $('checkinBtn').addEventListener('click', () => withLocation('attendance_checkin', $('checkinBtn')));
   $('checkoutBtn').addEventListener('click', () => withLocation('attendance_checkout', $('checkoutBtn')));
+  $('requestOvertimeBtn').addEventListener('click', async () => {
+    const btn=$('requestOvertimeBtn'); btn.disabled=true; btn.textContent='جارٍ إرسال الطلب...';
+    try { const result=await api('overtime_request'); if(tg?.showAlert)tg.showAlert(result.message||'تم إرسال الطلب.'); await refreshAttendance(); }
+    catch(e){ if(tg?.showAlert)tg.showAlert(e.message); else showAttendanceMessage(e.message,true); }
+    finally { btn.disabled=false; btn.textContent='طلب موافقة أوفر تايم'; }
+  });
   $('historyBtn').addEventListener('click', showAttendanceHistory);
   document.querySelectorAll('[data-uniform]').forEach(btn => btn.addEventListener('click', () => confirmUniform(btn.dataset.uniform)));
   document.querySelectorAll('[data-entity]').forEach(btn => btn.addEventListener('click', () => showList(btn.dataset.entity)));

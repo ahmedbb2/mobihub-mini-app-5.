@@ -179,3 +179,15 @@ body.modal-open{overflow:hidden;touch-action:none}
 .inspection-item summary{font-weight:700;cursor:pointer}
 .inspection-item p{margin:8px 0 0;color:var(--muted,#667085);line-height:1.7}
 .manager-device-detail p{margin:8px 0;line-height:1.6}
+
+
+/* V1.10.6 persistent inspection form */
+.device-inspection-form{display:flex;flex-direction:column;gap:12px;max-height:72vh;overflow:auto;padding:2px}
+.inspection-form-meta{display:flex;flex-direction:column;gap:5px;padding:12px;border:1px solid var(--line,#ddd);border-radius:12px;background:var(--surface-soft,#f7f7f7)}
+.inspection-form-meta span,.inspection-form-meta small{color:var(--muted,#777);font-size:.88rem}
+.inspection-form-item{display:flex;flex-direction:column;gap:8px;padding:12px;border:1px solid var(--line,#ddd);border-radius:12px}
+.inspection-form-title{display:flex;flex-direction:column;gap:7px}
+.inspection-form-title details{font-size:.88rem;color:var(--muted,#777)}
+.inspection-form-item label,.device-inspection-form>label{display:flex;flex-direction:column;gap:5px;font-size:.9rem}
+.inspection-form-item select,.inspection-form-item textarea,.device-inspection-form select{width:100%;box-sizing:border-box}
+.inspection-form-item textarea{resize:vertical;min-height:48px}
