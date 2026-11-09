@@ -274,7 +274,7 @@
     return data;
   }
 
-  async function showAttendanceHistory() {
+async function showAttendanceHistory() {
     $('results').classList.remove('hidden');
     $('resultTitle').textContent = titles.attendance;
     $('resultBody').textContent = 'جاري تحميل السجل...';
@@ -282,10 +282,31 @@
     try {
       const rows = await api('attendance_history', { limit: 30 });
       if (!rows.length) { $('resultBody').textContent = 'لا توجد سجلات حضور حتى الآن.'; return; }
-      $('resultBody').innerHTML = rows.map(row => `<article class="record"><strong>${escapeHtml(row['النوع'] || 'حركة حضور')}</strong><small class="record-meta">${escapeHtml(row['التاريخ'] || '')} · ${escapeHtml(row['الوقت'] || '')}<br>${escapeHtml(row['حالة الحضور'] || '')}${row['دقائق التأخير'] ? ` · التأخير ${escapeHtml(row['دقائق التأخير'])} دقيقة` : ''}<br>المسافة: ${escapeHtml(row['المسافة بالمتر'] ?? '—')} متر · دقة GPS: ${escapeHtml(row['دقة GPS بالمتر'] ?? '—')} متر</small></article>`).join('');
+      $('resultBody').innerHTML = rows.map(row => {
+        let datePart = String(row['التاريخ'] || '').split('T')[0].split(' ')[0].trim();
+        if (datePart.includes('1899')) datePart = '—';
+        const timePart = String(row['الوقت'] || '').trim().slice(0, 8);
+        const isCheckin = String(row['النوع'] || '').trim() === 'حضور';
+        const dist = row['المسافة بالمتر'];
+        const acc = row['دقة GPS بالمتر'];
+        const distLabel = (dist !== undefined && dist !== 'غير مطلوب' && dist !== '') ? `${dist} م` : 'غير مطلوب';
+        const accLabel = (acc !== undefined && acc !== 'غير مطلوب' && acc !== '') ? `${acc} م` : 'غير مطلوب';
+
+        return `
+          <article class="history-card">
+            <div class="history-head">
+              <span class="history-badge ${isCheckin ? 'badge-in' : 'badge-out'}">${isCheckin ? '✅ حضور' : '🚪 انصراف'}</span>
+              <span class="history-datetime">${datePart} · ${timePart}</span>
+            </div>
+            <div class="history-details">
+              <div><small>الحالة</small><b>${escapeHtml(row['حالة الحضور'] || '—')}${row['دقائق التأخير'] ? ` (${row['دقائق التأخير']} د)` : ''}</b></div>
+              <div><small>الموقع وGPS</small><b>${escapeHtml(distLabel)} (دقة: ${escapeHtml(accLabel)})</b></div>
+            </div>
+          </article>
+        `;
+      }).join('');
     } catch (e) { $('resultBody').textContent = e.message; }
   }
-
 
   const MANAGER_ROLES = ['super_admin','admin','finance','supervisor'];
   function buildWorkspace(role, permissions) {
@@ -423,11 +444,14 @@
     try { const data=await api('manager_dashboard'); renderManagerDashboard(data); }
     catch(e) { if(box) box.innerHTML=`<div class="manager-load-error">${escapeHtml(e.message)}</div>`; }
   }
-  function managerPanel(title, html) {
-    const panel=document.createElement('section'); panel.className='manager-module-panel';
-    panel.innerHTML=`<div class="manager-module-heading"><div><small>${workspaceRole==='manager'?'MOBIHUB MANAGEMENT':'MOBIHUB WORKSPACE'}</small><h3>${escapeHtml(title)}</h3></div><button type="button" class="modal-close" data-manager-panel-close aria-label="إغلاق">×</button></div><div class="manager-module-content">${html}</div>`;
-    panel.querySelector('[data-manager-panel-close]').addEventListener('click',closeModal);
-    document.body.appendChild(panel); openModal(title,panel); return panel;
+function managerPanel(title, html) {
+    const panel = document.createElement('section');
+    panel.className = 'manager-module-panel';
+    // نعتمد على عنوان ورأس الـ Modal الأصلي فقط لحل تراكب الـ X والعناوين المزدوجة
+    panel.innerHTML = `<div class="manager-module-content">${html}</div>`;
+    document.body.appendChild(panel);
+    openModal(title, panel);
+    return panel;
   }
   async function openManagerModule(module) {
     const permitted=managerDashboardCache?.modules?.[module];
@@ -1044,15 +1068,31 @@
       content.querySelectorAll('[data-price-row]').forEach(b=>b.addEventListener('click',()=>renderRepairPriceIssues(content,b.dataset.priceCategory,Number(b.dataset.priceRow))));
     }catch(e){content.innerHTML=`<button type="button" class="secondary-btn" id="priceBackHome">الأقسام الرئيسية</button><p class="manager-load-error">${escapeHtml(e.message)}</p>`;content.querySelector('#priceBackHome').addEventListener('click',()=>renderRepairPriceHome(content));}
   }
-  async function renderRepairPriceIssues(content,category,row){
-    content.innerHTML='<div class="manager-loading">جاري تحميل الأسعار...</div>';
-    try{
-      const d=await api('repair_price_issues',{category,row});
-      content.innerHTML=`<button type="button" class="secondary-btn" id="priceBackModels">رجوع للموديلات</button><div class="manager-device-detail"><h4>${escapeHtml(d.model)}</h4><p>${escapeHtml(d.label)}</p></div><div class="repair-price-list">${d.issues.map(i=>`<article class="manager-row"><b>${escapeHtml(i.issue)}</b><strong>${escapeHtml(i.price)}</strong></article>`).join('')||'<p class="muted">لا توجد أسعار مسجلة لهذا الموديل.</p>'}</div>`;
-      content.querySelector('#priceBackModels').addEventListener('click',()=>renderRepairPriceModels(content,category,0));
-    }catch(e){content.innerHTML=`<button type="button" class="secondary-btn" id="priceBackModels">رجوع للموديلات</button><p class="manager-load-error">${escapeHtml(e.message)}</p>`;content.querySelector('#priceBackModels').addEventListener('click',()=>renderRepairPriceModels(content,category,0));}
+async function renderRepairPriceIssues(content, category, row) {
+    content.innerHTML = '<div class="manager-loading">جاري تحميل الأسعار...</div>';
+    try {
+      const d = await api('repair_price_issues', { category, row });
+      content.innerHTML = `
+        <button type="button" class="secondary-btn" id="priceBackModels" style="width:100%;margin-bottom:12px;">⬅️ رجوع لقائمة الموديلات</button>
+        <div style="margin-bottom:12px;padding:10px 12px;border-radius:12px;background:rgba(255,152,47,0.1);border:1px solid rgba(255,152,47,0.25);">
+          <strong style="color:var(--orange2);display:block;font-size:14px;">📱 ${escapeHtml(d.model)}</strong>
+          <small style="color:var(--muted);font-size:11px;">${escapeHtml(d.label)}</small>
+        </div>
+        <div class="repair-price-list">
+          ${d.issues.map(i => `
+            <div class="repair-price-item">
+              <span class="repair-item-name">🔧 ${escapeHtml(i.issue)}</span>
+              <span class="repair-item-price">${escapeHtml(i.price)}</span>
+            </div>
+          `).join('') || '<p class="muted">لا توجد أسعار مسجلة لهذا الموديل.</p>'}
+        </div>
+      `;
+      content.querySelector('#priceBackModels').addEventListener('click', () => renderRepairPriceModels(content, category, 0));
+    } catch(e) {
+      content.innerHTML = `<button type="button" class="secondary-btn" id="priceBackModels">رجوع للموديلات</button><p class="manager-load-error">${escapeHtml(e.message)}</p>`;
+      content.querySelector('#priceBackModels').addEventListener('click', () => renderRepairPriceModels(content, category, 0));
+    }
   }
-
   async function openDeviceRegistration(){
     const panel=$('deviceRegisterPanel');
     panel.classList.remove('hidden');
