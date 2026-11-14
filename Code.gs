@@ -284,6 +284,9 @@ function doPost(e) {
       case 'repair_price_search':
         data = repairPriceSearchMini_(body);
         break;
+      case 'repair_price_search_all':
+        data = repairPriceSearchAllMini_(body);
+        break;
       case 'repair_price_issues':
         data = repairPriceIssuesMini_(body);
         break;
@@ -2731,7 +2734,11 @@ function getInspectionInstruction_(deviceType, index) {
   ];
   if (deviceType === "iphone" && iphoneInstructions[index]) return iphoneInstructions[index];
 
-  var catalog = getInspectionCatalog_();
+  // The catalog lives in MH_DEVICE_INSPECTION_CATALOG_ (type -> {name, items}).
+  // The previous code called a helper that was never defined in this project,
+  // which threw a ReferenceError on every non-iPhone item and surfaced to the
+  // Mini App as INTERNAL_ERROR as soon as the inspection screen opened.
+  var catalog = MH_DEVICE_INSPECTION_CATALOG_;
   var device = catalog[deviceType];
   var item = device && device.items ? String(device.items[index] || "") : "";
   if (/شاشة|لمس/.test(item)) return "افتح خلفيات فاتحة وداكنة وملونة، وافحص الصورة والبقع والخطوط. جرّب الضغط والسحب في جميع أجزاء الشاشة والحواف.";
@@ -2750,6 +2757,51 @@ function deviceInspectionCatalogMini_(){
   const out={};Object.keys(MH_DEVICE_INSPECTION_CATALOG_).forEach(type=>{const d=MH_DEVICE_INSPECTION_CATALOG_[type];out[type]={name:d.name,items:d.items.map((item,index)=>({name:item,instruction:getInspectionInstruction_(type,index)}))};});return out;
 }
 
+
+/**
+ * Returns the inspection log sheet with a compatible header row.
+ *
+ * If the sheet already exists with a different/legacy header, the missing
+ * columns are appended instead of throwing SHEET_SCHEMA_MISMATCH. Existing
+ * rows are preserved: new columns stay empty for old records.
+ */
+function mhEnsureInspectionSheetV106_(ss) {
+  const NAME = 'سجل فحص الأجهزة';
+  const expected = MH_DEVICE_INSPECTION_HEADERS_V106_;
+  let sh = ss.getSheetByName(NAME);
+
+  if (!sh) {
+    sh = ss.insertSheet(NAME);
+    sh.getRange(1,1,1,expected.length).setValues([expected]);
+    sh.setFrozenRows(1);
+    return sh;
+  }
+
+  if (sh.getLastRow() === 0) {
+    sh.getRange(1,1,1,expected.length).setValues([expected]);
+    return sh;
+  }
+
+  const existing = sh.getRange(1,1,1,Math.max(sh.getLastColumn(),1)).getDisplayValues()[0]
+    .map(function(h) { return String(h).trim(); });
+
+  const missing = expected.filter(function(h) { return existing.indexOf(h) < 0; });
+  if (!missing.length && existing.length === expected.length) return sh;
+
+  // A partially-matching legacy header is dangerous: a column such as
+  // 'النتيجة' may exist but in a completely different position, so appending
+  // the "missing" columns would silently write values into the wrong column.
+  // Rebuild the header row instead and keep old data in a backup sheet.
+  const hasOldData = sh.getLastRow() > 1;
+  if (hasOldData) {
+    const backupName = NAME + ' - نسخة قديمة ' + Utilities.formatDate(new Date(), MH.TZ, 'yyyyMMdd-HHmmss');
+    sh.copyTo(ss).setName(backupName);
+  }
+  sh.clear();
+  sh.getRange(1,1,1,expected.length).setValues([expected]);
+  sh.setFrozenRows(1);
+  return sh;
+}
 
 /* V1.10.6 persistent device inspection sessions.
  * Every save is an immutable snapshot; the latest session is loaded for continuation.
@@ -2837,23 +2889,38 @@ function deviceInspectionSaveMiniV106_(profile, body) {
     };
   });
   const ss = spreadsheet_();
-  let sh = ss.getSheetByName('سجل فحص الأجهزة');
-  if (!sh) {
-    sh = ss.insertSheet('سجل فحص الأجهزة');
-    sh.getRange(1,1,1,MH_DEVICE_INSPECTION_HEADERS_V106_.length).setValues([MH_DEVICE_INSPECTION_HEADERS_V106_]);
-    sh.setFrozenRows(1);
-  }
-  mhAssertHeaders_(sh, MH_DEVICE_INSPECTION_HEADERS_V106_);
+  const sh = mhEnsureInspectionSheetV106_(ss);
   const sessionId = Utilities.getUuid();
   const now = mhStamp_();
-  const rows = normalized.map(item => [
-    now,sessionId,orderId,type,item.index,item.name,item.result,item.note,
-    String(profile.chatId),String(profile.name || '')
-  ]);
+
+  // Map by header name so a legacy sheet column order cannot corrupt rows.
+  const headerRow = sh.getRange(1,1,1,Math.max(sh.getLastColumn(),1)).getDisplayValues()[0]
+    .map(function(h) { return String(h).trim(); });
+  const columnIndex = {};
+  headerRow.forEach(function(h, i) { if (h) columnIndex[h] = i; });
+
+  const rows = normalized.map(function(item) {
+    const row = new Array(headerRow.length).fill('');
+    const set = function(header, value) {
+      if (columnIndex[header] !== undefined) row[columnIndex[header]] = value;
+    };
+    set('التاريخ والوقت', now);
+    set('معرف جلسة الفحص', sessionId);
+    set('رقم الطلب', orderId);
+    set('نوع الجهاز', type);
+    set('ترتيب الاختبار', item.index);
+    set('اسم الاختبار', item.name);
+    set('النتيجة', item.result);
+    set('ملاحظات الاختبار', item.note);
+    set('منفذ الفحص Chat ID', String(profile.chatId));
+    set('منفذ الفحص', String(profile.name || ''));
+    return row;
+  });
+
   const lock = LockService.getScriptLock(); lock.waitLock(15000);
   try {
     const start = sh.getLastRow()+1;
-    sh.getRange(start,1,rows.length,MH_DEVICE_INSPECTION_HEADERS_V106_.length).setValues(rows);
+    sh.getRange(start,1,rows.length,headerRow.length).setValues(rows);
   } finally { lock.releaseLock(); }
   return {
     saved:true,orderId,deviceType:type,sessionId,updatedAt:now,
@@ -2897,6 +2964,69 @@ function repairPriceSheetMini_(book, cfg) {
 function repairPriceNormalizeMini_(value) {
   return String(value || '').toLowerCase().replace(/[\u200e\u200f\uFEFF]/g,'').replace(/[–—_.,،؛:()[\]{}]/g,' ').replace(/\s+/g,' ').trim();
 }
+
+/**
+ * Extracts the first numeric value from a price cell so results can be sorted
+ * and ranges can be summarised. Returns null when the cell holds no number.
+ */
+function repairPriceNumberMini_(value) {
+  const match = String(value || '').replace(/[٬,]/g, '').match(/\d+(?:\.\d+)?/);
+  return match ? Number(match[0]) : null;
+}
+
+function repairPriceCleanTextMini_(value) {
+  return String(value || '')
+    .replace(/[\u200e\u200f\uFEFF]/g, '')
+    .replace(/\uF8FF/g, 'Apple')
+    .trim();
+}
+
+/**
+ * Reads one price category once and returns every model with its priced items.
+ * This replaces the previous per-call scanning and gives the Mini App the
+ * price ranges and part names it needs for a single unified search.
+ */
+function repairPriceCategoryDataMini_(book, cfg) {
+  const sh = repairPriceSheetMini_(book, cfg);
+  const last = Math.min(sh.getLastRow(), cfg.endRow);
+  if (last < cfg.startRow) return { headers: [], models: [] };
+
+  const width = sh.getLastColumn();
+  if (width < 2) return { headers: [], models: [] };
+
+  const headers = sh.getRange(cfg.headerRow, 1, 1, width).getDisplayValues()[0]
+    .map(function(h) { return repairPriceCleanTextMini_(h); });
+  const values = sh.getRange(cfg.startRow, 1, last - cfg.startRow + 1, width).getDisplayValues();
+
+  const models = [];
+  values.forEach(function(row, index) {
+    const name = repairPriceCleanTextMini_(row[0]);
+    if (!name) return;
+    if (/^(device|AirPod|Watch)\\/i.test(name)) return;
+
+    const issues = [];
+    for (let col = 1; col < width; col++) {
+      const issue = headers[col];
+      const price = repairPriceCleanTextMini_(row[col]);
+      if (!issue || !price) continue;
+      issues.push({ issue: issue, price: price, value: repairPriceNumberMini_(price) });
+    }
+    if (!issues.length) return;
+
+    const values_ = issues.map(function(i) { return i.value; }).filter(function(v) { return v !== null; });
+    models.push({
+      row: cfg.startRow + index,
+      name: name,
+      issues: issues,
+      issueCount: issues.length,
+      minPrice: values_.length ? Math.min.apply(null, values_) : null,
+      maxPrice: values_.length ? Math.max.apply(null, values_) : null
+    });
+  });
+
+  return { headers: headers, models: models };
+}
+
 function repairPriceModelsMiniForCategory_(book, cfg) {
   const sh = repairPriceSheetMini_(book, cfg);
   const last = Math.min(sh.getLastRow(), cfg.endRow);
@@ -2919,7 +3049,10 @@ function repairPriceCategoriesMini_() {
 }
 function repairPriceModelsMini_(body) {
   const cfg=repairPriceConfigMini_(body.category), book=repairPriceBookMini_();
-  const models=repairPriceModelsMiniForCategory_(book,cfg);
+  const data=repairPriceCategoryDataMini_(book,cfg);
+  const models=data.models.map(function(m){
+    return {row:m.row,name:m.name,issueCount:m.issueCount,minPrice:m.minPrice,maxPrice:m.maxPrice};
+  });
   const pageSize=12, totalPages=Math.max(1,Math.ceil(models.length/pageSize));
   const page=Math.max(0,Math.min(Number(body.page)||0,totalPages-1));
   return {category:cfg.key,label:cfg.label,models:models.slice(page*pageSize,(page+1)*pageSize),page,total:models.length,totalPages,pageSize};
@@ -2953,6 +3086,99 @@ function repairPriceIssuesMini_(body) {
     if(issue && price) issues.push({issue:issue,price:price});
   }
   return {category:cfg.key,label:cfg.label,row:rowNum,model:String(values[0]||'').replace(/\uF8FF/g,'Apple').trim(),issues:issues};
+}
+
+/**
+ * Unified search used by the Mini App price screen.
+ *
+ * mode = 'models' : matches device model names (the old behaviour).
+ * mode = 'parts'  : matches part/issue names across every model, so a
+ *                   technician can type "شاشة" or "بطارية" and get the
+ *                   actual price for a specific device.
+ * mode = 'all'    : both, parts first.
+ */
+function repairPriceSearchAllMini_(body) {
+  const query = String(body.query || '').trim();
+  if (query.length < 2 || query.length > 100) throw new Error('INVALID_REPAIR_PRICE_QUERY');
+
+  const mode = ['models', 'parts', 'all'].indexOf(String(body.mode || 'all')) >= 0
+    ? String(body.mode || 'all')
+    : 'all';
+  const needle = repairPriceNormalizeMini_(query);
+  const needleParts = needle.split(' ').filter(Boolean);
+  const matches = function(text) {
+    const hay = repairPriceNormalizeMini_(text);
+    if (hay.indexOf(needle) !== -1) return true;
+    return needleParts.length > 1 && needleParts.every(function(p) { return hay.indexOf(p) !== -1; });
+  };
+
+  const book = repairPriceBookMini_();
+  const modelHits = [];
+  const partHits = [];
+
+  MH_REPAIR_PRICE_CATEGORIES_.forEach(function(cfg) {
+    const data = repairPriceCategoryDataMini_(book, cfg);
+    data.models.forEach(function(model) {
+      if (mode !== 'parts' && matches(model.name)) {
+        modelHits.push({
+          kind: 'model',
+          category: cfg.key,
+          categoryLabel: cfg.label,
+          row: model.row,
+          model: model.name,
+          name: model.name,
+          issueCount: model.issueCount,
+          minPrice: model.minPrice,
+          maxPrice: model.maxPrice
+        });
+      }
+      if (mode !== 'models') {
+        model.issues.forEach(function(item) {
+          if (!matches(item.issue)) return;
+          partHits.push({
+            kind: 'part',
+            category: cfg.key,
+            categoryLabel: cfg.label,
+            row: model.row,
+            model: model.name,
+            name: item.issue,
+            issue: item.issue,
+            price: item.price,
+            priceValue: item.value
+          });
+        });
+      }
+    });
+  });
+
+  // Cheapest matching part first: technicians usually ask "how much is X".
+  partHits.sort(function(a, b) {
+    const av = a.priceValue === null ? Infinity : a.priceValue;
+    const bv = b.priceValue === null ? Infinity : b.priceValue;
+    return av - bv || String(a.model).localeCompare(String(b.model), 'ar');
+  });
+  modelHits.sort(function(a, b) {
+    const av = a.minPrice === null ? Infinity : a.minPrice;
+    const bv = b.minPrice === null ? Infinity : b.minPrice;
+    return av - bv || String(a.name).localeCompare(String(b.name), 'ar');
+  });
+
+  const results = partHits.concat(modelHits);
+  const pageSize = Number(body.pageSize) > 0 && Number(body.pageSize) <= 50 ? Number(body.pageSize) : 20;
+  const totalPages = Math.max(1, Math.ceil(results.length / pageSize));
+  const page = Math.max(0, Math.min(Number(body.page) || 0, totalPages - 1));
+
+  return {
+    query: query,
+    mode: mode,
+    results: results.slice(page * pageSize, (page + 1) * pageSize),
+    partCount: partHits.length,
+    modelCount: modelHits.length,
+    total: results.length,
+    page: page,
+    totalPages: totalPages,
+    pageSize: pageSize
+  };
 }
 function configureRepairPriceSourceOnceMini_() {
   const book=SpreadsheetApp.openById(MH_REPAIR_PRICE_SOURCE_ID_);

@@ -1006,51 +1006,241 @@
     }
   }
 
-  async function openRepairPriceBook(){
-    const panel=managerPanel('أسعار الإصلاح','<div class="manager-loading">جاري تحميل أقسام الأسعار...</div>');
-    const content=panel.querySelector('.manager-module-content');
-    await renderRepairPriceHome(content);
-  }
-  async function renderRepairPriceHome(content){
-    content.innerHTML='<div class="manager-loading">جاري تحميل الأقسام...</div>';
-    try{
-      const d=await api('repair_price_categories');
-      content.innerHTML=`<p class="manager-note">الأسعار معروضة كما هي من ملف الأسعار المرتبط. لا يتم تعديل ملف الأسعار من التطبيق.</p><form id="repairPriceSearchForm" class="manager-module-toolbar"><input name="query" minlength="2" maxlength="100" placeholder="ابحث عن موديل في كل الأقسام" required><button type="submit" class="primary-btn">بحث</button></form><h4>الأقسام</h4><div class="repair-price-categories">${d.categories.map(c=>`<button type="button" class="manager-action-card" data-price-category="${c.key}"><b>${escapeHtml(c.label)}</b><small>عرض الموديلات والأسعار</small></button>`).join('')}</div>`;
-      content.querySelector('#repairPriceSearchForm').addEventListener('submit',ev=>{ev.preventDefault();const q=new FormData(ev.currentTarget).get('query');renderRepairPriceSearch(content,q,0);});
-      content.querySelectorAll('[data-price-category]').forEach(b=>b.addEventListener('click',()=>renderRepairPriceModels(content,b.dataset.priceCategory,0)));
-    }catch(e){content.innerHTML=`<div class="manager-load-error">${escapeHtml(e.message)}<p>تأكد من إتاحة ملف الأسعار لحساب Google Apps Script وتشغيل إعداد ربط الأسعار في بيئة TEST.</p></div>`;}
-  }
-  async function renderRepairPriceModels(content,category,page){
-    content.innerHTML='<div class="manager-loading">جاري تحميل الموديلات...</div>';
-    try{
-      const d=await api('repair_price_models',{category,page});
-      content.innerHTML=`<button type="button" class="secondary-btn" id="priceBackHome">الأقسام الرئيسية</button><h4>${escapeHtml(d.label)}</h4><p class="manager-note">الصفحة ${d.page+1} من ${d.totalPages} · ${d.total} موديل</p>${d.models.map(m=>`<button type="button" class="manager-action-card repair-price-model" data-price-row="${m.row}" data-price-category="${category}"><b>${escapeHtml(m.name)}</b><small>عرض الأعطال والأسعار</small></button>`).join('')||'<p class="muted">لا توجد موديلات بأسعار مسجلة في هذا القسم.</p>'}<div class="manager-row-actions">${d.page>0?'<button type="button" class="secondary-btn" id="pricePrev">السابق</button>':''}${d.page+1<d.totalPages?'<button type="button" class="secondary-btn" id="priceNext">التالي</button>':''}</div>`;
-      content.querySelector('#priceBackHome').addEventListener('click',()=>renderRepairPriceHome(content));
-      if(content.querySelector('#pricePrev'))content.querySelector('#pricePrev').addEventListener('click',()=>renderRepairPriceModels(content,category,d.page-1));
-      if(content.querySelector('#priceNext'))content.querySelector('#priceNext').addEventListener('click',()=>renderRepairPriceModels(content,category,d.page+1));
-      content.querySelectorAll('[data-price-row]').forEach(b=>b.addEventListener('click',()=>renderRepairPriceIssues(content,category,Number(b.dataset.priceRow))));
-    }catch(e){content.innerHTML=`<button type="button" class="secondary-btn" id="priceBackHome">الأقسام الرئيسية</button><p class="manager-load-error">${escapeHtml(e.message)}</p>`;content.querySelector('#priceBackHome').addEventListener('click',()=>renderRepairPriceHome(content));}
-  }
-  async function renderRepairPriceSearch(content,query,page){
-    content.innerHTML='<div class="manager-loading">جاري البحث في جميع الأقسام...</div>';
-    try{
-      const d=await api('repair_price_search',{query,page});
-      content.innerHTML=`<button type="button" class="secondary-btn" id="priceBackHome">الأقسام الرئيسية</button><h4>نتائج البحث: ${escapeHtml(d.query)}</h4><p class="manager-note">${d.total} نتيجة · الصفحة ${d.page+1} من ${d.totalPages}</p>${d.results.map(r=>`<button type="button" class="manager-action-card repair-price-model" data-price-row="${r.row}" data-price-category="${r.category}"><b>${escapeHtml(r.name)}</b><small>${escapeHtml(r.categoryLabel)}</small></button>`).join('')||'<p class="muted">لا توجد نتائج مطابقة. جرّب جزءًا مختلفًا من اسم الموديل.</p>'}<div class="manager-row-actions">${d.page>0?'<button type="button" class="secondary-btn" id="pricePrev">السابق</button>':''}${d.page+1<d.totalPages?'<button type="button" class="secondary-btn" id="priceNext">التالي</button>':''}</div>`;
-      content.querySelector('#priceBackHome').addEventListener('click',()=>renderRepairPriceHome(content));
-      if(content.querySelector('#pricePrev'))content.querySelector('#pricePrev').addEventListener('click',()=>renderRepairPriceSearch(content,query,d.page-1));
-      if(content.querySelector('#priceNext'))content.querySelector('#priceNext').addEventListener('click',()=>renderRepairPriceSearch(content,query,d.page+1));
-      content.querySelectorAll('[data-price-row]').forEach(b=>b.addEventListener('click',()=>renderRepairPriceIssues(content,b.dataset.priceCategory,Number(b.dataset.priceRow))));
-    }catch(e){content.innerHTML=`<button type="button" class="secondary-btn" id="priceBackHome">الأقسام الرئيسية</button><p class="manager-load-error">${escapeHtml(e.message)}</p>`;content.querySelector('#priceBackHome').addEventListener('click',()=>renderRepairPriceHome(content));}
-  }
-  async function renderRepairPriceIssues(content,category,row){
-    content.innerHTML='<div class="manager-loading">جاري تحميل الأسعار...</div>';
-    try{
-      const d=await api('repair_price_issues',{category,row});
-      content.innerHTML=`<button type="button" class="secondary-btn" id="priceBackModels">رجوع للموديلات</button><div class="manager-device-detail"><h4>${escapeHtml(d.model)}</h4><p>${escapeHtml(d.label)}</p></div><div class="repair-price-list">${d.issues.map(i=>`<article class="manager-row"><b>${escapeHtml(i.issue)}</b><strong>${escapeHtml(i.price)}</strong></article>`).join('')||'<p class="muted">لا توجد أسعار مسجلة لهذا الموديل.</p>'}</div>`;
-      content.querySelector('#priceBackModels').addEventListener('click',()=>renderRepairPriceModels(content,category,0));
-    }catch(e){content.innerHTML=`<button type="button" class="secondary-btn" id="priceBackModels">رجوع للموديلات</button><p class="manager-load-error">${escapeHtml(e.message)}</p>`;content.querySelector('#priceBackModels').addEventListener('click',()=>renderRepairPriceModels(content,category,0));}
+  /* ============================================================
+   * REPAIR PRICE BOOK
+   * Same mental model as the device inspection: pick the device
+   * family first, then drill straight into a part and its price.
+   * Search accepts either a model name ("iPhone 13") or a part
+   * ("شاشة") and returns the cheapest matching prices first.
+   * ============================================================ */
+
+  const PRICE_FAMILY_ICONS = { iphone: '📱', board: '🧩', watch: '⌚', airpods: '🎧', airpods_commercial: '🏷️' };
+
+  function priceMoney(value) {
+    if (value === null || value === undefined || value === '') return '—';
+    const n = Number(value);
+    if (!isFinite(n)) return String(value);
+    return n.toLocaleString('en-US');
   }
 
+  function priceRange(min, max) {
+    if (min === null && max === null) return 'لا توجد أسعار مسجلة';
+    if (min === null) return priceMoney(max) + ' جنيه';
+    if (max === null || min === max) return priceMoney(min) + ' جنيه';
+    return priceMoney(min) + ' – ' + priceMoney(max) + ' جنيه';
+  }
+
+  async function openRepairPriceBook() {
+    const panel = managerPanel('أسعار الإصلاح', '<div class="manager-loading">جاري تحميل أقسام الأسعار...</div>');
+    const content = panel.querySelector('.manager-module-content');
+    await renderRepairPriceHome(content);
+  }
+
+  async function renderRepairPriceHome(content) {
+    content.innerHTML = '<div class="manager-loading">جاري تحميل الأقسام...</div>';
+    try {
+      const data = await api('repair_price_categories');
+      const categories = data.categories || [];
+      content.innerHTML = `<div class="price-home">
+        <form id="repairPriceSearchForm" class="price-search">
+          <div class="price-search-field">
+            <input name="query" minlength="2" maxlength="100" placeholder="ابحث باسم الموديل أو القطعة… مثال: شاشة، بطارية، iPhone 13" required autocomplete="off">
+            <button type="submit" class="primary-btn" aria-label="بحث">بحث</button>
+          </div>
+          <p class="price-search-hint">ابحث عن أي قطعة وتظهر أسعارها لكل موديل، الأرخص أولًا.</p>
+        </form>
+
+        <div class="price-family-head">
+          <h4>اختر نوع الجهاز</h4>
+          <small>لكل نوع قائمة الموديلات وأسعار القطع الخاصة به</small>
+        </div>
+        <div class="price-family-grid">
+          ${categories.map(c => `<button type="button" class="price-family-card" data-price-category="${escapeHtml(c.key)}">
+            <span class="price-family-icon">${PRICE_FAMILY_ICONS[c.key] || '📦'}</span>
+            <b>${escapeHtml(c.label)}</b>
+            <small>عرض الموديلات</small>
+          </button>`).join('')}
+        </div>
+
+        <p class="manager-note">الأسعار تُعرض كما هي من ملف الأسعار المرتبط. التطبيق لا يعدّل ملف الأسعار.</p>
+      </div>`;
+
+      content.querySelector('#repairPriceSearchForm').addEventListener('submit', ev => {
+        ev.preventDefault();
+        const query = String(new FormData(ev.currentTarget).get('query') || '').trim();
+        if (query.length < 2) return;
+        renderRepairPriceSearch(content, query, 0);
+      });
+      content.querySelectorAll('[data-price-category]').forEach(btn =>
+        btn.addEventListener('click', () => renderRepairPriceModels(content, btn.dataset.priceCategory, 0))
+      );
+    } catch (e) {
+      content.innerHTML = `<div class="manager-load-error">${escapeHtml(e.message)}
+        <p>تأكد من إتاحة ملف الأسعار لحساب Google Apps Script وتشغيل إعداد ربط الأسعار.</p></div>`;
+    }
+  }
+
+  async function renderRepairPriceModels(content, category, page) {
+    content.innerHTML = '<div class="manager-loading">جاري تحميل الموديلات...</div>';
+    try {
+      const data = await api('repair_price_models', { category, page });
+      const models = data.models || [];
+      content.innerHTML = `<div class="price-screen">
+        <div class="price-screen-head">
+          <button type="button" class="price-back" id="priceBackHome">← الأنواع</button>
+          <div>
+            <h4>${escapeHtml(data.label)}</h4>
+            <small>${data.total} موديل · صفحة ${data.page + 1} من ${data.totalPages}</small>
+          </div>
+        </div>
+        <div class="price-list">
+          ${models.map(m => `<button type="button" class="price-model-row" data-price-row="${m.row}" data-price-category="${escapeHtml(category)}">
+            <span class="price-model-main">
+              <b>${escapeHtml(m.name)}</b>
+              <small>${m.issueCount} قطعة مسعّرة</small>
+            </span>
+            <span class="price-model-range">
+              <b>${priceRange(m.minPrice, m.maxPrice)}</b>
+              <small>نطاق الأسعار</small>
+            </span>
+          </button>`).join('') || '<p class="manager-empty-state">لا توجد موديلات بأسعار مسجلة في هذا القسم.</p>'}
+        </div>
+        <div class="price-pager">
+          ${data.page > 0 ? '<button type="button" class="secondary-btn" id="pricePrev">الصفحة السابقة</button>' : ''}
+          ${data.page + 1 < data.totalPages ? '<button type="button" class="secondary-btn" id="priceNext">الصفحة التالية</button>' : ''}
+        </div>
+      </div>`;
+
+      content.querySelector('#priceBackHome').addEventListener('click', () => renderRepairPriceHome(content));
+      const prev = content.querySelector('#pricePrev');
+      const next = content.querySelector('#priceNext');
+      if (prev) prev.addEventListener('click', () => renderRepairPriceModels(content, category, data.page - 1));
+      if (next) next.addEventListener('click', () => renderRepairPriceModels(content, category, data.page + 1));
+      content.querySelectorAll('[data-price-row]').forEach(btn =>
+        btn.addEventListener('click', () => renderRepairPriceIssues(content, category, Number(btn.dataset.priceRow)))
+      );
+    } catch (e) {
+      content.innerHTML = `<div class="price-screen">
+        <button type="button" class="price-back" id="priceBackHome">← الأنواع</button>
+        <p class="manager-load-error">${escapeHtml(e.message)}</p></div>`;
+      content.querySelector('#priceBackHome').addEventListener('click', () => renderRepairPriceHome(content));
+    }
+  }
+
+  async function renderRepairPriceIssues(content, category, row, fromQuery) {
+    content.innerHTML = '<div class="manager-loading">جاري تحميل الأسعار...</div>';
+    try {
+      const data = await api('repair_price_issues', { category, row });
+      const issues = data.issues || [];
+      const numbers = issues.map(i => Number(String(i.price).replace(/[^\d.]/g, ''))).filter(n => isFinite(n) && n > 0);
+      const cheapest = numbers.length ? Math.min.apply(null, numbers) : null;
+
+      content.innerHTML = `<div class="price-screen">
+        <div class="price-screen-head">
+          <button type="button" class="price-back" id="priceBack${fromQuery ? 'Search' : 'Models'}">← ${fromQuery ? 'نتائج البحث' : 'الموديلات'}</button>
+          <div>
+            <h4>${escapeHtml(data.model)}</h4>
+            <small>${escapeHtml(data.label)} · ${issues.length} قطعة مسعّرة</small>
+          </div>
+        </div>
+        <div class="price-parts">
+          ${issues.map(item => `<article class="price-part-row${cheapest !== null && Number(String(item.price).replace(/[^\d.]/g, '')) === cheapest ? ' is-cheapest' : ''}">
+            <b>${escapeHtml(item.issue)}</b>
+            <strong>${escapeHtml(item.price)}</strong>
+          </article>`).join('') || '<p class="manager-empty-state">لا توجد أسعار مسجلة لهذا الموديل.</p>'}
+        </div>
+      </div>`;
+
+      const back = content.querySelector('#priceBackModels') || content.querySelector('#priceBackSearch');
+      if (back) {
+        back.addEventListener('click', () => {
+          if (fromQuery) renderRepairPriceSearch(content, fromQuery.query, fromQuery.page);
+          else renderRepairPriceModels(content, category, 0);
+        });
+      }
+    } catch (e) {
+      content.innerHTML = `<div class="price-screen">
+        <button type="button" class="price-back" id="priceBackModels">← الموديلات</button>
+        <p class="manager-load-error">${escapeHtml(e.message)}</p></div>`;
+      content.querySelector('#priceBackModels').addEventListener('click', () => renderRepairPriceModels(content, category, 0));
+    }
+  }
+
+  async function renderRepairPriceSearch(content, query, page) {
+    content.innerHTML = '<div class="manager-loading">جاري البحث في كل الأقسام...</div>';
+    try {
+      const data = await api('repair_price_search_all', { query, mode: 'all', page, pageSize: 20 });
+      const results = data.results || [];
+      const parts = results.filter(r => r.kind === 'part');
+      const models = results.filter(r => r.kind === 'model');
+
+      const partRow = r => `<button type="button" class="price-result-row is-part"
+          data-price-row="${r.row}" data-price-category="${escapeHtml(r.category)}"
+          data-query="${escapeHtml(data.query)}" data-page="${data.page}">
+          <span class="price-result-main">
+            <b>${escapeHtml(r.issue)}</b>
+            <small>${escapeHtml(r.model)}</small>
+          </span>
+          <span class="price-result-price">
+            <b>${escapeHtml(r.price)}</b>
+            <small>${escapeHtml(r.categoryLabel)}</small>
+          </span>
+        </button>`;
+
+      const modelRow = r => `<button type="button" class="price-result-row"
+          data-price-row="${r.row}" data-price-category="${escapeHtml(r.category)}">
+          <span class="price-result-main">
+            <b>${escapeHtml(r.model)}</b>
+            <small>${escapeHtml(r.categoryLabel)} · ${r.issueCount} قطعة</small>
+          </span>
+          <span class="price-result-price">
+            <b>${priceRange(r.minPrice, r.maxPrice)}</b>
+            <small>يبدأ من</small>
+          </span>
+        </button>`;
+
+      content.innerHTML = `<div class="price-screen">
+        <div class="price-screen-head">
+          <button type="button" class="price-back" id="priceBackHome">← الأنواع</button>
+          <div>
+            <h4>نتائج: ${escapeHtml(data.query)}</h4>
+            <small>${data.partCount} قطعة · ${data.modelCount} موديل · صفحة ${data.page + 1} من ${data.totalPages}</small>
+          </div>
+        </div>
+
+        ${!results.length ? `<p class="manager-empty-state"><b>لا توجد نتائج مطابقة</b><p>جرّب كلمة أقصر مثل «شاشة» أو اسم موديل مثل «iPhone 12».</p></p>` : ''}
+
+        ${parts.length ? `<h5 class="price-group-title">أسعار القطع</h5><div class="price-list">${parts.map(partRow).join('')}</div>` : ''}
+        ${models.length ? `<h5 class="price-group-title">الموديلات</h5><div class="price-list">${models.map(modelRow).join('')}</div>` : ''}
+
+        <div class="price-pager">
+          ${data.page > 0 ? '<button type="button" class="secondary-btn" id="pricePrev">الصفحة السابقة</button>' : ''}
+          ${data.page + 1 < data.totalPages ? '<button type="button" class="secondary-btn" id="priceNext">الصفحة التالية</button>' : ''}
+        </div>
+      </div>`;
+
+      content.querySelector('#priceBackHome').addEventListener('click', () => renderRepairPriceHome(content));
+      const prev = content.querySelector('#pricePrev');
+      const next = content.querySelector('#priceNext');
+      if (prev) prev.addEventListener('click', () => renderRepairPriceSearch(content, query, data.page - 1));
+      if (next) next.addEventListener('click', () => renderRepairPriceSearch(content, query, data.page + 1));
+
+      content.querySelectorAll('.price-result-row.is-part').forEach(btn =>
+        btn.addEventListener('click', () => renderRepairPriceIssues(
+          content, btn.dataset.priceCategory, Number(btn.dataset.priceRow),
+          { query: btn.dataset.query, page: Number(btn.dataset.page) }
+        ))
+      );
+      content.querySelectorAll('.price-result-row:not(.is-part)').forEach(btn =>
+        btn.addEventListener('click', () => renderRepairPriceIssues(content, btn.dataset.priceCategory, Number(btn.dataset.priceRow)))
+      );
+    } catch (e) {
+      content.innerHTML = `<div class="price-screen">
+        <button type="button" class="price-back" id="priceBackHome">← الأنواع</button>
+        <p class="manager-load-error">${escapeHtml(e.message)}</p></div>`;
+      content.querySelector('#priceBackHome').addEventListener('click', () => renderRepairPriceHome(content));
+    }
+  }
   async function openDeviceRegistration(){
     const panel=$('deviceRegisterPanel');
     panel.classList.remove('hidden');
