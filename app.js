@@ -1080,12 +1080,61 @@
     }
   }
 
-  /* Step 1 — pick the part category for a device family.
-   * This is what keeps the screen short: instead of 36 models at once,
-   * the technician sees 7-15 part categories first.
-   */
+  function repairPriceGeneration(name) {
+    const text = String(name || '').toLowerCase().replace(/iphone\s*/g, '').trim();
+    if (/\bse\s*\d*\b/.test(text)) return 'SE';
+    if (/\bx(?:r|s)?\b/.test(text)) return 'X / XS / XR';
+    const number = text.match(/\b(\d{1,2})(?=\s|plus|pro|max|mini|air|e\b|$)/);
+    if (!number) return 'أخرى';
+    const generation = Number(number[1]);
+    return generation === 7 || generation === 8 ? '7 / 8' : String(generation);
+  }
+
+  async function renderRepairPriceGenerations(content, category) {
+    content.innerHTML = '<div class="manager-loading">جاري تحميل فئات الموديلات...</div>';
+    try {
+      const first = await api('repair_price_models', { category, page: 0 });
+      const pages = await Promise.all(Array.from({ length: Math.max(0, first.totalPages - 1) },
+        (_, index) => api('repair_price_models', { category, page: index + 1 })));
+      const models = (first.models || []).concat(...pages.map(p => p.models || []));
+      const groups = new Map();
+      models.forEach(model => {
+        const group = repairPriceGeneration(model.name);
+        if (!groups.has(group)) groups.set(group, []);
+        groups.get(group).push(model);
+      });
+      const keys = [...groups.keys()].sort((a, b) => {
+        const rank = key => key === '7 / 8' ? 7 : key === 'X / XS / XR' ? 10 : /^\d+$/.test(key) ? Number(key) : key === 'SE' ? 100 : 101;
+        return rank(a) - rank(b);
+      });
+      const drawModels = group => {
+        const selected = group ? groups.get(group) : models;
+        content.innerHTML = `<div class="price-screen">
+          <div class="price-screen-head"><button type="button" class="price-back" id="priceGenerationBack">رجوع للفئات</button>
+          <div><h4>${escapeHtml(group ? 'iPhone ' + group : first.label)}</h4><small>${selected.length} موديل · اختر الجهاز</small></div></div>
+          <div class="price-list">${selected.map(model => `<button type="button" class="price-model-row" data-generation-row="${model.row}"><span class="price-model-main"><b>${escapeHtml(model.name)}</b><small>${model.issueCount} قطعة مسعّرة</small></span></button>`).join('') || '<p class="manager-empty-state">لا توجد موديلات مسجلة.</p>'}</div></div>`;
+        content.querySelector('#priceGenerationBack').addEventListener('click', group ? drawGroups : () => renderRepairPriceHome(content));
+        content.querySelectorAll('[data-generation-row]').forEach(button => button.addEventListener('click', () =>
+          renderRepairPriceIssues(content, category, Number(button.dataset.generationRow), null, () => drawModels(group))));
+      };
+      const drawGroups = () => {
+        content.innerHTML = `<div class="price-screen"><div class="price-screen-head">
+          <button type="button" class="price-back" id="priceGenerationHome">رجوع للأنواع</button>
+          <div><h4>${escapeHtml(first.label)}</h4><small>اختر جيل الجهاز، ثم الموديل</small></div></div>
+          <div class="price-generation-grid">${keys.map((key, index) => `<button type="button" class="price-family-card" data-generation="${index}"><b dir="ltr">${escapeHtml(key === 'أخرى' ? key : 'iPhone ' + key)}</b><small>${groups.get(key).length} موديل</small></button>`).join('')}</div></div>`;
+        content.querySelector('#priceGenerationHome').addEventListener('click', () => renderRepairPriceHome(content));
+        content.querySelectorAll('[data-generation]').forEach(button => button.addEventListener('click', () => drawModels(keys[Number(button.dataset.generation)])));
+      };
+      if (category === 'iphone' || category === 'board') drawGroups();
+      else drawModels(null);
+    } catch (error) {
+      content.innerHTML = `<div class="manager-load-error">${escapeHtml(error.message)}</div><button type="button" class="price-back">رجوع للأنواع</button>`;
+      content.querySelector('.price-back').addEventListener('click', () => renderRepairPriceHome(content));
+    }
+  }
+
   async function renderRepairPriceModels(content, category, page, part) {
-    if (!part) return renderRepairPriceParts(content, category);
+    if (!part) return renderRepairPriceGenerations(content, category);
 
     content.innerHTML = '<div class="manager-loading">جاري تحميل الموديلات...</div>';
     try {
@@ -1165,7 +1214,7 @@
     }
   }
 
-  async function renderRepairPriceIssues(content, category, row, fromQuery) {
+  async function renderRepairPriceIssues(content, category, row, fromQuery, returnToModels) {
     content.innerHTML = '<div class="manager-loading">جاري تحميل الأسعار...</div>';
     try {
       const data = await api('repair_price_issues', { category, row });
@@ -1192,7 +1241,8 @@
       const back = content.querySelector('#priceBackModels') || content.querySelector('#priceBackSearch');
       if (back) {
         back.addEventListener('click', () => {
-          if (fromQuery) renderRepairPriceSearch(content, fromQuery.query, fromQuery.page);
+          if (returnToModels) returnToModels();
+          else if (fromQuery) renderRepairPriceSearch(content, fromQuery.query, fromQuery.page);
           else renderRepairPriceModels(content, category, 0);
         });
       }
@@ -1200,7 +1250,7 @@
       content.innerHTML = `<div class="price-screen">
         <button type="button" class="price-back" id="priceBackModels">← الموديلات</button>
         <p class="manager-load-error">${escapeHtml(e.message)}</p></div>`;
-      content.querySelector('#priceBackModels').addEventListener('click', () => renderRepairPriceModels(content, category, 0));
+      content.querySelector('#priceBackModels').addEventListener('click', () => returnToModels ? returnToModels() : renderRepairPriceModels(content, category, 0));
     }
   }
 
