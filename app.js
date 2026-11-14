@@ -117,17 +117,21 @@
   }
 
   async function api(action, extra = {}) {
+    const startedAt = performance.now();
     const response = await fetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ initData, workspaceRole, action, ...extra })
     });
     const result = await response.json();
+    const elapsedMs = Math.round(performance.now() - startedAt);
+    if (elapsedMs >= 700) console.info(`[MobiHub API] ${action}: ${elapsedMs}ms`);
     if (!response.ok || !result.ok) {
       const code = result.error || 'تعذر تنفيذ الطلب';
       const err = new Error(errorMessages[code] || code);
       err.code = code;
       err.requestId = result.requestId;
+      err.elapsedMs = elapsedMs;
       throw err;
     }
     return result.data;
@@ -1093,10 +1097,8 @@
   async function renderRepairPriceGenerations(content, category) {
     content.innerHTML = '<div class="manager-loading">جاري تحميل فئات الموديلات...</div>';
     try {
-      const first = await api('repair_price_models', { category, page: 0 });
-      const pages = await Promise.all(Array.from({ length: Math.max(0, first.totalPages - 1) },
-        (_, index) => api('repair_price_models', { category, page: index + 1 })));
-      const models = (first.models || []).concat(...pages.map(p => p.models || []));
+      const first = await api('repair_price_catalog', { category });
+      const models = first.models || [];
       const groups = new Map();
       models.forEach(model => {
         const group = repairPriceGeneration(model.name);
