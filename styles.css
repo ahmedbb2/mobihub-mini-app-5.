@@ -1667,6 +1667,40 @@ footer{
   margin-top:2px;
 }
 
+/* --- Part categories: the step that keeps the screen short --- */
+.price-part-grid{display:grid;gap:7px}
+.price-part-card{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  width:100%;padding:13px 14px;
+  border-radius:var(--r-md);
+  border:1px solid var(--line);
+  background:linear-gradient(150deg,rgba(255,255,255,.045),rgba(255,255,255,.012));
+  color:var(--text);text-align:right;cursor:pointer;
+  transition:border-color .14s,background .14s,transform .14s;
+}
+.price-part-card:hover{border-color:var(--brand-line);background:var(--brand-wash)}
+.price-part-card:active{transform:scale(.99)}
+.price-part-card-main{display:grid;gap:2px;min-width:0}
+.price-part-card-main b{font-size:13px;line-height:1.5}
+.price-part-card-main small{font-size:10.5px;color:var(--text-3)}
+.price-part-card-range{
+  flex:0 0 auto;
+  font-size:12px;font-weight:800;color:var(--brand-2);
+  white-space:nowrap;
+}
+
+.price-part-model-row{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  width:100%;padding:12px 14px;
+  border-radius:var(--r-sm);
+  border:1px solid var(--line);
+  background:rgba(255,255,255,.024);
+  color:var(--text);text-align:right;cursor:pointer;
+  transition:border-color .14s,background .14s;
+}
+.price-part-model-row:hover{border-color:var(--brand-line);background:var(--brand-wash)}
+.price-part-model-row .price-model-range b{font-size:13px}
+
 /* --- Employee device list row --- */
 .my-device-row{align-items:start}
 .my-device-row .manager-row-actions{grid-column:1 / -1}
@@ -1857,3 +1891,12 @@ footer{
 }
 [data-theme="light"] .price-part-row{background:rgba(15,35,55,.03)}
 [data-theme="light"] .price-part-row.is-cheapest{background:var(--ok-wash)}
+[data-theme="light"] .price-part-card,
+[data-theme="light"] .price-part-model-row{
+  background:linear-gradient(150deg,rgba(15,35,55,.035),rgba(15,35,55,.012));
+  color:var(--text);
+}
+[data-theme="light"] .price-part-card:hover,
+[data-theme="light"] .price-part-model-row:hover{
+  background:var(--brand-wash);
+}

@@ -1080,30 +1080,30 @@
     }
   }
 
-  async function renderRepairPriceModels(content, category, page) {
+  /* Step 1 — pick the part category for a device family.
+   * This is what keeps the screen short: instead of 36 models at once,
+   * the technician sees 7-15 part categories first.
+   */
+  async function renderRepairPriceModels(content, category, page, part) {
+    if (!part) return renderRepairPriceParts(content, category);
+
     content.innerHTML = '<div class="manager-loading">جاري تحميل الموديلات...</div>';
     try {
-      const data = await api('repair_price_models', { category, page });
+      const data = await api('repair_price_models', { category, part, page: page || 0 });
       const models = data.models || [];
       content.innerHTML = `<div class="price-screen">
         <div class="price-screen-head">
-          <button type="button" class="price-back" id="priceBackHome">← الأنواع</button>
+          <button type="button" class="price-back" id="priceBackParts">← الفئات</button>
           <div>
-            <h4>${escapeHtml(data.label)}</h4>
-            <small>${data.total} موديل · صفحة ${data.page + 1} من ${data.totalPages}</small>
+            <h4>${escapeHtml(data.part)}</h4>
+            <small>${escapeHtml(data.label)} · ${data.total} موديل · صفحة ${data.page + 1} من ${data.totalPages}</small>
           </div>
         </div>
         <div class="price-list">
-          ${models.map(m => `<button type="button" class="price-model-row" data-price-row="${m.row}" data-price-category="${escapeHtml(category)}">
-            <span class="price-model-main">
-              <b>${escapeHtml(m.name)}</b>
-              <small>${m.issueCount} قطعة مسعّرة</small>
-            </span>
-            <span class="price-model-range">
-              <b>${priceRange(m.minPrice, m.maxPrice)}</b>
-              <small>نطاق الأسعار</small>
-            </span>
-          </button>`).join('') || '<p class="manager-empty-state">لا توجد موديلات بأسعار مسجلة في هذا القسم.</p>'}
+          ${models.map(m => `<button type="button" class="price-part-model-row" data-price-row="${m.row}" data-price-category="${escapeHtml(category)}">
+            <span class="price-model-main"><b>${escapeHtml(m.name)}</b></span>
+            <span class="price-model-range"><b>${escapeHtml(m.price)}</b></span>
+          </button>`).join('') || '<p class="manager-empty-state">لا توجد موديلات مسعّرة لهذه الفئة.</p>'}
         </div>
         <div class="price-pager">
           ${data.page > 0 ? '<button type="button" class="secondary-btn" id="pricePrev">الصفحة السابقة</button>' : ''}
@@ -1111,13 +1111,51 @@
         </div>
       </div>`;
 
-      content.querySelector('#priceBackHome').addEventListener('click', () => renderRepairPriceHome(content));
+      content.querySelector('#priceBackParts').addEventListener('click', () => renderRepairPriceParts(content, category));
       const prev = content.querySelector('#pricePrev');
       const next = content.querySelector('#priceNext');
-      if (prev) prev.addEventListener('click', () => renderRepairPriceModels(content, category, data.page - 1));
-      if (next) next.addEventListener('click', () => renderRepairPriceModels(content, category, data.page + 1));
+      if (prev) prev.addEventListener('click', () => renderRepairPriceModels(content, category, data.page - 1, part));
+      if (next) next.addEventListener('click', () => renderRepairPriceModels(content, category, data.page + 1, part));
       content.querySelectorAll('[data-price-row]').forEach(btn =>
         btn.addEventListener('click', () => renderRepairPriceIssues(content, category, Number(btn.dataset.priceRow)))
+      );
+    } catch (e) {
+      content.innerHTML = `<div class="price-screen">
+        <button type="button" class="price-back" id="priceBackParts">← الفئات</button>
+        <p class="manager-load-error">${escapeHtml(e.message)}</p></div>`;
+      content.querySelector('#priceBackParts').addEventListener('click', () => renderRepairPriceParts(content, category));
+    }
+  }
+
+  async function renderRepairPriceParts(content, category) {
+    content.innerHTML = '<div class="manager-loading">جاري تحميل الفئات...</div>';
+    try {
+      const data = await api('repair_price_parts', { category });
+      const parts = data.parts || [];
+      content.innerHTML = `<div class="price-screen">
+        <div class="price-screen-head">
+          <button type="button" class="price-back" id="priceBackHome">← الأنواع</button>
+          <div>
+            <h4>${escapeHtml(data.label)}</h4>
+            <small>${parts.length} فئة · ${data.modelCount} موديل</small>
+          </div>
+        </div>
+        <h5 class="price-group-title">اختر الفئة لعرض أسعارها</h5>
+        <div class="price-part-grid">
+          ${parts.map(p => `<button type="button" class="price-part-card" data-price-part="${escapeHtml(p.name)}">
+            <span class="price-part-card-main">
+              <b>${escapeHtml(p.name)}</b>
+              <small>${p.modelCount} موديل</small>
+            </span>
+            <span class="price-part-card-range">${priceRange(p.minPrice, p.maxPrice)}</span>
+          </button>`).join('') || '<p class="manager-empty-state">لا توجد فئات مسعّرة لهذا النوع.</p>'}
+        </div>
+        <p class="manager-note">الأسعار تُعرض كما هي من ملف الأسعار المرتبط.</p>
+      </div>`;
+
+      content.querySelector('#priceBackHome').addEventListener('click', () => renderRepairPriceHome(content));
+      content.querySelectorAll('[data-price-part]').forEach(btn =>
+        btn.addEventListener('click', () => renderRepairPriceModels(content, category, 0, btn.dataset.pricePart))
       );
     } catch (e) {
       content.innerHTML = `<div class="price-screen">
@@ -1169,10 +1207,19 @@
   async function renderRepairPriceSearch(content, query, page) {
     content.innerHTML = '<div class="manager-loading">جاري البحث في كل الأقسام...</div>';
     try {
-      const data = await api('repair_price_search_all', { query, mode: 'all', page, pageSize: 20 });
+      const data = await api('repair_price_search_all', { query, mode: 'all', page: page || 0, pageSize: 20 });
+      const groups = data.partGroups || [];
       const results = data.results || [];
-      const parts = results.filter(r => r.kind === 'part');
       const models = results.filter(r => r.kind === 'model');
+      const showRows = page > 0 || !groups.length;
+
+      const groupRow = g => `<button type="button" class="price-part-card" data-price-group="${escapeHtml(g.issue)}">
+          <span class="price-part-card-main">
+            <b>${escapeHtml(g.issue)}</b>
+            <small>${g.modelCount} موديل</small>
+          </span>
+          <span class="price-part-card-range">${priceRange(g.minPrice, g.maxPrice)}</span>
+        </button>`;
 
       const partRow = r => `<button type="button" class="price-result-row is-part"
           data-price-row="${r.row}" data-price-category="${escapeHtml(r.category)}"
@@ -1204,14 +1251,22 @@
           <button type="button" class="price-back" id="priceBackHome">← الأنواع</button>
           <div>
             <h4>نتائج: ${escapeHtml(data.query)}</h4>
-            <small>${data.partCount} قطعة · ${data.modelCount} موديل · صفحة ${data.page + 1} من ${data.totalPages}</small>
+            <small>${groups.length} فئة · ${data.partCount} قطعة · ${data.modelCount} موديل</small>
           </div>
         </div>
 
-        ${!results.length ? `<p class="manager-empty-state"><b>لا توجد نتائج مطابقة</b><p>جرّب كلمة أقصر مثل «شاشة» أو اسم موديل مثل «iPhone 12».</p></p>` : ''}
+        ${!groups.length && !models.length ? `<p class="manager-empty-state"><b>لا توجد نتائج مطابقة</b><p>جرّب كلمة أقصر مثل «شاشة» أو اسم موديل مثل «iPhone 12».</p></p>` : ''}
 
-        ${parts.length ? `<h5 class="price-group-title">أسعار القطع</h5><div class="price-list">${parts.map(partRow).join('')}</div>` : ''}
-        ${models.length ? `<h5 class="price-group-title">الموديلات</h5><div class="price-list">${models.map(modelRow).join('')}</div>` : ''}
+        ${groups.length && !showRows ? `<h5 class="price-group-title">الفئات المطابقة — اختر فئة لعرض أسعارها</h5>
+          <div class="price-part-grid">${groups.map(groupRow).join('')}</div>` : ''}
+
+        ${showRows ? `<h5 class="price-group-title">${groups.length ? 'كل النتائج' : 'الموديلات'}</h5>
+          <div class="price-list">${results.map(r => r.kind === 'part' ? partRow(r) : modelRow(r)).join('')}</div>` : ''}
+
+        ${(!showRows && models.length) ? `<h5 class="price-group-title">موديلات مطابقة</h5>
+          <div class="price-list">${models.map(modelRow).join('')}</div>` : ''}
+
+        ${groups.length && !showRows ? `<button type="button" class="secondary-btn" id="priceShowAll">عرض كل النتائج (${data.total})</button>` : ''}
 
         <div class="price-pager">
           ${data.page > 0 ? '<button type="button" class="secondary-btn" id="pricePrev">الصفحة السابقة</button>' : ''}
@@ -1220,6 +1275,14 @@
       </div>`;
 
       content.querySelector('#priceBackHome').addEventListener('click', () => renderRepairPriceHome(content));
+
+      content.querySelectorAll('[data-price-group]').forEach(btn =>
+        btn.addEventListener('click', () => openPartGroupFromSearch(content, data.query, btn.dataset.priceGroup))
+      );
+
+      const showAll = content.querySelector('#priceShowAll');
+      if (showAll) showAll.addEventListener('click', () => renderRepairPriceSearch(content, query, 1));
+
       const prev = content.querySelector('#pricePrev');
       const next = content.querySelector('#priceNext');
       if (prev) prev.addEventListener('click', () => renderRepairPriceSearch(content, query, data.page - 1));
@@ -1241,6 +1304,16 @@
       content.querySelector('#priceBackHome').addEventListener('click', () => renderRepairPriceHome(content));
     }
   }
+
+  /* A part group in the search results opens the models that price it. */
+  async function openPartGroupFromSearch(content, query, issue) {
+    const data = await api('repair_price_search_all', { query, mode: 'parts', pageSize: 50 });
+    const target = (data.results || []).filter(r => r.kind === 'part' && r.issue === issue)[0];
+    if (!target) return renderRepairPriceSearch(content, query, 0);
+    renderRepairPriceModels(content, target.category, 0, issue);
+  }
+
+
   async function openDeviceRegistration(){
     const panel=$('deviceRegisterPanel');
     panel.classList.remove('hidden');
