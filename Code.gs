@@ -10,7 +10,7 @@
  */
 
 const MH = Object.freeze({
-  VERSION: '1.10.9',
+  VERSION: '1.12.0',
   TZ: 'Africa/Cairo',
   AUTH_MAX_AGE_SECONDS: 300,
   SHEETS: {
@@ -80,6 +80,13 @@ function doPost(e) {
       });
     }
 
+    const action = String(body.action || 'bootstrap');
+
+    // Profit from the read cache while resolving the profile too: the two
+    // sheets it reads are reused by the handler below. Mutating actions stay
+    // uncached so a write is never masked by a stale copy.
+    mhEnableReadCache_(action);
+
     const profile = resolveProfile_(String(telegramUser.id), String(body.workspaceRole || ''));
 
     if (!profile || profile.status !== 'نشط') {
@@ -90,7 +97,7 @@ function doPost(e) {
       });
     }
 
-    const action = String(body.action || 'bootstrap');
+    // action is resolved above, before profile lookup.
     let data;
 
     switch (action) {
@@ -1366,7 +1373,7 @@ function mhValidateLocation_(location) {
 function mhRows_(ss, sheetName) {
   const sheet = ss.getSheetByName(sheetName);
   if (!sheet) throw new Error('MISSING_SHEET:' + sheetName);
-  const values = sheet.getDataRange().getValues();
+  const values = mhReadSheetValues_(sheet);
   if (values.length < 2) return [];
   const headers = values[0].map(v => String(v).trim());
   return values.slice(1).filter(row => row.some(v => v !== '' && v !== null)).map(row => {
@@ -1417,7 +1424,12 @@ function mhDistance_(lat1, lon1, lat2, lon2) {
   return 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 function mhToday_() { return Utilities.formatDate(new Date(), MH.TZ, 'yyyy-MM-dd'); }
-function mhNow_(format) { return Utilities.formatDate(new Date(), MH.TZ, format); }
+// Single definition for mhNow_. The old build declared it twice (with and
+// without a format argument); the later declaration won, so every
+// mhNow_('HH:mm:ss') call silently returned a full datetime string.
+function mhNow_(format) {
+  return Utilities.formatDate(new Date(), MH.TZ, format || 'yyyy-MM-dd HH:mm:ss');
+}
 function mhDate_(value) {
   if (value instanceof Date) return Utilities.formatDate(value, MH.TZ, 'yyyy-MM-dd');
   const s = String(value || '').trim();
@@ -1443,6 +1455,46 @@ function spreadsheet_() {
   return SpreadsheetApp.openById(id);
 }
 
+/**
+ * Per-execution sheet read cache.
+ *
+ * The Mini App frequently reads the same sheet several times inside a single
+ * request (bootstrap -> managerDashboard -> list/reward summary). Every
+ * getDataRange().getValues() is a slow remote call, so re-reading the same
+ * sheet dominated response time. Apps Script starts a fresh execution for
+ * each doPost call, so this cache can never outlive a request and cannot
+ * return stale data to a later request.
+ *
+ * Writes must call mhInvalidateSheetCache_() for that sheet.
+ */
+const MH_SHEET_CACHE_ = {};
+
+// Caching is enabled only for actions that never write, so a cached sheet
+// can never mask a write performed earlier in the same execution.
+const MH_READ_ONLY_ACTIONS_ = [
+  'bootstrap', 'manager_dashboard', 'list', 'attendance_status',
+  'attendance_history', 'monthly_summary', 'active_employees',
+  'device_registration_options', 'device_list', 'device_detail',
+  'device_staff', 'device_inspection_catalog', 'device_inspection_get',
+  'my_shifts', 'complaint_thread', 'reward_summary',
+  'repair_price_categories', 'repair_price_models',
+  'repair_price_search', 'repair_price_issues'
+];
+let MH_READ_CACHE_ENABLED_ = false;
+
+function mhEnableReadCache_(action) {
+  MH_READ_CACHE_ENABLED_ = MH_READ_ONLY_ACTIONS_.indexOf(String(action)) >= 0;
+}
+
+function mhReadSheetValues_(sheet) {
+  if (!MH_READ_CACHE_ENABLED_) return sheet.getDataRange().getValues();
+  const key = sheet.getName();
+  if (!Object.prototype.hasOwnProperty.call(MH_SHEET_CACHE_, key)) {
+    MH_SHEET_CACHE_[key] = sheet.getDataRange().getValues();
+  }
+  return MH_SHEET_CACHE_[key];
+}
+
 function rowsAsObjects_(ss, sheetName) {
   const sheet = ss.getSheetByName(sheetName);
 
@@ -1450,7 +1502,7 @@ function rowsAsObjects_(ss, sheetName) {
     throw new Error('Missing sheet: ' + sheetName);
   }
 
-  const values = sheet.getDataRange().getValues();
+  const values = mhReadSheetValues_(sheet);
   if (values.length < 2) return [];
 
   const headers = values[0].map(function(header) {
@@ -1656,8 +1708,6 @@ function mhAssertHeaders_(sh, expected) {
   if (missing.length) throw new Error('SHEET_SCHEMA_MISMATCH:' + sh.getName() + ':' + missing.join(','));
   return map;
 }
-function mhNow_() { return Utilities.formatDate(new Date(), MH.TZ, 'yyyy-MM-dd HH:mm:ss'); }
-function mhToday_() { return Utilities.formatDate(new Date(), MH.TZ, 'yyyy-MM-dd'); }
 function mhIsoDate_(value) {
   const s = String(value || '').trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return '';
@@ -2428,7 +2478,7 @@ function managerUpdateDevice_(profile,body) {
     movement.appendRow([mhStamp_(),orderId,'تحديث من لوحة الإدارة',oldId,oldName,nextEmployeeId,nextEmployee,status,location,note,profile.chatId,profile.name]);
   } finally {lock.releaseLock();}
   if(employeeId && employeeId!==oldId) {
-    try { mhTelegramSend_(employeeId,'📱 تم إسناد جهاز إليك من إدارة MobiHub\\nرقم الطلب: '+orderId+'\\nالجهاز: '+String(found['اسم الجهاز']||'')+'\\nالحالة: '+status+'\\nالمكان: '+location); mhAppendNotificationLog_(employeeId,'إسناد جهاز','تم الإرسال',''); }
+    try { mhTelegramSend_(employeeId,'📱 تم إسناد جهاز إليك من إدارة MobiHub\nرقم الطلب: '+orderId+'\nالجهاز: '+String(found['اسم الجهاز']||'')+'\nالحالة: '+status+'\nالمكان: '+location); mhAppendNotificationLog_(employeeId,'إسناد جهاز','تم الإرسال',''); }
     catch(e){mhAppendNotificationLog_(employeeId,'إسناد جهاز','فشل',e.message);}
   }
   return {updated:true,orderId:orderId,status:status,location:location,employeeId:nextEmployeeId,employee:nextEmployee};
@@ -2710,6 +2760,14 @@ const MH_DEVICE_INSPECTION_HEADERS_V106_ = [
 ];
 
 function mhDeviceInspectionAccessV106_(profile, orderId) {
+  // Standalone inspection mirrors the original Telegram bot: choose a device
+  // family first, then run its checklist. No device custody/order is required.
+  if (!String(orderId || '').trim()) {
+    if (!['employee','supervisor','admin','super_admin'].includes(String(profile.role || ''))) {
+      throw new Error('FORBIDDEN');
+    }
+    return null;
+  }
   const rows = rowsAsObjects_(spreadsheet_(), MH.SHEETS.devices);
   const row = rows.find(r => String(r['رقم الطلب'] || '').trim() === String(orderId || '').trim());
   if (!row) throw new Error('DEVICE_NOT_FOUND');
@@ -2724,7 +2782,9 @@ function mhDeviceInspectionAccessV106_(profile, orderId) {
 function deviceInspectionGetMiniV106_(profile, body) {
   const orderId = String(body.orderId || '').trim();
   const type = String(body.deviceType || '').trim().toLowerCase();
-  if (!orderId || !MH_DEVICE_INSPECTION_CATALOG_[type]) throw new Error('INVALID_INSPECTION_TYPE');
+  // orderId may be empty for a standalone check; rows are then scoped to
+  // the requesting Telegram account by the filter below.
+  if (!MH_DEVICE_INSPECTION_CATALOG_[type]) throw new Error('INVALID_INSPECTION_TYPE');
   mhDeviceInspectionAccessV106_(profile, orderId);
   const sh = spreadsheet_().getSheetByName('سجل فحص الأجهزة');
   if (!sh || sh.getLastRow() < 2) return {orderId,deviceType:type,sessionId:'',items:[]};
@@ -2733,7 +2793,8 @@ function deviceInspectionGetMiniV106_(profile, body) {
   const ix = {}; headers.forEach((h,i)=>ix[h]=i);
   const matches = values.slice(1).filter(r =>
     String(r[ix['رقم الطلب']] || '').trim() === orderId &&
-    String(r[ix['نوع الجهاز']] || '').trim() === type
+    String(r[ix['نوع الجهاز']] || '').trim() === type &&
+    (orderId || String(r[ix['منفذ الفحص Chat ID']] || '').trim() === String(profile.chatId))
   );
   if (!matches.length) return {orderId,deviceType:type,sessionId:'',items:[]};
   const latest = matches[matches.length-1];
@@ -2755,7 +2816,9 @@ function deviceInspectionSaveMiniV106_(profile, body) {
   const orderId = String(body.orderId || '').trim();
   const type = String(body.deviceType || '').trim().toLowerCase();
   const catalog = MH_DEVICE_INSPECTION_CATALOG_[type];
-  if (!orderId || !catalog) throw new Error('INVALID_INSPECTION_TYPE');
+  // orderId is optional: the Telegram bot also allows a standalone check
+  // that is not tied to a registered device. Access is still authorised.
+  if (!catalog) throw new Error('INVALID_INSPECTION_TYPE');
   mhDeviceInspectionAccessV106_(profile, orderId);
   const items = Array.isArray(body.items) ? body.items : [];
   if (!items.length || items.length > catalog.items.length) throw new Error('INVALID_INSPECTION_ITEMS');

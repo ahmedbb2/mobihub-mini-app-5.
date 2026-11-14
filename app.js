@@ -693,7 +693,7 @@
     try {
       const data = await api('bootstrap');
       applyWorkspaceProfile(data);
-      $('connection').textContent = 'متصل'; $('connection').style.color = '#8be0aa';
+      $('connection').textContent = 'متصل'; $('connection').classList.add('is-online');
 
       // Secondary data is non-blocking: the dashboard appears as soon as bootstrap
       // completes, while permitted review queues and device options load in background.
@@ -790,6 +790,7 @@
     if(action==='rewards'){ $('financeCenter').classList.remove('hidden'); openModal('مكافآتي', $('financeCenter')); loadFinanceSummary(); return;}
     if(action==='monthly'){loadMonthlySummary();return;}
     if(action==='devices'){await openEmployeeDevices();return;}
+    if(action==='inspection'){await openStandaloneDeviceInspection();return;}
     if(action==='repair-prices'){await openRepairPriceBook();return;}
     if(action==='device-register'){openDeviceRegistration();return;}
     if(action==='refresh'){refreshEmployeeWorkspace();return;}
@@ -861,14 +862,148 @@
     }catch(e){content.innerHTML=`<div class="manager-load-error">${escapeHtml(e.message)}</div>`;}
   }
 
+  /* Standalone 40-point inspection (the "فحص الجهاز" home tile).
+   * Mirrors the Telegram bot: pick a device family first, then run its
+   * checklist. No device record or order number is required — the backend
+   * authorises order-less sessions through mhDeviceInspectionAccessV106_.
+   */
+  async function openStandaloneDeviceInspection(){
+    const panel=managerPanel('فحص الجهاز','<div class="manager-loading">جاري تحميل قوائم الفحص...</div>');
+    const content=panel.querySelector('.manager-module-content');
+    try{
+      const catalog=await api('device_inspection_catalog');
+      renderInspectionTypePicker(content,catalog);
+    }catch(e){
+      content.innerHTML=`<div class="manager-load-error">${escapeHtml(e.message)}</div>`;
+    }
+  }
+
+  function renderInspectionTypePicker(content,catalog){
+    const icons={iphone:'📱',ipad:'📲',macbook:'💻',watch:'⌚',airpods:'🎧'};
+    const order=['iphone','ipad','macbook','watch','airpods'].filter(k=>catalog[k]);
+    content.innerHTML=`<div class="inspection-wizard">
+      <div class="inspection-wizard-head">
+        <span class="inspection-wizard-kicker">DEVICE INSPECTION</span>
+        <h4>اختيار نوع الجهاز</h4>
+        <small>اختر نوع الجهاز لعرض قائمة الفحص الخاصة به.</small>
+      </div>
+      <div class="inspection-type-grid">
+        ${order.map(key=>`<button type="button" class="inspection-type-card" data-inspection-type="${key}">
+          <span>${icons[key]||'📱'}</span>
+          <b>${escapeHtml(catalog[key].name)}</b>
+          <small>${catalog[key].items.length} اختبار</small>
+        </button>`).join('')}
+      </div>
+      <p class="manager-note">يمكنك حفظ الفحص بدون رقم طلب، أو فتح فحص مرتبط بجهاز من بطاقة «حالة الجهاز».</p>
+    </div>`;
+    content.querySelectorAll('[data-inspection-type]').forEach(btn=>btn.addEventListener('click',()=>{
+      startInspectionWizard(content,{orderId:'',deviceName:''},catalog,btn.dataset.inspectionType);
+    }));
+  }
+
+  async function startInspectionWizard(content,row,catalog,type){
+    content.innerHTML='<div class="manager-loading">جاري تحميل نتائج الفحص السابقة...</div>';
+    try{
+      await renderEmployeeInspectionForm(content,row,catalog,type);
+    }catch(e){
+      content.innerHTML=`<div class="manager-load-error">${escapeHtml(e.message)}</div>`;
+    }
+  }
+
+  /* One-test-at-a-time inspection (mirrors the Telegram bot journey).
+   * Works for both order-linked and standalone inspections.
+   */
   async function renderEmployeeInspectionForm(content,row,catalog,type){
-    const d=catalog[type];
-    const saved=await api('device_inspection_get',{orderId:row.orderId,deviceType:type});
-    const old={};(saved.items||[]).forEach(x=>old[x.index]=x);
-    const items=d.items.map((it,i)=>{const v=old[i]||{};return `<article class="inspection-form-item"><div class="inspection-form-title"><b>${i+1}. ${escapeHtml(it.name)}</b><details><summary>تعليمات الاختبار</summary><p>${escapeHtml(it.instruction||'')}</p></details></div><label>النتيجة<select name="result_${i}"><option value="" ${!v.result?'selected':''}>لم يتم التقييم</option><option value="سليم" ${v.result==='سليم'?'selected':''}>سليم</option><option value="مشكلة" ${v.result==='مشكلة'?'selected':''}>مشكلة</option><option value="لم يختبر" ${v.result==='لم يختبر'?'selected':''}>لم يختبر</option></select></label><label>ملاحظات<textarea name="note_${i}" rows="2" maxlength="500">${escapeHtml(v.note||'')}</textarea></label></article>`;}).join('');
-    content.innerHTML=`<div class="inspection-form-meta"><b>رقم الطلب: ${escapeHtml(row.orderId)}</b><span>${escapeHtml(d.name)} · ${d.items.length} اختبار</span>${saved.updatedAt?`<small>آخر حفظ: ${escapeHtml(saved.updatedAt)}</small>`:''}</div><label>نوع الجهاز<select id="employeeInspectionType">${Object.entries(catalog).map(([k,v])=>`<option value="${k}" ${k===type?'selected':''}>${escapeHtml(v.name)}</option>`).join('')}</select></label><form id="employeeDeviceInspectionForm" class="device-inspection-form"><div class="inspection-form-items">${items}</div><button type="submit" class="primary-btn">حفظ نتائج الفحص</button></form>`;
-    content.querySelector('#employeeInspectionType').addEventListener('change',ev=>renderEmployeeInspectionForm(content,row,catalog,ev.target.value).catch(e=>{content.innerHTML=`<p class="manager-load-error">${escapeHtml(e.message)}</p>`;}));
-    content.querySelector('#employeeDeviceInspectionForm').addEventListener('submit',async ev=>{ev.preventDefault();const form=ev.currentTarget,btn=form.querySelector('button[type=submit]');btn.disabled=true;try{const typeNow=content.querySelector('#employeeInspectionType').value, count=catalog[typeNow].items.length,fd=new FormData(form),items=[];for(let i=0;i<count;i++)items.push({index:i,result:String(fd.get('result_'+i)||''),note:String(fd.get('note_'+i)||'')});const result=await api('device_inspection_save',{orderId:row.orderId,deviceType:typeNow,items});if(tg?.showAlert)tg.showAlert(`تم حفظ الفحص. مكتمل: ${result.completed} · مشاكل: ${result.issues} · لم يختبر: ${result.untested}`);closeModal();await openEmployeeDevices();}catch(e){if(tg?.showAlert)tg.showAlert(e.message);btn.disabled=false;}});
+    return renderInspectionWizard(content,row,catalog,type);
+  }
+
+  async function renderInspectionWizard(content,row,catalog,type){
+    const device = catalog[type];
+    if (!device) { content.innerHTML = '<div class="manager-load-error">نوع الجهاز غير معروف.</div>'; return; }
+
+    content.innerHTML = '<div class="manager-loading">جاري تحميل نتائج الفحص السابقة...</div>';
+    let previous = { items: [] };
+    try {
+      previous = await api('device_inspection_get', { orderId: row.orderId || '', deviceType: type }) || previous;
+    } catch (_) {
+      // A failed restore must never block starting a fresh inspection.
+    }
+
+    const total = device.items.length;
+    const answers = device.items.map((_, i) => {
+      const found = (previous.items || []).find(x => Number(x.index) === i) || {};
+      return { index: i, result: String(found.result || ''), note: String(found.note || '') };
+    });
+
+    let step = answers.findIndex(a => !a.result);
+    if (step < 0) step = 0;
+
+    const draw = () => {
+      const item = device.items[step];
+      const current = answers[step];
+      const answered = answers.filter(a => a.result).length;
+      const percent = total ? Math.round((answered / total) * 100) : 0;
+      const choices = [['سليم', 'ok'], ['مشكلة', 'bad'], ['لم يختبر', 'skip']];
+
+      content.innerHTML = `<div class="inspection-wizard">
+        <div class="inspection-wizard-head">
+          <span class="inspection-wizard-kicker">${row.orderId ? 'طلب ' + escapeHtml(row.orderId) : 'فحص مستقل'}</span>
+          <h4>${escapeHtml(device.name)} · ${total} اختبار</h4>
+          <small>تم تقييم ${answered} من ${total}</small>
+        </div>
+        <div class="inspection-progress"><span style="width:${percent}%"></span></div>
+        <div class="inspection-step">
+          <div class="inspection-step-index">اختبار ${step + 1} من ${total}</div>
+          <b>${escapeHtml(item.name)}</b>
+          ${item.instruction ? `<p class="inspection-step-instruction">${escapeHtml(item.instruction)}</p>` : ''}
+          <div class="inspection-result-group">
+            ${choices.map(([value, kind]) => `<button type="button" class="inspection-result-btn is-${kind}${current.result === value ? ' is-selected' : ''}" data-result="${value}">${value}</button>`).join('')}
+          </div>
+          <label>ملاحظات<textarea id="inspectionNote" rows="2" maxlength="500" placeholder="ملاحظة اختيارية">${escapeHtml(current.note)}</textarea></label>
+        </div>
+        <div class="inspection-nav">
+          <button type="button" class="secondary-btn" id="inspectionPrev"${step === 0 ? ' disabled' : ''}>السابق</button>
+          <button type="button" class="secondary-btn" id="inspectionNext"${step === total - 1 ? ' disabled' : ''}>التالي</button>
+        </div>
+        <button type="button" class="primary-btn" id="inspectionSave">حفظ نتائج الفحص</button>
+        <p class="manager-note">تُحفظ النتائج كجلسة جديدة في سجل الفحص، ويمكنك الحفظ في أي وقت.</p>
+      </div>`;
+
+      content.querySelectorAll('[data-result]').forEach(button => button.addEventListener('click', () => {
+        answers[step].result = button.dataset.result;
+        answers[step].note = content.querySelector('#inspectionNote').value;
+        const pending = answers.findIndex((a, i) => i > step && !a.result);
+        step = pending >= 0 ? pending : Math.min(step + 1, total - 1);
+        draw();
+      }));
+
+      content.querySelector('#inspectionNote').addEventListener('input', event => {
+        answers[step].note = event.target.value;
+      });
+      content.querySelector('#inspectionPrev').addEventListener('click', () => { if (step > 0) { step--; draw(); } });
+      content.querySelector('#inspectionNext').addEventListener('click', () => { if (step < total - 1) { step++; draw(); } });
+      content.querySelector('#inspectionSave').addEventListener('click', () => saveInspectionWizard(content, row, catalog, type, answers));
+    };
+
+    draw();
+  }
+
+  async function saveInspectionWizard(content, row, catalog, type, answers){
+    const button = content.querySelector('#inspectionSave');
+    if (button) button.disabled = true;
+    try {
+      const result = await api('device_inspection_save', {
+        orderId: row.orderId || '',
+        deviceType: type,
+        items: answers.map(a => ({ index: a.index, result: a.result, note: a.note }))
+      });
+      if (tg?.showAlert) tg.showAlert(`تم حفظ الفحص. مكتمل: ${result.completed} · مشاكل: ${result.issues} · لم يختبر: ${result.untested}`);
+      if (row.orderId) { closeModal(); await openEmployeeDevices(); }
+      else { renderInspectionTypePicker(content, catalog); }
+    } catch (e) {
+      if (tg?.showAlert) tg.showAlert(e.message);
+      if (button) button.disabled = false;
+    }
   }
 
   async function openRepairPriceBook(){
@@ -1184,6 +1319,45 @@
     return String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
+  /* ============ Theme (dark / light) ============
+   * The palette lives entirely in CSS variables, so switching the
+   * data-theme attribute on <html> restyles every component at once.
+   * The choice is remembered per device and also seeds from the
+   * Telegram client theme on first open.
+   */
+  function applyTheme(theme) {
+    const next = theme === 'light' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    try { localStorage.setItem('mobihub-theme', next); } catch (_) {}
+    const toggle = $('themeToggle');
+    if (toggle) {
+      const isLight = next === 'light';
+      toggle.textContent = isLight ? '☾' : '☀';
+      toggle.setAttribute('aria-pressed', String(isLight));
+      toggle.setAttribute('aria-label', isLight ? 'التبديل إلى الوضع الداكن' : 'التبديل إلى الوضع الفاتح');
+    }
+    const themeMeta = document.querySelector('meta[name="theme-color"]');
+    if (themeMeta) themeMeta.setAttribute('content', next === 'light' ? '#F4F7FA' : '#080D12');
+    if (tg?.setHeaderColor) {
+      try { tg.setHeaderColor(next === 'light' ? '#F4F7FA' : '#080D12'); } catch (_) {}
+    }
+    if (tg?.setBackgroundColor) {
+      try { tg.setBackgroundColor(next === 'light' ? '#F4F7FA' : '#080D12'); } catch (_) {}
+    }
+  }
+
+  function initTheme() {
+    let stored = '';
+    try { stored = localStorage.getItem('mobihub-theme') || ''; } catch (_) {}
+    const telegramLight = tg?.colorScheme === 'light';
+    applyTheme(stored || (telegramLight ? 'light' : 'dark'));
+    $('themeToggle')?.addEventListener('click', () => {
+      const current = document.documentElement.getAttribute('data-theme');
+      applyTheme(current === 'light' ? 'dark' : 'light');
+      if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
+    });
+  }
+
   $('workspaceSwitch').addEventListener('click', switchWorkspace);
   $('refreshManagerDashboard').addEventListener('click',loadManagerDashboard);
   document.querySelectorAll('[data-manager-module]').forEach(btn=>btn.addEventListener('click',()=>openManagerModule(btn.dataset.managerModule)));
@@ -1231,5 +1405,6 @@
   document.querySelectorAll('[data-uniform]').forEach(btn => btn.addEventListener('click', () => confirmUniform(btn.dataset.uniform)));
   document.querySelectorAll('[data-entity]').forEach(btn => btn.addEventListener('click', () => showList(btn.dataset.entity)));
   $('backBtn').addEventListener('click', () => { const title=$('resultTitle').textContent; $('results').classList.add('hidden'); if(['الطلبات العامة','طلبات الأذونات','السلف والعهد'].includes(title)) showRequestPicker(); else closeModal(); });
+  initTheme();
   start();
 })();

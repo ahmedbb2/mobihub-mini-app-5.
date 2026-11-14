@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ar" dir="rtl">
+<html lang="ar" dir="rtl" data-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
@@ -7,8 +7,8 @@
   <title>MobiHub | مركز الصيانة</title>
 
   <!-- أيقونة داخلية SVG (بديل خفيف للـ base64 الأصلي). -->
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23FFC078'/%3E%3Cstop offset='1' stop-color='%23EF821C'/%3E%3C/linearGradient%3E%3C/defs%3E%3Ccircle cx='50' cy='50' r='46' fill='%23121C26' stroke='url(%23g)' stroke-width='4'/%3E%3Ctext x='50' y='64' font-family='Segoe UI,Arial,sans-serif' font-size='34' font-weight='700' fill='url(%23g)' text-anchor='middle'%3EMH%3C/text%3E%3C/svg%3E">
-  <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23080D12'/%3E%3Ccircle cx='50' cy='50' r='40' fill='none' stroke='%23FF9A3C' stroke-width='4'/%3E%3Ctext x='50' y='63' font-family='Segoe UI,Arial,sans-serif' font-size='30' font-weight='700' fill='%23FFC078' text-anchor='middle'%3EMH%3C/text%3E%3C/svg%3E">
+  <link rel="icon" type="image/webp" href="logo.webp">
+  <link rel="apple-touch-icon" href="logo.webp">
 
   <link rel="stylesheet" href="styles.css">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -17,14 +17,13 @@
   <div class="app-shell">
     <header class="topbar">
       <div class="brand-lockup">
-        <img class="brand-logo"
-             src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23FFC078'/%3E%3Cstop offset='1' stop-color='%23EF821C'/%3E%3C/linearGradient%3E%3C/defs%3E%3Ccircle cx='50' cy='50' r='46' fill='%23121C26' stroke='url(%23g)' stroke-width='4'/%3E%3Ctext x='50' y='64' font-family='Segoe UI,Arial,sans-serif' font-size='34' font-weight='700' fill='url(%23g)' text-anchor='middle'%3EMH%3C/text%3E%3C/svg%3E"
-             alt="MobiHub logo" width="44" height="44">
+        <img class="brand-logo" src="logo.webp" alt="MobiHub" width="44" height="44" decoding="async">
         <div><strong>MobiHub</strong><small>مركز الصيانة</small></div>
       </div>
       <div class="topbar-meta">
         <span id="connection" class="status"><i></i> جاري الاتصال</span>
         <button id="workspaceSwitch" class="workspace-switch hidden" type="button">لوحة المدير</button>
+        <button id="themeToggle" class="theme-toggle" type="button" aria-label="التبديل إلى الوضع الفاتح" aria-pressed="false">☀</button>
       </div>
     </header>
 
