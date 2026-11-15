@@ -1998,6 +1998,7 @@
 
         <button type="button" class="primary-btn" id="taskCreateOpen">+ إنشاء مهمة جديدة</button>
         <button type="button" class="secondary-btn" id="taskSeedMarketing">إضافة مهام الدعاية لكل الفنيين</button>
+        <button type="button" class="secondary-btn" id="taskRepairBtn">إصلاح صفوف المهام</button>
 
         ${review.length ? `<h5 class="price-group-title">تحتاج مراجعتك</h5>
           <div class="tasks-list">${review.map(t => `<div class="task-row is-review" data-task-open="${escapeHtml(t.id)}">
@@ -2017,7 +2018,23 @@
         </div>
       </div>`;
 
-      content.querySelector('#taskCreateOpen').addEventListener('click', () => renderTaskCreateForm(content));
+            content.querySelector('#taskCreateOpen').addEventListener('click', () => renderTaskCreateForm(content));
+      const repairBtn = content.querySelector('#taskRepairBtn');
+      if (repairBtn) repairBtn.addEventListener('click', async function() {
+        const ok = tg?.showConfirm ? await new Promise(function(res) { tg.showConfirm('فحص صفوف المهام وإصلاح التالف منها؟', res); }) : window.confirm('فحص صفوف المهام وإصلاح التالف منها؟');
+        if (!ok) return;
+        repairBtn.disabled = true;
+        repairBtn.textContent = 'جارٍ الفحص...';
+        try {
+          const res = await api('tasks_repair');
+          if (tg?.showAlert) tg.showAlert(res.message || 'تم الفحص.');
+          renderTaskAdmin(content);
+        } catch (e) {
+          if (tg?.showAlert) tg.showAlert(e.message);
+          repairBtn.disabled = false;
+          repairBtn.textContent = 'إصلاح صفوف المهام';
+        }
+      });
       content.querySelector('#taskSeedMarketing').addEventListener('click', async ev => {
         const btn = ev.currentTarget;
         btn.disabled = true;
