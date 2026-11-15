@@ -318,6 +318,24 @@ function doPost(e) {
       case 'task_assignees':
         data = tasksAssigneesMini_(profile);
         break;
+      case 'customers_search':
+        data = customersSearchMini_(profile, body);
+        break;
+      case 'device_intake_options':
+        data = deviceIntakeOptionsMini_(profile);
+        break;
+      case 'device_intake_create':
+        data = deviceIntakeCreateMini_(profile, body);
+        break;
+      case 'buttons_matrix_get':
+        data = buttonsMatrixGetMini_(profile);
+        break;
+      case 'buttons_matrix_set':
+        data = buttonsMatrixSetMini_(profile, body);
+        break;
+      case 'buttons_matrix_bulk':
+        data = buttonsMatrixBulkMini_(profile, body);
+        break;
       case 'notify_matrix_get':
         data = notifyMatrixGetMini_(profile);
         break;
@@ -623,6 +641,8 @@ function bootstrap_(profile) {
 
   return {
     profile: profile,
+    // Tiles this technician is allowed to see, controlled from the dashboard.
+    visibleButtons: mhVisibleButtons_(profile),
     managerDashboard: isManagement ? managerDashboard_(profile) : null,
     permissions: {
       viewManagement: isManagement,
@@ -783,6 +803,7 @@ function managerDashboard_(profile) {
     tasks: ['super_admin','admin','supervisor'].includes(role),
     parts: ['super_admin','admin','finance','supervisor'].includes(role),
     notificationMatrix: ['super_admin','admin'].includes(role),
+    buttonsMatrix: ['super_admin','admin'].includes(role),
     system: ['super_admin','admin'].includes(role),
     notifications: ['super_admin','admin','supervisor'].includes(role),
     managers: role === 'super_admin'
@@ -4509,4 +4530,465 @@ function notifyMatrixBulkMini_(profile, body) {
   } finally { lock.releaseLock(); }
 
   return { updated: true, employeeId: chatId, events: MH_EMPLOYEE_EVENTS_.length, enabled: enabled };
+}
+
+/* =========================================================
+   V1.16 — CUSTOMERS + FULL DEVICE INTAKE
+   The intake card now captures the customer, the device, its
+   condition and the accessories received, exactly like the
+   paper/desktop form. Customers can be looked up by phone so
+   repeat visits do not retype data.
+========================================================= */
+const MH_CUSTOMER_HEADERS = ['رقم العميل','اسم العميل','رقم الهاتف','رقم الهاتف 2','العنوان','ملاحظات','تاريخ الإضافة','آخر زيارة','عدد الزيارات'];
+const MH_CUSTOMER_SHEET_ = 'العملاء';
+
+const MH_DEVICE_EXTRA_HEADERS = [
+  'رقم العميل','اسم العميل','رقم الهاتف','الماركة','رقم IMEI','الرقم السري',
+  'الإكسسوارات','يفتح ويعمل','التكلفة التقديرية','العربون المدفوع','موعد التسليم','اسم المستلم'
+];
+
+function mhCustomerSheet_() {
+  const ss = spreadsheet_();
+  let sh = ss.getSheetByName(MH_CUSTOMER_SHEET_);
+  if (!sh) {
+    sh = ss.insertSheet(MH_CUSTOMER_SHEET_);
+    sh.getRange(1, 1, 1, MH_CUSTOMER_HEADERS.length).setValues([MH_CUSTOMER_HEADERS]);
+    sh.setFrozenRows(1);
+    return sh;
+  }
+  const width = Math.max(sh.getLastColumn(), 1);
+  const existing = sh.getRange(1, 1, 1, width).getDisplayValues()[0]
+    .map(function(h) { return String(h).trim(); });
+  const missing = MH_CUSTOMER_HEADERS.filter(function(h) { return existing.indexOf(h) < 0; });
+  if (missing.length) sh.getRange(1, width + 1, 1, missing.length).setValues([missing]);
+  if (sh.getFrozenRows() === 0) sh.setFrozenRows(1);
+  return sh;
+}
+
+/** Adds the intake columns to the devices sheet without disturbing data. */
+function mhEnsureDeviceExtraColumns_() {
+  const ss = spreadsheet_();
+  const sh = ss.getSheetByName(MH.SHEETS.devices);
+  if (!sh) return null;
+  const width = Math.max(sh.getLastColumn(), 1);
+  const existing = sh.getRange(1, 1, 1, width).getDisplayValues()[0]
+    .map(function(h) { return String(h).trim(); });
+  const missing = MH_DEVICE_EXTRA_HEADERS.filter(function(h) { return existing.indexOf(h) < 0; });
+  if (missing.length) sh.getRange(1, width + 1, 1, missing.length).setValues([missing]);
+  return sh;
+}
+
+function mhNormalizePhone_(value) {
+  let digits = String(value || '').replace(/[^\d+]/g, '').replace(/^\+/, '');
+  if (digits.indexOf('0020') === 0) digits = digits.slice(4);
+  if (digits.indexOf('20') === 0 && digits.length === 12) digits = '0' + digits.slice(2);
+  return digits;
+}
+
+function mhCustomerRow_(r) {
+  return {
+    id: String(r['رقم العميل'] || ''),
+    name: String(r['اسم العميل'] || ''),
+    phone: String(r['رقم الهاتف'] || ''),
+    phone2: String(r['رقم الهاتف 2'] || ''),
+    address: String(r['العنوان'] || ''),
+    visits: Number(r['عدد الزيارات'] || 0)
+  };
+}
+
+/** Search customers by name or phone (used by the intake form). */
+function customersSearchMini_(profile, body) {
+  if (['employee','supervisor','admin','finance','super_admin'].indexOf(profile.role) < 0) throw new Error('FORBIDDEN');
+  const query = String(body.query || '').trim();
+  if (query.length < 2) return { customers: [], total: 0 };
+
+  const needle = mhNormalizePhone_(query) || query.toLowerCase();
+  const rows = mhRowsObjects_(mhCustomerSheet_());
+  const hits = rows.map(mhCustomerRow_).filter(function(c) {
+    const name = c.name.toLowerCase();
+    const phone = mhNormalizePhone_(c.phone);
+    const phone2 = mhNormalizePhone_(c.phone2);
+    return name.indexOf(query.toLowerCase()) >= 0 ||
+      (needle && phone.indexOf(needle) >= 0) ||
+      (needle && phone2.indexOf(needle) >= 0);
+  });
+  return { customers: hits.slice(0, 20), total: hits.length };
+}
+
+/** Creates or updates a customer and returns the stored record. */
+function mhUpsertCustomer_(data) {
+  const sh = mhCustomerSheet_();
+  mhAssertHeaders_(sh, MH_CUSTOMER_HEADERS);
+  const map = mhHeaderMap_(sh);
+  const phone = mhNormalizePhone_(data.phone);
+  const rows = mhRowsObjects_(sh);
+  const existing = phone ? rows.find(function(r) { return mhNormalizePhone_(r['رقم الهاتف']) === phone; }) : null;
+
+  if (existing) {
+    if (data.name && map['اسم العميل']) sh.getRange(existing.__row, map['اسم العميل']).setValue(data.name);
+    if (data.address && map['العنوان']) sh.getRange(existing.__row, map['العنوان']).setValue(data.address);
+    if (data.phone2 && map['رقم الهاتف 2']) sh.getRange(existing.__row, map['رقم الهاتف 2']).setValue(data.phone2);
+    if (map['آخر زيارة']) sh.getRange(existing.__row, map['آخر زيارة']).setValue(mhStamp_());
+    if (map['عدد الزيارات']) sh.getRange(existing.__row, map['عدد الزيارات']).setValue(Number(existing['عدد الزيارات'] || 0) + 1);
+    return mhCustomerRow_(existing);
+  }
+
+  const id = 'CUS-' + Utilities.formatDate(new Date(), MH.TZ, 'yyyyMMdd') + '-' + String(rows.length + 1).padStart(4, '0');
+  const now = mhStamp_();
+  sh.appendRow([id, data.name || '', phone, mhNormalizePhone_(data.phone2 || ''), data.address || '', data.notes || '', now, now, 1]);
+  return { id: id, name: data.name || '', phone: phone, phone2: mhNormalizePhone_(data.phone2 || ''), address: data.address || '', visits: 1 };
+}
+
+/**
+ * Full device intake: customer + device + condition + accessories.
+ * Replaces the order-number-only registration.
+ */
+function deviceIntakeCreateMini_(profile, body) {
+  if (!deviceIntakeAllowed_(profile)) throw new Error('FORBIDDEN');
+
+  const customer = {
+    name: String(body.customerName || '').trim(),
+    phone: String(body.customerPhone || '').trim(),
+    phone2: String(body.customerPhone2 || '').trim(),
+    address: String(body.customerAddress || '').trim()
+  };
+  const device = {
+    brand: String(body.brand || '').trim(),
+    model: String(body.model || '').trim(),
+    imei: String(body.imei || '').trim(),
+    pin: String(body.pin || '').trim(),
+    problem: String(body.problem || '').trim(),
+    accessories: Array.isArray(body.accessories) ? body.accessories.map(String) : [],
+    powersOn: String(body.powersOn || '').trim(),
+    estimate: Number(body.estimate || 0),
+    deposit: Number(body.deposit || 0),
+    dueDate: mhIsoDate_(body.dueDate) || '',
+    technicianId: String(body.technicianId || '').trim()
+  };
+
+  if (customer.name.length < 2 || customer.name.length > 80) throw new Error('INVALID_CUSTOMER_NAME');
+  if (mhNormalizePhone_(customer.phone).length < 7) throw new Error('INVALID_CUSTOMER_PHONE');
+  if (!device.brand) throw new Error('INVALID_DEVICE_BRAND');
+  if (device.problem.length < 3 || device.problem.length > 1000) throw new Error('INVALID_DEVICE_PROBLEM');
+  if (device.pin.length > 40 || device.imei.length > 40) throw new Error('INVALID_DEVICE_IDENTITY');
+  if (!Number.isFinite(device.estimate) || device.estimate < 0 || device.estimate > 1000000) throw new Error('INVALID_ESTIMATE');
+  if (!Number.isFinite(device.deposit) || device.deposit < 0 || device.deposit > 1000000) throw new Error('INVALID_DEPOSIT');
+  if (['يعمل','لا يعمل'].indexOf(device.powersOn) < 0) throw new Error('INVALID_POWER_STATE');
+
+  const ss = spreadsheet_();
+  const employees = rowsAsObjects_(ss, MH.SHEETS.employees);
+  const technician = employees.find(function(r) {
+    return String(r['Chat ID'] || '').trim() === device.technicianId && mhEmployeeIsActive_(r) &&
+      !mhIsIntakeJob_(mhEmployeeJob_(r));
+  });
+  if (!technician) throw new Error('INVALID_DEVICE_TECHNICIAN');
+
+  const sh = mhEnsureDeviceExtraColumns_();
+  if (!sh) throw new Error('DEVICE_SHEETS_MISSING');
+  const movement = ss.getSheetByName('سجل حركة الأجهزة');
+  mhAssertHeaders_(sh, MH_DEVICE.DEVICE_HEADERS);
+  // The movement log is an audit trail: missing or legacy headers must not
+  // block a customer's intake. Create/repair it instead of throwing.
+  const movementSheet = movement || ss.insertSheet('سجل حركة الأجهزة');
+  if (movementSheet.getLastRow() === 0) {
+    movementSheet.getRange(1, 1, 1, MH_DEVICE.MOVEMENT_HEADERS.length).setValues([MH_DEVICE.MOVEMENT_HEADERS]);
+    movementSheet.setFrozenRows(1);
+  }
+
+  const lock = LockService.getScriptLock(); lock.waitLock(20000);
+  let orderId = '';
+  let savedCustomer = null;
+  try {
+    savedCustomer = mhUpsertCustomer_(customer);
+
+    const today = Utilities.formatDate(new Date(), MH.TZ, 'yyyyMMdd');
+    const seq = String(sh.getLastRow()).padStart(4, '0');
+    orderId = 'MH-' + today + '-' + seq;
+
+    const now = mhStamp_();
+    const intakeName = String(profile.name || '');
+
+    // Write by header name so a legacy column order cannot corrupt the row.
+    const headerRow = sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), 1)).getDisplayValues()[0]
+      .map(function(h) { return String(h).trim(); });
+    const idx = {};
+    headerRow.forEach(function(h, i) { if (h) idx[h] = i; });
+    const row = new Array(headerRow.length).fill('');
+    const set = function(header, value) { if (idx[header] !== undefined) row[idx[header]] = value; };
+
+    set('رقم الطلب', orderId);
+    set('تاريخ الاستلام', now);
+    set('اسم الجهاز', device.brand + (device.model ? ' ' + device.model : ''));
+    set('اسم العميل', customer.name);
+    set('المشكلة المسجلة', device.problem);
+    set('مسؤول الاستلام Chat ID', String(profile.chatId));
+    set('مسؤول الاستلام', intakeName);
+    set('الموظف المسؤول Chat ID', device.technicianId);
+    set('الموظف المسؤول', String(technician['اسم الموظف'] || ''));
+    set('القسم', String(technician['الوظيفة'] || ''));
+    set('حالة الجهاز', 'تم الاستلام');
+    set('مكان الجهاز', 'قسم الاستلام');
+    set('آخر تحديث', now);
+    set('رقم العميل', savedCustomer.id);
+    set('اسم العميل', customer.name);
+    set('رقم الهاتف', mhNormalizePhone_(customer.phone));
+    set('الماركة', device.brand);
+    set('رقم IMEI', device.imei);
+    set('الرقم السري', device.pin);
+    set('الإكسسوارات', device.accessories.join('، '));
+    set('يفتح ويعمل', device.powersOn);
+    set('التكلفة التقديرية', device.estimate);
+    set('العربون المدفوع', device.deposit);
+    set('موعد التسليم', device.dueDate);
+    set('اسم المستلم', intakeName);
+
+    sh.appendRow(row);
+    movementSheet.appendRow([
+      now, orderId, 'استلام وإسناد الجهاز', '', '', device.technicianId,
+      String(technician['اسم الموظف'] || ''), 'تم الاستلام', 'قسم الاستلام',
+      'إكسسوارات: ' + (device.accessories.join('، ') || 'لا يوجد') + ' · يفتح: ' + device.powersOn,
+      String(profile.chatId), intakeName
+    ]);
+  } finally { lock.releaseLock(); }
+
+  // Notify the assigned technician with the essentials.
+  mhNotifyEmployee_(device.technicianId,
+    '📱 جهاز جديد أُسند إليك\n━━━━━━━━━━━━━━━━━━\n' +
+    '🆔 ' + orderId + '\n' +
+    '📱 ' + device.brand + (device.model ? ' ' + device.model : '') + '\n' +
+    '👤 ' + customer.name + '\n' +
+    '🔧 ' + device.problem.slice(0, 160) + '\n' +
+    (device.dueDate ? '📅 التسليم: ' + device.dueDate + '\n' : '') +
+    '━━━━━━━━━━━━━━━━━━\nافتح التطبيق ← حالة الجهاز.',
+    'إسناد جهاز', 'device.assigned');
+
+  return {
+    registered: true,
+    orderId: orderId,
+    customerId: savedCustomer.id,
+    customerName: customer.name,
+    technicianName: String(technician['اسم الموظف'] || ''),
+    message: 'تم تسجيل الجهاز برقم الطلب ' + orderId
+  };
+}
+
+/** Device registration form metadata: brands + technicians. */
+function deviceIntakeOptionsMini_(profile) {
+  if (!deviceIntakeAllowed_(profile)) {
+    return { allowed: false, technicians: [], brands: [], message: 'تسجيل الأجهزة متاح لمسؤول الاستلام أو الإدارة فقط.' };
+  }
+  const ss = spreadsheet_();
+  const employees = rowsAsObjects_(ss, MH.SHEETS.employees);
+  const technicians = employees.filter(function(r) {
+    const job = mhEmployeeJob_(r);
+    return String(r['Chat ID'] || '').trim() && mhEmployeeIsActive_(r) &&
+      !mhIsIntakeJob_(job) && !/مدير|مشرف|إدارة|manager|supervisor/i.test(job);
+  }).map(function(r) {
+    return { id: String(r['Chat ID']).trim(), name: String(r['اسم الموظف'] || ''), job: mhEmployeeJob_(r) };
+  });
+
+  // Brands come from the price book, which already lists every model family.
+  let brands = [];
+  try {
+    const book = repairPriceBookMini_();
+    const seen = {};
+    MH_REPAIR_PRICE_CATEGORIES_.forEach(function(cfg) {
+      repairPriceCategoryDataMini_(book, cfg).models.forEach(function(m) {
+        const brand = String(m.name).split(' ')[0];
+        if (brand && !seen[brand]) { seen[brand] = true; brands.push(brand); }
+      });
+    });
+  } catch (e) { /* price book optional */ }
+
+  if (!brands.length) brands = ['Apple', 'Samsung', 'Huawei', 'Xiaomi', 'Oppo', 'Realme', 'Other'];
+
+  return { allowed: true, technicians: technicians, brands: brands, message: '' };
+}
+
+/* =========================================================
+   V1.16 — PER-EMPLOYEE UI VISIBILITY
+   Super Admin chooses which home tiles each technician sees.
+   Stored in «إعدادات أزرار الفنيين»: chatId + buttonKey = TRUE/FALSE.
+   Missing row means visible, so the app works before configuration.
+========================================================= */
+const MH_UI_BUTTON_HEADERS = ['Chat ID','اسم الفني','الزر','ظاهر','آخر تحديث','بواسطة'];
+const MH_UI_BUTTON_SHEET_ = 'إعدادات أزرار الفنيين';
+
+/** Every home tile that can be shown or hidden per technician. */
+const MH_HOME_BUTTONS_ = [
+  { key: 'attendance', label: 'تسجيل حضور', group: 'الدوام' },
+  { key: 'checkout', label: 'تسجيل انصراف', group: 'الدوام' },
+  { key: 'my-shifts', label: 'ورديتي', group: 'الدوام' },
+  { key: 'history', label: 'سجل الحضور', group: 'الدوام' },
+  { key: 'inspection', label: 'فحص الجهاز', group: 'الصيانة' },
+  { key: 'repair-prices', label: 'أسعار الإصلاح', group: 'الصيانة' },
+  { key: 'devices', label: 'حالة الجهاز', group: 'الصيانة' },
+  { key: 'device-register', label: 'تسجيل جهاز', group: 'الصيانة' },
+  { key: 'part-request', label: 'طلب قطعة غيار', group: 'الصيانة' },
+  { key: 'leave', label: 'طلب إذن', group: 'الطلبات' },
+  { key: 'cash', label: 'طلب سلفة', group: 'الطلبات' },
+  { key: 'withdraw', label: 'طلب سحب مبلغ', group: 'الطلبات' },
+  { key: 'settlement', label: 'تسوية عهدة', group: 'الطلبات' },
+  { key: 'requests', label: 'طلباتي', group: 'الأداء' },
+  { key: 'rewards', label: 'مكافآتي', group: 'الأداء' },
+  { key: 'deductions', label: 'خصوماتي', group: 'الأداء' },
+  { key: 'monthly', label: 'ملخص الشهر', group: 'الأداء' },
+  { key: 'tasks', label: 'تسكاتي', group: 'الأداء' },
+  { key: 'complaint-new', label: 'تقديم شكوى', group: 'التواصل' },
+  { key: 'complaint-list', label: 'شكاويي', group: 'التواصل' }
+];
+
+function mhUiButtonSheet_() {
+  const ss = spreadsheet_();
+  let sh = ss.getSheetByName(MH_UI_BUTTON_SHEET_);
+  if (!sh) {
+    sh = ss.insertSheet(MH_UI_BUTTON_SHEET_);
+    sh.getRange(1, 1, 1, MH_UI_BUTTON_HEADERS.length).setValues([MH_UI_BUTTON_HEADERS]);
+    sh.setFrozenRows(1);
+    return sh;
+  }
+  const width = Math.max(sh.getLastColumn(), 1);
+  const existing = sh.getRange(1, 1, 1, width).getDisplayValues()[0]
+    .map(function(h) { return String(h).trim(); });
+  const missing = MH_UI_BUTTON_HEADERS.filter(function(h) { return existing.indexOf(h) < 0; });
+  if (missing.length) sh.getRange(1, width + 1, 1, missing.length).setValues([missing]);
+  if (sh.getFrozenRows() === 0) sh.setFrozenRows(1);
+  return sh;
+}
+
+/** { chatId: { buttonKey: visible } } */
+function mhUiRules_() {
+  const rules = {};
+  let rows = [];
+  try { rows = mhRowsObjects_(mhUiButtonSheet_()); } catch (e) { return rules; }
+  rows.forEach(function(r) {
+    const chatId = String(r['Chat ID'] || '').trim();
+    const key = String(r['الزر'] || '').trim();
+    if (!chatId || !key) return;
+    if (!rules[chatId]) rules[chatId] = {};
+    rules[chatId][key] = String(r['ظاهر'] || 'TRUE').toUpperCase() !== 'FALSE';
+  });
+  return rules;
+}
+
+/** Hidden button keys for one technician. */
+function mhHiddenButtons_(chatId) {
+  const forUser = mhUiRules_()[String(chatId || '').trim()] || {};
+  return Object.keys(forUser).filter(function(k) { return forUser[k] === false; });
+}
+
+/** Returned inside bootstrap so the app can hide tiles instantly. */
+function mhVisibleButtons_(profile) {
+  if (profile.role !== 'employee') {
+    return MH_HOME_BUTTONS_.map(function(b) { return b.key; });
+  }
+  const hidden = mhHiddenButtons_(profile.chatId);
+  return MH_HOME_BUTTONS_
+    .map(function(b) { return b.key; })
+    .filter(function(k) { return hidden.indexOf(k) < 0; });
+}
+
+/** Super Admin reads the visibility matrix. */
+function buttonsMatrixGetMini_(profile) {
+  mhRequireRole_(profile, ['super_admin','admin']);
+  const employees = rowsAsObjects_(spreadsheet_(), MH.SHEETS.employees)
+    .filter(function(r) {
+      return String(r['Chat ID'] || '').trim() &&
+        String(r['الحالة'] || 'نشط').trim() === 'نشط' &&
+        String(r['حالة الحساب'] || 'نشط').trim() === 'نشط';
+    })
+    .map(function(r) {
+      return {
+        id: String(r['Chat ID']).trim(),
+        name: String(r['اسم الموظف'] || ''),
+        job: String(r['الوظيفة'] || '')
+      };
+    });
+
+  const rules = mhUiRules_();
+  return {
+    employees: employees.map(function(e) {
+      const visible = {};
+      MH_HOME_BUTTONS_.forEach(function(b) {
+        const v = (rules[e.id] || {})[b.key];
+        visible[b.key] = v === undefined ? true : v;
+      });
+      return { employeeId: e.id, name: e.name, job: e.job, visible: visible };
+    }),
+    buttons: MH_HOME_BUTTONS_
+  };
+}
+
+/** Super Admin toggles one button for one technician. */
+function buttonsMatrixSetMini_(profile, body) {
+  mhRequireRole_(profile, ['super_admin','admin']);
+  const chatId = String(body.employeeId || '').trim();
+  const key = String(body.button || '').trim();
+  const visible = body.visible === true;
+  if (!/^\d{5,20}$/.test(chatId)) throw new Error('INVALID_EMPLOYEE');
+  if (!MH_HOME_BUTTONS_.some(function(b) { return b.key === key; })) throw new Error('INVALID_BUTTON');
+
+  const emp = rowsAsObjects_(spreadsheet_(), MH.SHEETS.employees).find(function(r) {
+    return String(r['Chat ID'] || '').trim() === chatId;
+  });
+  const name = emp ? String(emp['اسم الموظف'] || '') : '';
+
+  const sh = mhUiButtonSheet_();
+  mhAssertHeaders_(sh, MH_UI_BUTTON_HEADERS);
+  const map = mhHeaderMap_(sh);
+  const found = mhRowsObjects_(sh).find(function(r) {
+    return String(r['Chat ID'] || '').trim() === chatId && String(r['الزر'] || '').trim() === key;
+  });
+
+  const lock = LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    if (!found) sh.appendRow([chatId, name, key, 'TRUE', mhStamp_(), String(profile.name || '')]);
+    const row = found ? found.__row : sh.getLastRow();
+    sh.getRange(row, map['Chat ID']).setValue(chatId);
+    if (map['اسم الفني']) sh.getRange(row, map['اسم الفني']).setValue(name);
+    sh.getRange(row, map['الزر']).setValue(key);
+    sh.getRange(row, map['ظاهر']).setValue(visible ? 'TRUE' : 'FALSE');
+    sh.getRange(row, map['آخر تحديث']).setValue(mhStamp_());
+    sh.getRange(row, map['بواسطة']).setValue(String(profile.name || profile.chatId));
+  } finally { lock.releaseLock(); }
+
+  return { updated: true, employeeId: chatId, button: key, visible: visible };
+}
+
+/** Show or hide every tile for one technician. */
+function buttonsMatrixBulkMini_(profile, body) {
+  mhRequireRole_(profile, ['super_admin','admin']);
+  const chatId = String(body.employeeId || '').trim();
+  const visible = body.visible === true;
+  if (!/^\d{5,20}$/.test(chatId)) throw new Error('INVALID_EMPLOYEE');
+
+  const emp = rowsAsObjects_(spreadsheet_(), MH.SHEETS.employees).find(function(r) {
+    return String(r['Chat ID'] || '').trim() === chatId;
+  });
+  const name = emp ? String(emp['اسم الموظف'] || '') : '';
+
+  const sh = mhUiButtonSheet_();
+  mhAssertHeaders_(sh, MH_UI_BUTTON_HEADERS);
+  const map = mhHeaderMap_(sh);
+  const rows = mhRowsObjects_(sh).filter(function(r) {
+    return String(r['Chat ID'] || '').trim() === chatId;
+  });
+  const byKey = {};
+  rows.forEach(function(r) { byKey[String(r['الزر'] || '').trim()] = r.__row; });
+
+  const lock = LockService.getScriptLock(); lock.waitLock(20000);
+  try {
+    MH_HOME_BUTTONS_.forEach(function(b) {
+      let row = byKey[b.key];
+      if (!row) {
+        sh.appendRow([chatId, name, b.key, 'TRUE', mhStamp_(), String(profile.name || '')]);
+        row = sh.getLastRow();
+      }
+      sh.getRange(row, map['ظاهر']).setValue(visible ? 'TRUE' : 'FALSE');
+      sh.getRange(row, map['آخر تحديث']).setValue(mhStamp_());
+      sh.getRange(row, map['بواسطة']).setValue(String(profile.name || profile.chatId));
+    });
+  } finally { lock.releaseLock(); }
+
+  return { updated: true, employeeId: chatId, buttons: MH_HOME_BUTTONS_.length, visible: visible };
 }

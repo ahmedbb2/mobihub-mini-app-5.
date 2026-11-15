@@ -2481,3 +2481,142 @@ main{display:grid;gap:14px;min-width:0}
 [data-theme="light"] .notify-head{background:rgba(15,35,55,.04)}
 [data-theme="light"] .notify-switch i{background:rgba(15,35,55,.16)}
 [data-theme="light"] .notify-switch input:checked + i{background:var(--brand)}
+
+/* ===================================================================
+   V1.16 — DEVICE INTAKE CARD + BUTTON CONTROL + HIDDEN TILES
+   =================================================================== */
+.is-hidden-by-admin{display:none !important}
+
+/* --- Intake form --- */
+.intake-form{display:grid;gap:12px}
+.intake-card{
+  display:grid;
+  gap:10px;
+  padding:14px;
+  border-radius:var(--r-md);
+  border:1px solid var(--line);
+  background:rgba(255,255,255,.022);
+}
+.intake-card-head{
+  display:flex;align-items:center;gap:8px;
+  padding-bottom:8px;
+  border-bottom:1px solid var(--line);
+}
+.intake-card-head span{font-size:15px;line-height:1}
+.intake-card-head h4{
+  margin:0;
+  font-size:12.5px;
+  font-weight:800;
+  color:var(--text);
+}
+.intake-card label{margin:0;font-size:11.5px}
+.intake-row{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.intake-hint{
+  padding:8px 11px;
+  border-radius:9px;
+  border:1px solid var(--line);
+  background:rgba(255,255,255,.03);
+  font-size:10.5px;
+  line-height:1.7;
+  color:var(--text-3);
+}
+.intake-hint.is-found{
+  border-color:var(--ok-line);
+  background:var(--ok-wash);
+  color:var(--ok);
+  font-weight:700;
+}
+.intake-note{
+  margin:0;
+  font-size:10px;
+  line-height:1.7;
+  color:var(--text-3);
+}
+.intake-chips{display:flex;flex-wrap:wrap;gap:6px}
+.intake-chip{
+  padding:7px 12px;
+  border-radius:var(--r-pill);
+  border:1px solid var(--line-2);
+  background:rgba(255,255,255,.04);
+  color:var(--text-2);
+  font-family:inherit;font-size:11px;font-weight:700;
+  cursor:pointer;
+  transition:border-color .14s,background .14s,color .14s;
+}
+.intake-chip.is-on{
+  border-color:var(--brand-line);
+  background:var(--brand-wash);
+  color:var(--brand-2);
+}
+.intake-toggle{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.intake-choice{
+  display:flex;align-items:center;justify-content:center;gap:7px;
+  min-height:46px;
+  border-radius:var(--r-sm);
+  border:1px solid var(--line-2);
+  background:rgba(255,255,255,.04);
+  color:var(--text-2);
+  font-family:inherit;font-size:12px;font-weight:800;
+  cursor:pointer;
+  transition:border-color .14s,background .14s,color .14s;
+}
+.intake-choice span{font-size:14px}
+.intake-choice.is-on{
+  border-color:var(--brand-line);
+  background:var(--brand-wash);
+  color:var(--brand-2);
+}
+.intake-choice[data-power="يعمل"].is-on{
+  border-color:var(--ok-line);background:var(--ok-wash);color:var(--ok);
+}
+.intake-choice[data-power="لا يعمل"].is-on{
+  border-color:var(--danger-line);background:var(--danger-wash);color:var(--danger);
+}
+.intake-actions{
+  position:sticky;bottom:0;
+  display:grid;
+  grid-template-columns:1.4fr 1fr;
+  gap:8px;
+  padding:10px 0 calc(4px + env(safe-area-inset-bottom,0px));
+  background:linear-gradient(to top,rgba(12,20,29,.98) 65%,rgba(12,20,29,0));
+  z-index:2;
+}
+
+/* --- Button visibility control --- */
+.btn-matrix-summary{
+  padding:8px 12px;
+  border-radius:var(--r-sm);
+  border:1px solid var(--line);
+  background:rgba(255,255,255,.03);
+  font-size:11.5px;
+  font-weight:700;
+  color:var(--text-2);
+  text-align:center;
+}
+.btn-matrix-list{display:grid;gap:0}
+.btn-matrix-row{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  margin:0;
+  padding:10px 8px;
+  border-bottom:1px solid var(--line);
+  font-size:11.5px;
+  font-weight:600;
+  color:var(--text);
+  cursor:pointer;
+}
+.btn-matrix-row:last-child{border-bottom:0}
+.btn-matrix-row.is-hidden > span:first-child{
+  color:var(--text-3);
+  text-decoration:line-through;
+  opacity:.7;
+}
+
+[data-theme="light"] .intake-card{background:rgba(15,35,55,.035)}
+[data-theme="light"] .intake-chip{background:rgba(15,35,55,.045);color:var(--text-2)}
+[data-theme="light"] .intake-chip.is-on{background:var(--brand-wash);color:var(--brand-2)}
+[data-theme="light"] .intake-choice{background:rgba(15,35,55,.045);color:var(--text-2)}
+[data-theme="light"] .intake-hint{background:rgba(15,35,55,.04)}
+[data-theme="light"] .intake-actions{
+  background:linear-gradient(to top,rgba(241,246,250,.98) 65%,rgba(241,246,250,0));
+}
+[data-theme="light"] .btn-matrix-summary{background:rgba(15,35,55,.04)}

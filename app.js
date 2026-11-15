@@ -324,6 +324,23 @@
       nav.classList.add('hidden');
     }
   }
+  /* Tiles hidden by the Super Admin are removed from the home grid.
+   * A missing list means "no restrictions" so old hubs keep working. */
+  function applyVisibleButtons(list) {
+    const all = document.querySelectorAll('[data-home-action]');
+    if (!Array.isArray(list) || !list.length) {
+      all.forEach(el => el.classList.remove('is-hidden-by-admin'));
+      return;
+    }
+    const allowed = new Set(list);
+    all.forEach(el => {
+      const key = el.getAttribute('data-home-action');
+      // device-register keeps its own permission logic, never force-shown.
+      if (key === 'device-register') return;
+      el.classList.toggle('is-hidden-by-admin', !allowed.has(key));
+    });
+  }
+
   function applyWorkspaceProfile(data) {
     currentRole = data.profile.role || 'employee';
     const roleDefaultWorkspace = MANAGER_ROLES.includes(currentRole) ? 'manager' : 'employee';
@@ -340,6 +357,7 @@
     const jobTitle = String(data.profile.job || '').trim();
     $('userRole').textContent = jobTitle || roleNames[currentRole] || currentRole;
     $('userRole').classList.toggle('is-job', !!jobTitle);
+    applyVisibleButtons(data.visibleButtons);
     $('workspaceSwitch').classList.toggle('hidden', !(availableWorkspaces.includes('employee') && availableWorkspaces.includes('manager')));
     $('workspaceSwitch').textContent = workspaceRole === 'manager' ? 'لوحة المهندس' : 'لوحة المدير';
     $('workspaceSwitch').setAttribute('aria-label', workspaceRole === 'manager' ? 'التحويل إلى لوحة المهندس' : 'التحويل إلى لوحة المدير');
@@ -358,7 +376,7 @@
   const managerModuleTitles = {
     daily:'المتابعة اليومية', staff:'شؤون المهندسين', shifts:'إدارة الورديات', requests:'طلبات المهندسين والتواصل',
     tasks:'المهام والتسكات', parts:'قطع الغيار',
-    finance:'الإدارة المالية', overtime:'الأوفر تايم', devices:'الأجهزة والصيانة', system:'التقارير والنظام', notifications:'مركز الإشعارات', notificationMatrix:'التحكم في الإشعارات', managers:'إدارة المديرين'
+    finance:'الإدارة المالية', overtime:'الأوفر تايم', devices:'الأجهزة والصيانة', system:'التقارير والنظام', notifications:'مركز الإشعارات', notificationMatrix:'التحكم في الإشعارات', buttonsMatrix:'التحكم في الأزرار', managers:'إدارة المديرين'
   };
   let managerDashboardCache = null;
   function renderManagerDashboard(data) {
@@ -407,6 +425,7 @@
     if(module==='tasks') { closeModal(); await openTaskAdminPanel(); return; }
     if(module==='parts') { closeModal(); await openPartAdminPanel(); return; }
     if(module==='notificationMatrix') { closeModal(); await openNotificationMatrix(); return; }
+    if(module==='buttonsMatrix') { closeModal(); await openButtonsMatrix(); return; }
     if(module==='requests') {
       const panel=managerPanel(title,'<button type="button" class="manager-action-card" id="managerOpenPendingRequests"><b>مراجعة الطلبات والأذونات</b><small>مراجعة الطلبات المقدمة من المهندسين</small></button><button type="button" class="manager-action-card" id="managerOpenComplaints"><b>شكاوى المهندسين</b><small>فتح الشكاوى ومتابعة الردود والحالات</small></button>');
       panel.querySelector('#managerOpenPendingRequests').addEventListener('click',async()=>{closeModal();openModal('مراجعة الطلبات والأذونات',$('reviewCenter'));await loadReviews();});
@@ -827,7 +846,7 @@
     if(action==='devices'){await openEmployeeDevices();return;}
     if(action==='inspection'){await openStandaloneDeviceInspection();return;}
     if(action==='repair-prices'){await openRepairPriceBook();return;}
-    if(action==='device-register'){openDeviceRegistration();return;}
+    if(action==='device-register'){await openDeviceIntake();return;}
     if(action==='refresh'){refreshEmployeeWorkspace();return;}
   }
 
@@ -2509,6 +2528,375 @@
       const res = await api('notify_matrix_bulk', { employeeId, enabled });
       if (tg?.showAlert) tg.showAlert(enabled ? 'تم تفعيل كل الإشعارات لهذا الفني.' : 'تم إيقاف كل الإشعارات لهذا الفني.');
       renderNotificationMatrix(content, employeeId);
+    } catch (e) {
+      if (tg?.showAlert) tg.showAlert(e.message);
+    }
+  }
+
+
+  /* ============================================================
+   * DEVICE INTAKE — «بطاقة صيانة جديدة»
+   * Matches the reference card: customer block, device block,
+   * accessories, power state, costing. Customer lookup by phone
+   * avoids retyping repeat visits.
+   * ============================================================ */
+
+  const INTAKE_BRANDS = ['Apple', 'Samsung', 'Huawei', 'Xiaomi', 'Oppo', 'Realme', 'Nokia', 'Infinix', 'Tecno', 'Other'];
+  const INTAKE_ACCESSORIES = ['شاحن', 'علبة', 'جراب', 'درج SIM', 'سماعة', 'كابل', 'أخرى'];
+  const INTAKE_PROBLEMS = ['شاشة مكسورة', 'لا يشحن', 'بطارية تفضي بسرعة', 'لا يعمل', 'كاميرا', 'سماعة', 'شبكة', 'مياه', 'أخرى'];
+
+  let intakeState = null;
+
+  async function openDeviceIntake() {
+    const panel = managerPanel('بطاقة صيانة جديدة', '<div class="manager-loading">جاري تحميل النموذج...</div>');
+    const content = panel.querySelector('.manager-module-content');
+    intakeState = {
+      customerId: '',
+      accessories: [],
+      powersOn: '',
+      brand: '',
+      technicians: [],
+      problemPicked: ''
+    };
+    await renderDeviceIntake(content);
+  }
+
+  async function renderDeviceIntake(content) {
+    content.innerHTML = '<div class="manager-loading">جاري تحميل النموذج...</div>';
+    try {
+      const opts = await api('device_intake_options');
+      if (!opts.allowed) {
+        content.innerHTML = `<div class="manager-load-error">${escapeHtml(opts.message || 'غير مسموح')}</div>`;
+        return;
+      }
+      intakeState.technicians = opts.technicians || [];
+      const brands = (opts.brands && opts.brands.length) ? opts.brands : INTAKE_BRANDS;
+
+      content.innerHTML = `<form id="intakeForm" class="intake-form" novalidate>
+
+        <section class="intake-card">
+          <header class="intake-card-head"><span>👤</span><h4>بيانات العميل</h4></header>
+          <label>اسم العميل *
+            <input id="intakeCustomerName" maxlength="80" required placeholder="الاسم الكامل">
+          </label>
+          <label>رقم الهاتف (11 رقم) *
+            <input id="intakeCustomerPhone" type="tel" inputmode="numeric" maxlength="15" required placeholder="01xxxxxxxxx">
+          </label>
+          <div id="intakeCustomerHint" class="intake-hint hidden"></div>
+        </section>
+
+        <section class="intake-card">
+          <header class="intake-card-head"><span>📱</span><h4>بيانات الجهاز</h4></header>
+          <label>الماركة *
+            <select id="intakeBrand" required>
+              <option value="">— اختر الماركة —</option>
+              ${brands.map(b => `<option value="${escapeHtml(b)}">${escapeHtml(b)}</option>`).join('')}
+            </select>
+          </label>
+          <label>الموديل
+            <input id="intakeModel" maxlength="60" placeholder="مثال: iPhone 13 Pro">
+          </label>
+          <div class="intake-row">
+            <label>رقم IMEI
+              <input id="intakeImei" maxlength="40" inputmode="numeric" placeholder="15 رقم">
+            </label>
+            <label>الرقم السري / PIN
+              <input id="intakePin" maxlength="40" placeholder="كلمة المرور">
+            </label>
+          </div>
+          <label>وصف المشكلة *
+            <textarea id="intakeProblem" rows="3" maxlength="1000" required placeholder="ما الشكوى التي أبلغ عنها العميل؟"></textarea>
+          </label>
+          <div class="intake-chips" id="intakeProblemChips">
+            ${INTAKE_PROBLEMS.map(p => `<button type="button" class="intake-chip" data-problem="${escapeHtml(p)}">${escapeHtml(p)}</button>`).join('')}
+          </div>
+        </section>
+
+        <section class="intake-card">
+          <header class="intake-card-head"><span>🎒</span><h4>الإكسسوارات المستلمة مع الجهاز</h4></header>
+          <div class="intake-chips" id="intakeAccessoryChips">
+            ${INTAKE_ACCESSORIES.map(a => `<button type="button" class="intake-chip" data-accessory="${escapeHtml(a)}">${escapeHtml(a)}</button>`).join('')}
+          </div>
+          <p class="intake-note">اضغط لاختيار ما تم استلامه. لا تختار شيئًا إن لم يُستلم أي إكسسوار.</p>
+        </section>
+
+        <section class="intake-card">
+          <header class="intake-card-head"><span>🔌</span><h4>هل الجهاز يفتح ويعمل؟</h4></header>
+          <div class="intake-toggle">
+            <button type="button" class="intake-choice" data-power="يعمل"><span>✓</span> يعمل</button>
+            <button type="button" class="intake-choice" data-power="لا يعمل"><span>✕</span> لا يعمل</button>
+          </div>
+        </section>
+
+        <section class="intake-card">
+          <header class="intake-card-head"><span>💰</span><h4>التكلفة والتواريخ</h4></header>
+          <div class="intake-row">
+            <label>تكلفة تقديرية
+              <input id="intakeEstimate" type="number" min="0" max="1000000" step="1" value="0" inputmode="numeric">
+            </label>
+            <label>عربون مدفوع
+              <input id="intakeDeposit" type="number" min="0" max="1000000" step="1" value="0" inputmode="numeric">
+            </label>
+          </div>
+          <div class="intake-row">
+            <label>تاريخ الاستلام *
+              <input id="intakeDate" type="date" required>
+            </label>
+            <label>موعد التسليم
+              <input id="intakeDue" type="date">
+            </label>
+          </div>
+        </section>
+
+        <section class="intake-card">
+          <header class="intake-card-head"><span>🛠️</span><h4>الفني المسؤول</h4></header>
+          <label>اختر الفني *
+            <select id="intakeTechnician" required>
+              <option value="">— اختر المسؤول عن الجهاز —</option>
+              ${intakeState.technicians.map(t => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.name)}${t.job ? ' — ' + escapeHtml(t.job) : ''}</option>`).join('')}
+            </select>
+          </label>
+        </section>
+
+        <div class="intake-actions">
+          <button type="submit" class="primary-btn" id="intakeSubmit">+ إنشاء البطاقة</button>
+          <button type="button" class="secondary-btn" id="intakeCancel">إلغاء</button>
+        </div>
+        <p id="intakeMessage" class="inline-message hidden" aria-live="polite"></p>
+      </form>`;
+
+      // Default the intake date to today.
+      content.querySelector('#intakeDate').value = new Date().toISOString().slice(0, 10);
+
+      wireIntakeForm(content);
+    } catch (e) {
+      content.innerHTML = `<div class="manager-load-error">${escapeHtml(e.message)}</div>`;
+    }
+  }
+
+  function wireIntakeForm(content) {
+    const phone = content.querySelector('#intakeCustomerPhone');
+    const hint = content.querySelector('#intakeCustomerHint');
+
+    // Look the customer up as soon as the phone looks complete.
+    let lookupTimer = null;
+    phone.addEventListener('input', () => {
+      clearTimeout(lookupTimer);
+      const value = phone.value.replace(/[^\d]/g, '');
+      phone.value = value;
+      if (value.length < 7) { hint.classList.add('hidden'); return; }
+      lookupTimer = setTimeout(async () => {
+        try {
+          const res = await api('customers_search', { query: value });
+          const hit = (res.customers || [])[0];
+          if (hit) {
+            intakeState.customerId = hit.id;
+            if (!content.querySelector('#intakeCustomerName').value.trim()) {
+              content.querySelector('#intakeCustomerName').value = hit.name;
+            }
+            hint.textContent = `عميل مسجّل: ${hit.name} · زارنا ${hit.visits} مرة`;
+            hint.classList.remove('hidden');
+            hint.classList.add('is-found');
+          } else {
+            intakeState.customerId = '';
+            hint.textContent = 'عميل جديد — سيُضاف تلقائيًا عند الحفظ.';
+            hint.classList.remove('hidden');
+            hint.classList.remove('is-found');
+          }
+        } catch (_) { /* lookup is best-effort */ }
+      }, 400);
+    });
+
+    content.querySelectorAll('[data-problem]').forEach(chip => {
+      chip.addEventListener('click', () => {
+        const box = content.querySelector('#intakeProblem');
+        const text = chip.dataset.problem;
+        box.value = box.value.trim() ? box.value.trim() + ' · ' + text : text;
+        intakeState.problemPicked = text;
+        content.querySelectorAll('[data-problem]').forEach(c => c.classList.toggle('is-on', c === chip));
+      });
+    });
+
+    content.querySelectorAll('[data-accessory]').forEach(chip => {
+      chip.addEventListener('click', () => {
+        const value = chip.dataset.accessory;
+        chip.classList.toggle('is-on');
+        const set = new Set(intakeState.accessories);
+        if (chip.classList.contains('is-on')) set.add(value); else set.delete(value);
+        intakeState.accessories = [...set];
+      });
+    });
+
+    content.querySelectorAll('[data-power]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        intakeState.powersOn = btn.dataset.power;
+        content.querySelectorAll('[data-power]').forEach(b => b.classList.toggle('is-on', b === btn));
+      });
+    });
+
+    content.querySelector('#intakeCancel').addEventListener('click', closeModal);
+
+    content.querySelector('#intakeForm').addEventListener('submit', async ev => {
+      ev.preventDefault();
+      const message = content.querySelector('#intakeMessage');
+      const submit = content.querySelector('#intakeSubmit');
+      const fail = text => {
+        message.textContent = text;
+        message.classList.remove('hidden');
+        submit.disabled = false;
+        submit.textContent = '+ إنشاء البطاقة';
+        message.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      };
+
+      const customerName = content.querySelector('#intakeCustomerName').value.trim();
+      const customerPhone = content.querySelector('#intakeCustomerPhone').value.trim();
+      const brand = content.querySelector('#intakeBrand').value;
+      const problem = content.querySelector('#intakeProblem').value.trim();
+      const technicianId = content.querySelector('#intakeTechnician').value;
+
+      if (customerName.length < 2) return fail('اكتب اسم العميل.');
+      if (customerPhone.replace(/\D/g, '').length < 7) return fail('اكتب رقم هاتف صحيح.');
+      if (!brand) return fail('اختر ماركة الجهاز.');
+      if (problem.length < 3) return fail('اكتب وصف المشكلة.');
+      if (!intakeState.powersOn) return fail('حدد هل الجهاز يعمل أم لا.');
+      if (!technicianId) return fail('اختر الفني المسؤول.');
+
+      submit.disabled = true;
+      submit.textContent = 'جارٍ الإنشاء...';
+      message.classList.add('hidden');
+
+      try {
+        const res = await api('device_intake_create', {
+          customerName, customerPhone, customerId: intakeState.customerId,
+          brand,
+          model: content.querySelector('#intakeModel').value.trim(),
+          imei: content.querySelector('#intakeImei').value.trim(),
+          pin: content.querySelector('#intakePin').value.trim(),
+          problem,
+          accessories: intakeState.accessories,
+          powersOn: intakeState.powersOn,
+          estimate: Number(content.querySelector('#intakeEstimate').value || 0),
+          deposit: Number(content.querySelector('#intakeDeposit').value || 0),
+          dueDate: content.querySelector('#intakeDue').value,
+          technicianId
+        });
+        if (tg?.showAlert) tg.showAlert(`تم إنشاء البطاقة\nرقم الطلب: ${res.orderId}\nالفني: ${res.technicianName}`);
+        closeModal();
+        await openEmployeeDevices();
+      } catch (e) {
+        fail(e.message);
+      }
+    });
+  }
+
+
+  /* ============================================================
+   * BUTTON VISIBILITY CONTROL (Super Admin)
+   * Choose which home tiles each technician sees.
+   * ============================================================ */
+
+  async function openButtonsMatrix() {
+    const panel = managerPanel('التحكم في أزرار الفنيين', '<div class="manager-loading">جاري تحميل الأزرار...</div>');
+    const content = panel.querySelector('.manager-module-content');
+    await renderButtonsMatrix(content);
+  }
+
+  async function renderButtonsMatrix(content, selectedId) {
+    content.innerHTML = '<div class="manager-loading">جاري تحميل الأزرار...</div>';
+    try {
+      const data = await api('buttons_matrix_get');
+      const employees = data.employees || [];
+      const buttons = data.buttons || [];
+
+      const groups = {};
+      buttons.forEach(b => {
+        if (!groups[b.group]) groups[b.group] = [];
+        groups[b.group].push(b);
+      });
+
+      const current = employees.find(e => e.employeeId === selectedId) || employees[0];
+      const visibleCount = current ? buttons.filter(b => current.visible[b.key] !== false).length : 0;
+
+      content.innerHTML = `<div class="notify-matrix">
+        <div class="notify-intro">
+          <b>تحكم في أزرار كل فني</b>
+          <p>أخفِ أي زر عن أي فني. الإخفاء يمنع الزر من الظهور في تطبيقه فقط، ولا يغيّر صلاحيات الخادم.</p>
+        </div>
+
+        <label class="notify-picker">الفني
+          <select id="btnPickEmployee">
+            ${employees.map(e => `<option value="${escapeHtml(e.employeeId)}"${current && e.employeeId === current.employeeId ? ' selected' : ''}>${escapeHtml(e.name)}${e.job ? ' — ' + escapeHtml(e.job) : ''}</option>`).join('')}
+          </select>
+        </label>
+
+        ${current ? `
+          <div class="btn-matrix-summary">
+            <span>${visibleCount} من ${buttons.length} زر ظاهر</span>
+          </div>
+
+          <div class="notify-bulk">
+            <button type="button" class="secondary-btn" id="btnShowAll">إظهار الكل</button>
+            <button type="button" class="danger-btn" id="btnHideAll">إخفاء الكل</button>
+          </div>
+
+          ${Object.keys(groups).map(group => `<div class="notify-group">
+            <h5 class="price-group-title">${escapeHtml(group)}</h5>
+            <div class="btn-matrix-list">
+              ${groups[group].map(b => {
+                const isVisible = current.visible[b.key] !== false;
+                return `<label class="btn-matrix-row${isVisible ? '' : ' is-hidden'}">
+                  <span>${escapeHtml(b.label)}</span>
+                  <span class="notify-switch">
+                    <input type="checkbox" data-btn-toggle data-emp="${escapeHtml(current.employeeId)}" data-button="${escapeHtml(b.key)}"${isVisible ? ' checked' : ''}>
+                    <i></i>
+                  </span>
+                </label>`;
+              }).join('')}
+            </div>
+          </div>`).join('')}
+        ` : '<p class="manager-empty-state">لا يوجد فنيون نشطون.</p>'}
+      </div>`;
+
+      content.querySelector('#btnPickEmployee')?.addEventListener('change', ev => {
+        renderButtonsMatrix(content, ev.target.value);
+      });
+      content.querySelector('#btnShowAll')?.addEventListener('click', () => bulkButtons(content, current.employeeId, true));
+      content.querySelector('#btnHideAll')?.addEventListener('click', () => bulkButtons(content, current.employeeId, false));
+
+      content.querySelectorAll('[data-btn-toggle]').forEach(box => {
+        box.addEventListener('change', async () => {
+          const d = box.dataset;
+          box.disabled = true;
+          try {
+            await api('buttons_matrix_set', {
+              employeeId: d.emp, button: d.button, visible: box.checked
+            });
+            const row = box.closest('.btn-matrix-row');
+            if (row) row.classList.toggle('is-hidden', !box.checked);
+            updateBtnSummary(content, buttons.length);
+          } catch (e) {
+            box.checked = !box.checked;
+            if (tg?.showAlert) tg.showAlert(e.message);
+          } finally { box.disabled = false; }
+        });
+      });
+    } catch (e) {
+      content.innerHTML = `<div class="manager-load-error">${escapeHtml(e.message)}</div>`;
+    }
+  }
+
+  function updateBtnSummary(content, total) {
+    const el = content.querySelector('.btn-matrix-summary span');
+    if (!el) return;
+    const on = content.querySelectorAll('[data-btn-toggle]:checked').length;
+    el.textContent = `${on} من ${total} زر ظاهر`;
+  }
+
+  async function bulkButtons(content, employeeId, visible) {
+    try {
+      await api('buttons_matrix_bulk', { employeeId, visible });
+      if (tg?.showAlert) tg.showAlert(visible ? 'تم إظهار كل الأزرار.' : 'تم إخفاء كل الأزرار.');
+      renderButtonsMatrix(content, employeeId);
     } catch (e) {
       if (tg?.showAlert) tg.showAlert(e.message);
     }
