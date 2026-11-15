@@ -2620,3 +2620,179 @@ main{display:grid;gap:14px;min-width:0}
   background:linear-gradient(to top,rgba(241,246,250,.98) 65%,rgba(241,246,250,0));
 }
 [data-theme="light"] .btn-matrix-summary{background:rgba(15,35,55,.04)}
+
+/* ===================================================================
+   V1.17 — INTAKE WIZARD: steps, family picker, model list, inspection
+   =================================================================== */
+.intake-steps{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:6px;
+  padding:10px 0 4px;
+}
+.intake-step{
+  display:grid;
+  justify-items:center;
+  gap:4px;
+}
+.intake-step span{
+  width:26px;height:26px;
+  display:grid;place-items:center;
+  border-radius:50%;
+  border:1px solid var(--line-2);
+  background:rgba(255,255,255,.04);
+  font-size:11px;font-weight:800;
+  color:var(--text-3);
+}
+.intake-step small{
+  font-size:9px;
+  line-height:1.4;
+  color:var(--text-3);
+  text-align:center;
+}
+.intake-step.is-current span{
+  border-color:var(--brand-line);
+  background:var(--brand);
+  color:#20140A;
+}
+.intake-step.is-current small{color:var(--brand-2);font-weight:800}
+.intake-step.is-done span{
+  border-color:var(--ok-line);
+  background:var(--ok-wash);
+  color:var(--ok);
+}
+
+.intake-result{display:grid;gap:7px}
+.intake-searching,
+.intake-empty{
+  margin:0;
+  padding:10px 12px;
+  border-radius:9px;
+  background:rgba(255,255,255,.03);
+  font-size:11px;
+  color:var(--text-3);
+  text-align:center;
+}
+.intake-customer-hit{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  width:100%;padding:12px 13px;
+  border-radius:var(--r-sm);
+  border:1px solid var(--line);
+  background:rgba(255,255,255,.03);
+  color:var(--text);text-align:right;cursor:pointer;
+  transition:border-color .14s,background .14s;
+}
+.intake-customer-hit:hover{border-color:var(--brand-line);background:var(--brand-wash)}
+.intake-customer-hit span:first-child{display:grid;gap:2px;min-width:0}
+.intake-customer-hit b{font-size:12.5px}
+.intake-customer-hit small{font-size:10.5px;color:var(--text-3)}
+.intake-hit-arrow{color:var(--brand-2);font-weight:800;flex:0 0 auto}
+
+.intake-family-grid{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:8px;
+}
+.intake-family-card{
+  display:grid;justify-items:center;gap:5px;
+  padding:18px 10px;
+  border-radius:var(--r-md);
+  border:1px solid var(--line);
+  background:linear-gradient(150deg,rgba(255,255,255,.045),rgba(255,255,255,.012));
+  color:var(--text);cursor:pointer;
+  transition:border-color .14s,background .14s,transform .14s;
+}
+.intake-family-card:hover{border-color:var(--brand-line);background:var(--brand-wash)}
+.intake-family-card:active{transform:scale(.97)}
+.intake-family-icon{font-size:24px;line-height:1.2}
+.intake-family-card b{font-size:12px}
+
+.intake-model-list{display:grid;gap:6px;max-height:320px;overflow-y:auto}
+.intake-model-row{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  width:100%;padding:12px 13px;
+  border-radius:var(--r-sm);
+  border:1px solid var(--line);
+  background:rgba(255,255,255,.025);
+  color:var(--text);text-align:right;cursor:pointer;
+  transition:border-color .14s,background .14s;
+}
+.intake-model-row:hover{border-color:var(--brand-line);background:var(--brand-wash)}
+.intake-model-row b{font-size:12.5px}
+.intake-model-row small{font-size:10px;color:var(--text-3)}
+
+.intake-summary{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+}
+.intake-summary>div{display:grid;gap:2px;min-width:0}
+.intake-summary small{font-size:9.5px;color:var(--text-3)}
+.intake-summary b{font-size:12px;overflow-wrap:anywhere}
+
+.intake-inspection{display:grid;gap:6px;max-height:340px;overflow-y:auto}
+.intake-inspect-row{
+  display:grid;
+  gap:6px;
+  padding:10px 11px;
+  border-radius:9px;
+  border:1px solid var(--line);
+  background:rgba(255,255,255,.02);
+}
+.intake-inspect-row b{font-size:11px;line-height:1.65;font-weight:600}
+.intake-inspect-row.has-issue{border-color:var(--danger-line);background:var(--danger-wash)}
+.intake-inspect-actions{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.intake-inspect-actions button{
+  min-height:34px;
+  border-radius:8px;
+  border:1px solid var(--line-2);
+  background:rgba(255,255,255,.04);
+  color:var(--text-3);
+  font-family:inherit;font-size:10.5px;font-weight:800;
+  cursor:pointer;
+  transition:border-color .14s,background .14s,color .14s;
+}
+.intake-inspect-actions button[data-result="سليم"].is-on{
+  border-color:var(--ok-line);background:var(--ok-wash);color:var(--ok);
+}
+.intake-inspect-actions button[data-result="مشكلة"].is-on{
+  border-color:var(--danger-line);background:var(--danger-wash);color:var(--danger);
+}
+
+.intake-parts-hint{
+  display:grid;gap:6px;
+  padding:10px 11px;
+  border-radius:9px;
+  border:1px dashed var(--line-2);
+  background:rgba(255,255,255,.02);
+}
+.intake-parts-hint b{font-size:10.5px;color:var(--text-3)}
+.intake-part-chips{display:flex;flex-wrap:wrap;gap:5px}
+.intake-part-chip{
+  padding:5px 9px;
+  border-radius:var(--r-pill);
+  border:1px solid var(--line-2);
+  background:rgba(255,255,255,.04);
+  color:var(--text-2);
+  font-family:inherit;font-size:9.5px;font-weight:700;
+  cursor:pointer;
+}
+.intake-part-chip.is-on{
+  border-color:var(--ok-line);background:var(--ok-wash);color:var(--ok);
+}
+
+.intake-actions.single{grid-template-columns:1fr}
+
+[data-theme="light"] .intake-step span{background:rgba(15,35,55,.05)}
+[data-theme="light"] .intake-step.is-current span{background:var(--brand);color:#20140A}
+[data-theme="light"] .intake-searching,
+[data-theme="light"] .intake-empty,
+[data-theme="light"] .intake-customer-hit,
+[data-theme="light"] .intake-model-row,
+[data-theme="light"] .intake-inspect-row,
+[data-theme="light"] .intake-parts-hint{background:rgba(15,35,55,.035)}
+[data-theme="light"] .intake-family-card{
+  background:linear-gradient(150deg,rgba(15,35,55,.035),rgba(15,35,55,.012));
+}
+[data-theme="light"] .intake-inspect-actions button,
+[data-theme="light"] .intake-part-chip{background:rgba(15,35,55,.045)}

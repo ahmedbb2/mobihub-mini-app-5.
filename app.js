@@ -2535,89 +2535,307 @@
 
 
   /* ============================================================
-   * DEVICE INTAKE — «بطاقة صيانة جديدة»
-   * Matches the reference card: customer block, device block,
-   * accessories, power state, costing. Customer lookup by phone
-   * avoids retyping repeat visits.
+   * DEVICE INTAKE — guided 4-step flow
+   *   1) ابحث بالهاتف  → إن لم يوجد، سجّل الاسم
+   *   2) عائلة الجهاز   → iPhone / iPad / MacBook / Watch / AirPods
+   *   3) الموديل        → من نفس فئات أسعار الإصلاح
+   *   4) الفحص          → قائمة الفحص حسب الموديل المختار
    * ============================================================ */
 
-  const INTAKE_BRANDS = ['Apple', 'Samsung', 'Huawei', 'Xiaomi', 'Oppo', 'Realme', 'Nokia', 'Infinix', 'Tecno', 'Other'];
-  const INTAKE_ACCESSORIES = ['شاحن', 'علبة', 'جراب', 'درج SIM', 'سماعة', 'كابل', 'أخرى'];
-  const INTAKE_PROBLEMS = ['شاشة مكسورة', 'لا يشحن', 'بطارية تفضي بسرعة', 'لا يعمل', 'كاميرا', 'سماعة', 'شبكة', 'مياه', 'أخرى'];
+  let intake = null;
 
-  let intakeState = null;
-
-  async function openDeviceIntake() {
-    const panel = managerPanel('بطاقة صيانة جديدة', '<div class="manager-loading">جاري تحميل النموذج...</div>');
-    const content = panel.querySelector('.manager-module-content');
-    intakeState = {
-      customerId: '',
+  function intakeReset() {
+    intake = {
+      step: 1,
+      customer: null,          // {id, name, phone, address, visits}
+      family: '',
+      familyLabel: '',
+      model: '',
       accessories: [],
       powersOn: '',
-      brand: '',
-      technicians: [],
-      problemPicked: ''
+      checklist: [],
+      parts: [],
+      technicians: []
     };
-    await renderDeviceIntake(content);
   }
 
-  async function renderDeviceIntake(content) {
-    content.innerHTML = '<div class="manager-loading">جاري تحميل النموذج...</div>';
+  async function openDeviceIntake() {
+    intakeReset();
+    const panel = managerPanel('بطاقة صيانة جديدة', '<div class="manager-loading">جاري تحميل النموذج...</div>');
+    const content = panel.querySelector('.manager-module-content');
     try {
       const opts = await api('device_intake_options');
       if (!opts.allowed) {
         content.innerHTML = `<div class="manager-load-error">${escapeHtml(opts.message || 'غير مسموح')}</div>`;
         return;
       }
-      intakeState.technicians = opts.technicians || [];
-      const brands = (opts.brands && opts.brands.length) ? opts.brands : INTAKE_BRANDS;
+      intake.technicians = opts.technicians || [];
+      renderIntakeStep(content);
+    } catch (e) {
+      content.innerHTML = `<div class="manager-load-error">${escapeHtml(e.message)}</div>`;
+    }
+  }
 
-      content.innerHTML = `<form id="intakeForm" class="intake-form" novalidate>
+  function intakeStepsBar(step) {
+    const labels = ['العميل', 'نوع الجهاز', 'الموديل', 'الفحص والبيانات'];
+    return `<div class="intake-steps">
+      ${labels.map((label, i) => `<div class="intake-step${i + 1 === step ? ' is-current' : ''}${i + 1 < step ? ' is-done' : ''}">
+        <span>${i + 1 < step ? '✓' : i + 1}</span><small>${label}</small>
+      </div>`).join('')}
+    </div>`;
+  }
 
-        <section class="intake-card">
-          <header class="intake-card-head"><span>👤</span><h4>بيانات العميل</h4></header>
-          <label>اسم العميل *
-            <input id="intakeCustomerName" maxlength="80" required placeholder="الاسم الكامل">
-          </label>
-          <label>رقم الهاتف (11 رقم) *
-            <input id="intakeCustomerPhone" type="tel" inputmode="numeric" maxlength="15" required placeholder="01xxxxxxxxx">
-          </label>
-          <div id="intakeCustomerHint" class="intake-hint hidden"></div>
+  function renderIntakeStep(content) {
+    if (intake.step === 1) return renderIntakeCustomer(content);
+    if (intake.step === 2) return renderIntakeFamily(content);
+    if (intake.step === 3) return renderIntakeModel(content);
+    return renderIntakeDetails(content);
+  }
+
+  /* ---------- Step 1: customer lookup ---------- */
+  function renderIntakeCustomer(content) {
+    content.innerHTML = `<div class="intake-form">
+      ${intakeStepsBar(1)}
+
+      <section class="intake-card">
+        <header class="intake-card-head"><span>🔍</span><h4>ابحث عن العميل برقم الهاتف</h4></header>
+        <label>رقم الهاتف
+          <input id="intakePhone" type="tel" inputmode="numeric" maxlength="15" placeholder="01xxxxxxxxx" autocomplete="off">
+        </label>
+        <div id="intakeSearchResult" class="intake-result"></div>
+      </section>
+
+      <section class="intake-card hidden" id="intakeNewCustomer">
+        <header class="intake-card-head"><span>👤</span><h4>عميل جديد</h4></header>
+        <label>اسم العميل *
+          <input id="intakeCustomerName" maxlength="80" placeholder="الاسم الكامل">
+        </label>
+        <label>العنوان (اختياري)
+          <input id="intakeCustomerAddress" maxlength="120" placeholder="المنطقة / الشارع">
+        </label>
+        <button type="button" class="primary-btn" id="intakeSaveCustomer">حفظ العميل والمتابعة</button>
+      </section>
+
+      <div class="intake-actions single">
+        <button type="button" class="secondary-btn" id="intakeCancel1">إلغاء</button>
+      </div>
+    </div>`;
+
+    const phone = content.querySelector('#intakePhone');
+    const result = content.querySelector('#intakeSearchResult');
+    const newCard = content.querySelector('#intakeNewCustomer');
+    let timer = null;
+
+    phone.focus();
+    phone.addEventListener('input', () => {
+      phone.value = phone.value.replace(/[^\d]/g, '');
+      clearTimeout(timer);
+      const value = phone.value;
+      if (value.length < 7) {
+        result.innerHTML = '';
+        newCard.classList.add('hidden');
+        return;
+      }
+      result.innerHTML = '<p class="intake-searching">جارٍ البحث...</p>';
+      timer = setTimeout(async () => {
+        try {
+          const res = await api('customers_search', { query: value });
+          const hits = res.customers || [];
+          if (hits.length) {
+            newCard.classList.add('hidden');
+            result.innerHTML = hits.map(c => `<button type="button" class="intake-customer-hit" data-customer='${escapeHtml(JSON.stringify(c))}'>
+              <span><b>${escapeHtml(c.name)}</b><small>${escapeHtml(c.phone)} · ${c.visits} زيارة</small></span>
+              <span class="intake-hit-arrow">←</span>
+            </button>`).join('');
+            result.querySelectorAll('[data-customer]').forEach(btn => {
+              btn.addEventListener('click', () => {
+                intake.customer = JSON.parse(btn.dataset.customer);
+                intake.step = 2;
+                renderIntakeStep(content);
+              });
+            });
+          } else {
+            result.innerHTML = '<p class="intake-empty">لا يوجد عميل بهذا الرقم.</p>';
+            newCard.classList.remove('hidden');
+            content.querySelector('#intakeCustomerName').focus();
+          }
+        } catch (e) {
+          result.innerHTML = `<p class="manager-load-error">${escapeHtml(e.message)}</p>`;
+        }
+      }, 400);
+    });
+
+    content.querySelector('#intakeSaveCustomer').addEventListener('click', () => {
+      const name = content.querySelector('#intakeCustomerName').value.trim();
+      const address = content.querySelector('#intakeCustomerAddress').value.trim();
+      if (name.length < 2) {
+        if (tg?.showAlert) tg.showAlert('اكتب اسم العميل.');
+        return;
+      }
+      intake.customer = {
+        id: '',
+        name: name,
+        phone: phone.value,
+        address: address,
+        visits: 0,
+        isNew: true
+      };
+      intake.step = 2;
+      renderIntakeStep(content);
+    });
+
+    content.querySelector('#intakeCancel1').addEventListener('click', closeModal);
+  }
+
+  /* ---------- Step 2: device family ---------- */
+  async function renderIntakeFamily(content) {
+    content.innerHTML = `<div class="intake-form">
+      ${intakeStepsBar(2)}
+      <section class="intake-card">
+        <header class="intake-card-head"><span>📱</span><h4>اختر نوع الجهاز</h4></header>
+        <p class="intake-note">العميل: <b>${escapeHtml(intake.customer.name)}</b> · ${escapeHtml(intake.customer.phone)}</p>
+        <div class="intake-family-grid" id="intakeFamilies">
+          <div class="manager-loading">جاري تحميل الأنواع...</div>
+        </div>
+      </section>
+      <div class="intake-actions single">
+        <button type="button" class="secondary-btn" id="intakeBack1">← رجوع</button>
+      </div>
+    </div>`;
+
+    content.querySelector('#intakeBack1').addEventListener('click', () => { intake.step = 1; renderIntakeStep(content); });
+
+    try {
+      const data = await api('device_families');
+      const families = data.families || [];
+      content.querySelector('#intakeFamilies').innerHTML = families.map(f => `
+        <button type="button" class="intake-family-card" data-family="${escapeHtml(f.key)}" data-label="${escapeHtml(f.label)}">
+          <span class="intake-family-icon">${f.icon}</span>
+          <b>${escapeHtml(f.label)}</b>
+        </button>`).join('');
+      content.querySelectorAll('[data-family]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          intake.family = btn.dataset.family;
+          intake.familyLabel = btn.dataset.label;
+          intake.step = 3;
+          renderIntakeStep(content);
+        });
+      });
+    } catch (e) {
+      content.querySelector('#intakeFamilies').innerHTML = `<p class="manager-load-error">${escapeHtml(e.message)}</p>`;
+    }
+  }
+
+  /* ---------- Step 3: model (from the price book) ---------- */
+  async function renderIntakeModel(content) {
+    content.innerHTML = `<div class="intake-form">
+      ${intakeStepsBar(3)}
+      <section class="intake-card">
+        <header class="intake-card-head"><span>🧩</span><h4>موديل ${escapeHtml(intake.familyLabel)}</h4></header>
+        <label>ابحث في الموديلات
+          <input id="intakeModelSearch" placeholder="مثال: 13 Pro، XR…" autocomplete="off">
+        </label>
+        <div class="intake-model-list" id="intakeModels"><div class="manager-loading">جاري تحميل الموديلات...</div></div>
+      </section>
+      <div class="intake-actions single">
+        <button type="button" class="secondary-btn" id="intakeBack2">← رجوع</button>
+      </div>
+    </div>`;
+
+    content.querySelector('#intakeBack2').addEventListener('click', () => { intake.step = 2; renderIntakeStep(content); });
+
+    try {
+      const data = await api('device_family_models', { family: intake.family });
+      const models = data.models || [];
+      const list = content.querySelector('#intakeModels');
+
+      const draw = filter => {
+        const needle = String(filter || '').toLowerCase().trim();
+        const shown = models.filter(m => !needle || m.name.toLowerCase().indexOf(needle) >= 0);
+        list.innerHTML = shown.length
+          ? shown.map(m => `<button type="button" class="intake-model-row" data-model="${escapeHtml(m.name)}">
+              <b>${escapeHtml(m.name)}</b><small>عرض الفحص والأسعار</small></button>`).join('')
+          : `<p class="intake-empty">${data.hasPriceData
+              ? 'لا يوجد موديل مطابق.'
+              : 'لا توجد موديلات مسعّرة لهذا النوع بعد — اكتب الموديل يدويًا.'}</p>
+             <label>اسم الموديل يدويًا<input id="intakeManualModel" maxlength="60" placeholder="مثال: iPad Pro 11"></label>
+             <button type="button" class="primary-btn" id="intakeManualGo">متابعة</button>`;
+        list.querySelectorAll('[data-model]').forEach(btn => {
+          btn.addEventListener('click', () => {
+            intake.model = btn.dataset.model;
+            intake.step = 4;
+            renderIntakeStep(content);
+          });
+        });
+        const manual = list.querySelector('#intakeManualGo');
+        if (manual) manual.addEventListener('click', () => {
+          const value = list.querySelector('#intakeManualModel').value.trim();
+          if (value.length < 2) { if (tg?.showAlert) tg.showAlert('اكتب اسم الموديل.'); return; }
+          intake.model = value;
+          intake.step = 4;
+          renderIntakeStep(content);
+        });
+      };
+
+      draw('');
+      content.querySelector('#intakeModelSearch').addEventListener('input', ev => draw(ev.target.value));
+    } catch (e) {
+      content.querySelector('#intakeModels').innerHTML = `<p class="manager-load-error">${escapeHtml(e.message)}</p>`;
+    }
+  }
+
+  /* ---------- Step 4: inspection + data ---------- */
+  async function renderIntakeDetails(content) {
+    content.innerHTML = `<div class="intake-form">
+      ${intakeStepsBar(4)}
+      <div class="manager-loading">جاري تحميل الفحص والأسعار...</div>
+    </div>`;
+
+    try {
+      const detail = await api('device_model_detail', { family: intake.family, model: intake.model });
+      intake.checklist = detail.checklist || [];
+      intake.parts = detail.parts || [];
+
+      content.innerHTML = `<div class="intake-form">
+        ${intakeStepsBar(4)}
+
+        <section class="intake-card intake-summary">
+          <div><small>العميل</small><b>${escapeHtml(intake.customer.name)}</b></div>
+          <div><small>الجهاز</small><b>${escapeHtml(intake.model)}</b></div>
         </section>
 
         <section class="intake-card">
-          <header class="intake-card-head"><span>📱</span><h4>بيانات الجهاز</h4></header>
-          <label>الماركة *
-            <select id="intakeBrand" required>
-              <option value="">— اختر الماركة —</option>
-              ${brands.map(b => `<option value="${escapeHtml(b)}">${escapeHtml(b)}</option>`).join('')}
-            </select>
-          </label>
-          <label>الموديل
-            <input id="intakeModel" maxlength="60" placeholder="مثال: iPhone 13 Pro">
-          </label>
-          <div class="intake-row">
-            <label>رقم IMEI
-              <input id="intakeImei" maxlength="40" inputmode="numeric" placeholder="15 رقم">
-            </label>
-            <label>الرقم السري / PIN
-              <input id="intakePin" maxlength="40" placeholder="كلمة المرور">
-            </label>
-          </div>
-          <label>وصف المشكلة *
-            <textarea id="intakeProblem" rows="3" maxlength="1000" required placeholder="ما الشكوى التي أبلغ عنها العميل؟"></textarea>
-          </label>
-          <div class="intake-chips" id="intakeProblemChips">
-            ${INTAKE_PROBLEMS.map(p => `<button type="button" class="intake-chip" data-problem="${escapeHtml(p)}">${escapeHtml(p)}</button>`).join('')}
+          <header class="intake-card-head"><span>🔧</span><h4>وصف المشكلة</h4></header>
+          <textarea id="intakeProblem" rows="3" maxlength="1000" placeholder="ما الشكوى التي أبلغ عنها العميل؟"></textarea>
+          <div class="intake-chips">
+            ${['شاشة مكسورة','لا يشحن','بطارية تفضي بسرعة','لا يعمل','كاميرا','سماعة','شبكة','مياه'].map(p =>
+              `<button type="button" class="intake-chip" data-problem="${p}">${p}</button>`).join('')}
           </div>
         </section>
 
         <section class="intake-card">
-          <header class="intake-card-head"><span>🎒</span><h4>الإكسسوارات المستلمة مع الجهاز</h4></header>
-          <div class="intake-chips" id="intakeAccessoryChips">
-            ${INTAKE_ACCESSORIES.map(a => `<button type="button" class="intake-chip" data-accessory="${escapeHtml(a)}">${escapeHtml(a)}</button>`).join('')}
+          <header class="intake-card-head"><span>✅</span><h4>فحص الجهاز عند الاستلام</h4></header>
+          <p class="intake-note">${intake.checklist.length
+            ? `${intake.checklist.length} اختبار — حدّد نتيجة كل اختبار.`
+            : 'لا توجد قائمة فحص مسجّلة لهذا النوع.'}</p>
+          ${intake.checklist.length ? `
+            <div class="intake-inspection">
+              ${intake.checklist.map(item => `<div class="intake-inspect-row" data-inspect="${item.index}">
+                <b>${escapeHtml(item.name)}</b>
+                <div class="intake-inspect-actions">
+                  <button type="button" data-result="سليم" data-index="${item.index}">سليم</button>
+                  <button type="button" data-result="مشكلة" data-index="${item.index}">مشكلة</button>
+                </div>
+              </div>`).join('')}
+            </div>` : ''}
+        </section>
+
+        <section class="intake-card">
+          <header class="intake-card-head"><span>🎒</span><h4>الإكسسوارات المستلمة</h4></header>
+          <div class="intake-chips" id="intakeAccessories">
+            ${['شاحن','علبة','جراب','درج SIM','سماعة','كابل'].map(a =>
+              `<button type="button" class="intake-chip" data-accessory="${a}">${a}</button>`).join('')}
           </div>
-          <p class="intake-note">اضغط لاختيار ما تم استلامه. لا تختار شيئًا إن لم يُستلم أي إكسسوار.</p>
         </section>
 
         <section class="intake-card">
@@ -2631,150 +2849,133 @@
         <section class="intake-card">
           <header class="intake-card-head"><span>💰</span><h4>التكلفة والتواريخ</h4></header>
           <div class="intake-row">
-            <label>تكلفة تقديرية
-              <input id="intakeEstimate" type="number" min="0" max="1000000" step="1" value="0" inputmode="numeric">
-            </label>
-            <label>عربون مدفوع
-              <input id="intakeDeposit" type="number" min="0" max="1000000" step="1" value="0" inputmode="numeric">
-            </label>
+            <label>تكلفة تقديرية<input id="intakeEstimate" type="number" min="0" max="1000000" value="0" inputmode="numeric"></label>
+            <label>عربون مدفوع<input id="intakeDeposit" type="number" min="0" max="1000000" value="0" inputmode="numeric"></label>
           </div>
           <div class="intake-row">
-            <label>تاريخ الاستلام *
-              <input id="intakeDate" type="date" required>
-            </label>
-            <label>موعد التسليم
-              <input id="intakeDue" type="date">
-            </label>
+            <label>تاريخ الاستلام *<input id="intakeDate" type="date"></label>
+            <label>موعد التسليم<input id="intakeDue" type="date"></label>
           </div>
+          ${intake.parts.length ? `<div class="intake-parts-hint">
+            <b>قطع مسعّرة لهذا الموديل</b>
+            <div class="intake-part-chips">${intake.parts.slice(0, 8).map(p =>
+              `<button type="button" class="intake-part-chip" data-part-price="${escapeHtml(p.price)}">${escapeHtml(p.issue)} · ${escapeHtml(p.price)}</button>`).join('')}</div>
+          </div>` : ''}
         </section>
 
         <section class="intake-card">
           <header class="intake-card-head"><span>🛠️</span><h4>الفني المسؤول</h4></header>
-          <label>اختر الفني *
-            <select id="intakeTechnician" required>
-              <option value="">— اختر المسؤول عن الجهاز —</option>
-              ${intakeState.technicians.map(t => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.name)}${t.job ? ' — ' + escapeHtml(t.job) : ''}</option>`).join('')}
-            </select>
-          </label>
+          <select id="intakeTechnician">
+            <option value="">— اختر المسؤول —</option>
+            ${intake.technicians.map(t => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.name)}${t.job ? ' — ' + escapeHtml(t.job) : ''}</option>`).join('')}
+          </select>
         </section>
 
         <div class="intake-actions">
-          <button type="submit" class="primary-btn" id="intakeSubmit">+ إنشاء البطاقة</button>
-          <button type="button" class="secondary-btn" id="intakeCancel">إلغاء</button>
+          <button type="button" class="primary-btn" id="intakeSubmit">+ إنشاء البطاقة</button>
+          <button type="button" class="secondary-btn" id="intakeBack3">← رجوع</button>
         </div>
         <p id="intakeMessage" class="inline-message hidden" aria-live="polite"></p>
-      </form>`;
+      </div>`;
 
-      // Default the intake date to today.
       content.querySelector('#intakeDate').value = new Date().toISOString().slice(0, 10);
+      content.querySelector('#intakeBack3').addEventListener('click', () => { intake.step = 3; renderIntakeStep(content); });
 
-      wireIntakeForm(content);
+      wireIntakeDetails(content);
     } catch (e) {
       content.innerHTML = `<div class="manager-load-error">${escapeHtml(e.message)}</div>`;
     }
   }
 
-  function wireIntakeForm(content) {
-    const phone = content.querySelector('#intakeCustomerPhone');
-    const hint = content.querySelector('#intakeCustomerHint');
-
-    // Look the customer up as soon as the phone looks complete.
-    let lookupTimer = null;
-    phone.addEventListener('input', () => {
-      clearTimeout(lookupTimer);
-      const value = phone.value.replace(/[^\d]/g, '');
-      phone.value = value;
-      if (value.length < 7) { hint.classList.add('hidden'); return; }
-      lookupTimer = setTimeout(async () => {
-        try {
-          const res = await api('customers_search', { query: value });
-          const hit = (res.customers || [])[0];
-          if (hit) {
-            intakeState.customerId = hit.id;
-            if (!content.querySelector('#intakeCustomerName').value.trim()) {
-              content.querySelector('#intakeCustomerName').value = hit.name;
-            }
-            hint.textContent = `عميل مسجّل: ${hit.name} · زارنا ${hit.visits} مرة`;
-            hint.classList.remove('hidden');
-            hint.classList.add('is-found');
-          } else {
-            intakeState.customerId = '';
-            hint.textContent = 'عميل جديد — سيُضاف تلقائيًا عند الحفظ.';
-            hint.classList.remove('hidden');
-            hint.classList.remove('is-found');
-          }
-        } catch (_) { /* lookup is best-effort */ }
-      }, 400);
-    });
-
+  function wireIntakeDetails(content) {
+    // Problem chips append to the description.
     content.querySelectorAll('[data-problem]').forEach(chip => {
       chip.addEventListener('click', () => {
         const box = content.querySelector('#intakeProblem');
         const text = chip.dataset.problem;
         box.value = box.value.trim() ? box.value.trim() + ' · ' + text : text;
-        intakeState.problemPicked = text;
-        content.querySelectorAll('[data-problem]').forEach(c => c.classList.toggle('is-on', c === chip));
+        chip.classList.toggle('is-on');
       });
     });
 
+    // Accessories toggle.
     content.querySelectorAll('[data-accessory]').forEach(chip => {
       chip.addEventListener('click', () => {
-        const value = chip.dataset.accessory;
         chip.classList.toggle('is-on');
-        const set = new Set(intakeState.accessories);
-        if (chip.classList.contains('is-on')) set.add(value); else set.delete(value);
-        intakeState.accessories = [...set];
+        const set = new Set(intake.accessories);
+        if (chip.classList.contains('is-on')) set.add(chip.dataset.accessory);
+        else set.delete(chip.dataset.accessory);
+        intake.accessories = [...set];
       });
     });
 
+    // Power state.
     content.querySelectorAll('[data-power]').forEach(btn => {
       btn.addEventListener('click', () => {
-        intakeState.powersOn = btn.dataset.power;
+        intake.powersOn = btn.dataset.power;
         content.querySelectorAll('[data-power]').forEach(b => b.classList.toggle('is-on', b === btn));
       });
     });
 
-    content.querySelector('#intakeCancel').addEventListener('click', closeModal);
+    // Inspection result buttons.
+    intake.checklist.forEach(item => { item.result = ''; });
+    content.querySelectorAll('[data-result]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const index = Number(btn.dataset.index);
+        const entry = intake.checklist.find(c => c.index === index);
+        if (entry) entry.result = btn.dataset.result;
+        const row = btn.closest('.intake-inspect-row');
+        row.querySelectorAll('[data-result]').forEach(b => b.classList.toggle('is-on', b === btn));
+        row.classList.toggle('has-issue', btn.dataset.result === 'مشكلة');
+      });
+    });
 
-    content.querySelector('#intakeForm').addEventListener('submit', async ev => {
-      ev.preventDefault();
+    // Clicking a priced part fills the estimate.
+    content.querySelectorAll('[data-part-price]').forEach(chip => {
+      chip.addEventListener('click', () => {
+        const value = String(chip.dataset.partPrice).replace(/[^\d.]/g, '');
+        if (value) content.querySelector('#intakeEstimate').value = value;
+        content.querySelectorAll('[data-part-price]').forEach(c => c.classList.toggle('is-on', c === chip));
+      });
+    });
+
+    content.querySelector('#intakeSubmit').addEventListener('click', async ev => {
+      const btn = ev.currentTarget;
       const message = content.querySelector('#intakeMessage');
-      const submit = content.querySelector('#intakeSubmit');
       const fail = text => {
         message.textContent = text;
         message.classList.remove('hidden');
-        submit.disabled = false;
-        submit.textContent = '+ إنشاء البطاقة';
+        btn.disabled = false;
+        btn.textContent = '+ إنشاء البطاقة';
         message.scrollIntoView({ block: 'center', behavior: 'smooth' });
       };
 
-      const customerName = content.querySelector('#intakeCustomerName').value.trim();
-      const customerPhone = content.querySelector('#intakeCustomerPhone').value.trim();
-      const brand = content.querySelector('#intakeBrand').value;
       const problem = content.querySelector('#intakeProblem').value.trim();
       const technicianId = content.querySelector('#intakeTechnician').value;
-
-      if (customerName.length < 2) return fail('اكتب اسم العميل.');
-      if (customerPhone.replace(/\D/g, '').length < 7) return fail('اكتب رقم هاتف صحيح.');
-      if (!brand) return fail('اختر ماركة الجهاز.');
       if (problem.length < 3) return fail('اكتب وصف المشكلة.');
-      if (!intakeState.powersOn) return fail('حدد هل الجهاز يعمل أم لا.');
+      if (!intake.powersOn) return fail('حدد هل الجهاز يعمل أم لا.');
       if (!technicianId) return fail('اختر الفني المسؤول.');
 
-      submit.disabled = true;
-      submit.textContent = 'جارٍ الإنشاء...';
+      const issues = intake.checklist.filter(c => c.result === 'مشكلة').map(c => c.name);
+      const fullProblem = issues.length
+        ? problem + '\n\nمشاكل الفحص: ' + issues.join(' · ')
+        : problem;
+
+      btn.disabled = true;
+      btn.textContent = 'جارٍ الإنشاء...';
       message.classList.add('hidden');
 
       try {
         const res = await api('device_intake_create', {
-          customerName, customerPhone, customerId: intakeState.customerId,
-          brand,
-          model: content.querySelector('#intakeModel').value.trim(),
-          imei: content.querySelector('#intakeImei').value.trim(),
-          pin: content.querySelector('#intakePin').value.trim(),
-          problem,
-          accessories: intakeState.accessories,
-          powersOn: intakeState.powersOn,
+          customerName: intake.customer.name,
+          customerPhone: intake.customer.phone,
+          customerAddress: intake.customer.address || '',
+          family: intake.family,
+          brand: intake.familyLabel,
+          model: intake.model,
+          problem: fullProblem,
+          accessories: intake.accessories,
+          powersOn: intake.powersOn,
           estimate: Number(content.querySelector('#intakeEstimate').value || 0),
           deposit: Number(content.querySelector('#intakeDeposit').value || 0),
           dueDate: content.querySelector('#intakeDue').value,
@@ -2787,119 +2988,6 @@
         fail(e.message);
       }
     });
-  }
-
-
-  /* ============================================================
-   * BUTTON VISIBILITY CONTROL (Super Admin)
-   * Choose which home tiles each technician sees.
-   * ============================================================ */
-
-  async function openButtonsMatrix() {
-    const panel = managerPanel('التحكم في أزرار الفنيين', '<div class="manager-loading">جاري تحميل الأزرار...</div>');
-    const content = panel.querySelector('.manager-module-content');
-    await renderButtonsMatrix(content);
-  }
-
-  async function renderButtonsMatrix(content, selectedId) {
-    content.innerHTML = '<div class="manager-loading">جاري تحميل الأزرار...</div>';
-    try {
-      const data = await api('buttons_matrix_get');
-      const employees = data.employees || [];
-      const buttons = data.buttons || [];
-
-      const groups = {};
-      buttons.forEach(b => {
-        if (!groups[b.group]) groups[b.group] = [];
-        groups[b.group].push(b);
-      });
-
-      const current = employees.find(e => e.employeeId === selectedId) || employees[0];
-      const visibleCount = current ? buttons.filter(b => current.visible[b.key] !== false).length : 0;
-
-      content.innerHTML = `<div class="notify-matrix">
-        <div class="notify-intro">
-          <b>تحكم في أزرار كل فني</b>
-          <p>أخفِ أي زر عن أي فني. الإخفاء يمنع الزر من الظهور في تطبيقه فقط، ولا يغيّر صلاحيات الخادم.</p>
-        </div>
-
-        <label class="notify-picker">الفني
-          <select id="btnPickEmployee">
-            ${employees.map(e => `<option value="${escapeHtml(e.employeeId)}"${current && e.employeeId === current.employeeId ? ' selected' : ''}>${escapeHtml(e.name)}${e.job ? ' — ' + escapeHtml(e.job) : ''}</option>`).join('')}
-          </select>
-        </label>
-
-        ${current ? `
-          <div class="btn-matrix-summary">
-            <span>${visibleCount} من ${buttons.length} زر ظاهر</span>
-          </div>
-
-          <div class="notify-bulk">
-            <button type="button" class="secondary-btn" id="btnShowAll">إظهار الكل</button>
-            <button type="button" class="danger-btn" id="btnHideAll">إخفاء الكل</button>
-          </div>
-
-          ${Object.keys(groups).map(group => `<div class="notify-group">
-            <h5 class="price-group-title">${escapeHtml(group)}</h5>
-            <div class="btn-matrix-list">
-              ${groups[group].map(b => {
-                const isVisible = current.visible[b.key] !== false;
-                return `<label class="btn-matrix-row${isVisible ? '' : ' is-hidden'}">
-                  <span>${escapeHtml(b.label)}</span>
-                  <span class="notify-switch">
-                    <input type="checkbox" data-btn-toggle data-emp="${escapeHtml(current.employeeId)}" data-button="${escapeHtml(b.key)}"${isVisible ? ' checked' : ''}>
-                    <i></i>
-                  </span>
-                </label>`;
-              }).join('')}
-            </div>
-          </div>`).join('')}
-        ` : '<p class="manager-empty-state">لا يوجد فنيون نشطون.</p>'}
-      </div>`;
-
-      content.querySelector('#btnPickEmployee')?.addEventListener('change', ev => {
-        renderButtonsMatrix(content, ev.target.value);
-      });
-      content.querySelector('#btnShowAll')?.addEventListener('click', () => bulkButtons(content, current.employeeId, true));
-      content.querySelector('#btnHideAll')?.addEventListener('click', () => bulkButtons(content, current.employeeId, false));
-
-      content.querySelectorAll('[data-btn-toggle]').forEach(box => {
-        box.addEventListener('change', async () => {
-          const d = box.dataset;
-          box.disabled = true;
-          try {
-            await api('buttons_matrix_set', {
-              employeeId: d.emp, button: d.button, visible: box.checked
-            });
-            const row = box.closest('.btn-matrix-row');
-            if (row) row.classList.toggle('is-hidden', !box.checked);
-            updateBtnSummary(content, buttons.length);
-          } catch (e) {
-            box.checked = !box.checked;
-            if (tg?.showAlert) tg.showAlert(e.message);
-          } finally { box.disabled = false; }
-        });
-      });
-    } catch (e) {
-      content.innerHTML = `<div class="manager-load-error">${escapeHtml(e.message)}</div>`;
-    }
-  }
-
-  function updateBtnSummary(content, total) {
-    const el = content.querySelector('.btn-matrix-summary span');
-    if (!el) return;
-    const on = content.querySelectorAll('[data-btn-toggle]:checked').length;
-    el.textContent = `${on} من ${total} زر ظاهر`;
-  }
-
-  async function bulkButtons(content, employeeId, visible) {
-    try {
-      await api('buttons_matrix_bulk', { employeeId, visible });
-      if (tg?.showAlert) tg.showAlert(visible ? 'تم إظهار كل الأزرار.' : 'تم إخفاء كل الأزرار.');
-      renderButtonsMatrix(content, employeeId);
-    } catch (e) {
-      if (tg?.showAlert) tg.showAlert(e.message);
-    }
   }
 
 
