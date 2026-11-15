@@ -2796,3 +2796,36 @@ main{display:grid;gap:14px;min-width:0}
 }
 [data-theme="light"] .intake-inspect-actions button,
 [data-theme="light"] .intake-part-chip{background:rgba(15,35,55,.045)}
+
+/* ===================================================================
+   V1.18 — MODEL GENERATION CARDS (intake mirrors the price book)
+   =================================================================== */
+.intake-gen-grid{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:8px;
+}
+.intake-gen-card{
+  display:grid;
+  justify-items:center;
+  gap:3px;
+  padding:15px 10px;
+  border-radius:var(--r-md);
+  border:1px solid var(--line);
+  background:linear-gradient(150deg,rgba(255,255,255,.045),rgba(255,255,255,.012));
+  color:var(--text);
+  cursor:pointer;
+  transition:border-color .14s,background .14s,transform .14s;
+}
+.intake-gen-card:hover{border-color:var(--brand-line);background:var(--brand-wash)}
+.intake-gen-card:active{transform:scale(.97)}
+.intake-gen-card b{font-size:12.5px;line-height:1.4;white-space:normal;overflow-wrap:anywhere}
+.intake-gen-card small{font-size:10px;color:var(--text-3)}
+
+/* A stuck card must never appear empty or oversized on small screens. */
+.intake-model-list{max-height:min(52vh,380px)}
+
+[data-theme="light"] .intake-gen-card{
+  background:linear-gradient(150deg,rgba(15,35,55,.035),rgba(15,35,55,.012));
+}
+[data-theme="light"] .intake-gen-card:hover{background:var(--brand-wash)}
