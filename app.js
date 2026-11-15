@@ -434,10 +434,29 @@
       try {
         const [logs,settings,employees]=await Promise.all([api('list',{entity:'notifications'}),api('list',{entity:'notificationSettings'}),canManageNotifications?api('list',{entity:'employees'}):Promise.resolve([])]);
         const sendForm=canManageNotifications?`<form id="managerNoticeForm" class="manager-staff-form"><h4>إرسال إشعار للمهندسين</h4><label>المستلم<select name="recipient"><option value="all">جميع المهندسين النشطين</option>${employees.filter(e=>String(e['حالة الحساب']||'نشط')==='نشط'&&String(e['الحالة']||'نشط')==='نشط').map(e=>`<option value="${escapeHtml(e['Chat ID'])}">${escapeHtml(e['اسم الموظف']||e['Chat ID'])}</option>`).join('')}</select></label><label>نص الإشعار<textarea name="message" rows="4" maxlength="3900" required placeholder="اكتب التنبيه الذي تريد إرساله..."></textarea></label><button class="primary-btn" type="submit">إرسال الإشعار</button><p class="manager-form-error hidden" id="managerNoticeResult"></p></form>`:'<p class="manager-note">صلاحية المشرف تتيح الاطلاع على السجل والإعدادات فقط. إرسال الإشعارات وتغيير الإعدادات متاحان للمدير وSuper Admin.</p>';
-        content.innerHTML=`${sendForm}<h4>إعدادات التنبيه</h4>${settings.map(r=>{const enabled=String(r['القيمة']||'').toUpperCase()==='TRUE';return `<article class="manager-row"><div><b>${escapeHtml(r['الإعداد']||'')}</b><small>${escapeHtml(r['الوصف']||'')}</small></div>${canManageNotifications?`<label class="manager-switch"><input type="checkbox" data-notification-setting="${escapeHtml(r['الإعداد'])}" ${enabled?'checked':''}><span>${enabled?'مفعل':'متوقف'}</span></label>`:`<span class="status-pill">${enabled?'مفعل':'متوقف'}</span>`}</article>`;}).join('')||'<p class="muted">لا توجد إعدادات مسجلة.</p>'}<h4>سجل الإشعارات — آخر 30</h4>${logs.slice(-30).reverse().map(r=>`<article class="manager-row"><b>${escapeHtml(r['نوع الإشعار']||'إشعار')}</b><span class="status-pill">${escapeHtml(r['الحالة']||'')}</span><small>${escapeHtml(r['المستلم']||'')} · ${escapeHtml(r['التاريخ والوقت']||'')}</small></article>`).join('')||'<p class="muted">لا توجد سجلات إشعارات.</p>'}`;
+        content.innerHTML=`${sendForm}${canManageNotifications?`<div class="notification-tools"><button type="button" class="primary-btn" id="notificationsEnableAll">تفعيل كل الإشعارات</button><button type="button" class="secondary-btn" id="notificationsTest">إرسال رسالة اختبار</button></div>`:''}<h4>إعدادات التنبيه</h4>${settings.map(r=>{const enabled=String(r['القيمة']||'').toUpperCase()==='TRUE';return `<article class="manager-row"><div><b>${escapeHtml(r['الإعداد']||'')}</b><small>${escapeHtml(r['الوصف']||'')}</small></div>${canManageNotifications?`<label class="manager-switch"><input type="checkbox" data-notification-setting="${escapeHtml(r['الإعداد'])}" ${enabled?'checked':''}><span>${enabled?'مفعل':'متوقف'}</span></label>`:`<span class="status-pill">${enabled?'مفعل':'متوقف'}</span>`}</article>`;}).join('')||'<p class="muted">لا توجد إعدادات مسجلة.</p>'}<h4>سجل الإشعارات — آخر 30</h4>${logs.slice(-30).reverse().map(r=>`<article class="manager-row"><b>${escapeHtml(r['نوع الإشعار']||'إشعار')}</b><span class="status-pill">${escapeHtml(r['الحالة']||'')}</span><small>${escapeHtml(r['المستلم']||'')} · ${escapeHtml(r['التاريخ والوقت']||'')}</small></article>`).join('')||'<p class="muted">لا توجد سجلات إشعارات.</p>'}`;
         if(canManageNotifications) {
           content.querySelector('#managerNoticeForm').addEventListener('submit',async ev=>{ev.preventDefault();const form=ev.currentTarget,btn=form.querySelector('button[type=submit]'),result=form.querySelector('#managerNoticeResult');btn.disabled=true;result.classList.add('hidden');try{const fd=new FormData(form);const res=await api('notification_send',{recipient:fd.get('recipient'),message:fd.get('message')});result.textContent=`تم الإرسال إلى ${res.sent} مهندس، وتعذر الإرسال إلى ${res.failed}.`;result.classList.remove('hidden');form.elements.message.value='';}catch(e){result.textContent=e.message;result.classList.remove('hidden');}finally{btn.disabled=false;}});
           content.querySelectorAll('[data-notification-setting]').forEach(input=>input.addEventListener('change',async()=>{input.disabled=true;try{await api('notification_setting',{key:input.dataset.notificationSetting,enabled:input.checked});input.nextElementSibling.textContent=input.checked?'مفعل':'متوقف';}catch(e){input.checked=!input.checked;if(tg?.showAlert)tg.showAlert(e.message);}finally{input.disabled=false;}}));
+          const enableAll=content.querySelector('#notificationsEnableAll');
+          if(enableAll) enableAll.addEventListener('click',async()=>{
+            enableAll.disabled=true;
+            try{
+              const res=await api('notifications_enable_all');
+              if(tg?.showAlert) tg.showAlert(`تم تفعيل ${res.enabled} نوع إشعار.`);
+              content.querySelectorAll('[data-notification-setting]').forEach(i=>{i.checked=true;if(i.nextElementSibling)i.nextElementSibling.textContent='مفعل';});
+            }catch(e){if(tg?.showAlert)tg.showAlert(e.message);}
+            finally{enableAll.disabled=false;}
+          });
+          const testBtn=content.querySelector('#notificationsTest');
+          if(testBtn) testBtn.addEventListener('click',async()=>{
+            testBtn.disabled=true;
+            try{
+              const res=await api('notifications_test');
+              if(tg?.showAlert) tg.showAlert(res.message||(res.delivered?'تم الإرسال.':'تعذر الإرسال.'));
+            }catch(e){if(tg?.showAlert)tg.showAlert(e.message);}
+            finally{testBtn.disabled=false;}
+          });
         }
       } catch(e) { content.innerHTML=`<div class="manager-load-error">${escapeHtml(e.message)}</div>`; } return;
     }
@@ -1732,6 +1751,22 @@
     await renderTasksList(content);
   }
 
+  /* Replacing innerHTML resets the panel scroll position, which made the
+   * "إرسال للمراجعة" button jump out of reach while scrolling. Every task
+   * re-render now restores the previous scroll offset. */
+  /* Restores the panel scroll offset after an async re-render.
+   * The previous version restored synchronously, before renderTasksList had
+   * finished its API call, so the list reset to the top and the action
+   * buttons jumped out of reach. This waits for the render promise. */
+  async function keepScroll(content, render) {
+    const top = content ? content.scrollTop : 0;
+    await render();
+    if (!content) return;
+    content.scrollTop = top;
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    content.scrollTop = top;
+  }
+
   async function renderTasksList(content, filter) {
     content.innerHTML = '<div class="manager-loading">جاري تحميل مهامك...</div>';
     try {
@@ -1769,10 +1804,10 @@
       </div>`;
 
       content.querySelectorAll('[data-task-filter]').forEach(btn =>
-        btn.addEventListener('click', () => renderTasksList(content, btn.dataset.taskFilter))
+        btn.addEventListener('click', async () => { await keepScroll(content, () => renderTasksList(content, btn.dataset.taskFilter)); })
       );
       content.querySelectorAll('[data-task-id]').forEach(btn =>
-        btn.addEventListener('click', () => openTaskDetail(content, btn.dataset.taskId))
+        btn.addEventListener('click', async () => { await keepScroll(content, () => openTaskDetail(content, btn.dataset.taskId)); })
       );
     } catch (e) {
       content.innerHTML = `<div class="manager-load-error">${escapeHtml(e.message)}</div>`;
@@ -1813,6 +1848,8 @@
         </label>
         <label>رابط الدليل (اختياري)<input id="taskProofInput" type="url" maxlength="500" placeholder="رابط صورة أو فيديو أو منشور" value="${escapeHtml(task.proofUrl || '')}"></label>
         <label>ملاحظتك<textarea id="taskNoteInput" rows="3" maxlength="1000" placeholder="اكتب ما تم إنجازه...">${escapeHtml(task.employeeNote || '')}</textarea></label>
+      </div>
+      <div class="task-actions-sticky">
         <button type="button" class="primary-btn" id="taskSubmitReview">إرسال للمراجعة</button>
         <button type="button" class="secondary-btn" id="taskSaveDraft">حفظ التقدم فقط</button>
       </div>` : ''}
@@ -1840,7 +1877,7 @@
           const res = await api('task_update', collect('قيد التنفيذ'));
           if (tg?.showAlert) tg.showAlert(res.message || 'تم حفظ التقدم.');
           refreshTasksBadge();
-          renderTasksList(content);
+          await keepScroll(content, () => renderTasksList(content));
         } catch (e) {
           if (tg?.showAlert) tg.showAlert(e.message);
           btn.disabled = false;
@@ -1854,7 +1891,7 @@
           const res = await api('task_update', collect('بانتظار المراجعة'));
           if (tg?.showAlert) tg.showAlert(res.message || 'تم إرسال المهمة للمراجعة.');
           refreshTasksBadge();
-          renderTasksList(content);
+          await keepScroll(content, () => renderTasksList(content));
         } catch (e) {
           if (tg?.showAlert) tg.showAlert(e.message);
           btn.disabled = false;

@@ -51,6 +51,8 @@ function doGet() {
  */
 function doPost(e) {
   const requestId = Utilities.getUuid();
+  const startedAt = Date.now();
+  let actionForTiming = 'unknown';
 
   try {
     const rawBody = e && e.postData && e.postData.contents
@@ -81,6 +83,7 @@ function doPost(e) {
     }
 
     const action = String(body.action || 'bootstrap');
+    actionForTiming = action;
 
     // Profit from the read cache while resolving the profile too: the two
     // sheets it reads are reused by the handler below. Mutating actions stay
@@ -281,6 +284,12 @@ function doPost(e) {
       case 'repair_price_models':
         data = repairPriceModelsMini_(body);
         break;
+      case 'repair_price_catalog':
+        data = repairPriceCatalogMini_(body);
+        break;
+      case 'repair_price_parts':
+        data = repairPricePartsMini_(body);
+        break;
       case 'repair_price_search':
         data = repairPriceSearchMini_(body);
         break;
@@ -289,6 +298,28 @@ function doPost(e) {
         break;
       case 'repair_price_issues':
         data = repairPriceIssuesMini_(body);
+        break;
+
+      case 'tasks_list':
+        data = tasksListMini_(profile, body);
+        break;
+      case 'task_update':
+        data = tasksUpdateMini_(profile, body);
+        break;
+      case 'task_create':
+        data = tasksCreateMini_(profile, body);
+        break;
+      case 'task_review':
+        data = tasksReviewMini_(profile, body);
+        break;
+      case 'task_seed_marketing':
+        data = tasksSeedMarketingMini_(profile);
+        break;
+      case 'notifications_enable_all':
+        data = notificationsEnableAllMini_(profile);
+        break;
+      case 'notifications_test':
+        data = notificationsTestMini_(profile);
         break;
 
       case 'complaint_create':
@@ -327,21 +358,27 @@ function doPost(e) {
         });
     }
 
+    const elapsedMs = Date.now() - startedAt;
+    if (elapsedMs >= 700) console.warn('MOBI_API_SLOW action=' + action + ' elapsedMs=' + elapsedMs + ' requestId=' + requestId);
     return json_({
       ok: true,
       data: data,
-      requestId: requestId
+      requestId: requestId,
+      elapsedMs: elapsedMs
     });
 
   } catch (err) {
     logApiError_('MINI_APP_API_ERROR', err, requestId);
+    const elapsedMs = Date.now() - startedAt;
+    if (elapsedMs >= 700) console.warn('MOBI_API_SLOW action=' + actionForTiming + ' elapsedMs=' + elapsedMs + ' requestId=' + requestId);
 
     const safeMessage = err && err.message ? String(err.message) : '';
     const safeCode = /^[A-Z][A-Z0-9_:-]{2,120}$/.test(safeMessage) ? safeMessage : 'INTERNAL_ERROR';
     return json_({
       ok: false,
       error: safeCode,
-      requestId: requestId
+      requestId: requestId,
+      elapsedMs: elapsedMs
     });
   }
 }
@@ -573,7 +610,31 @@ function bootstrap_(profile) {
         return status.indexOf('مغلق') < 0 &&
           status.indexOf('تم الحل') < 0;
       }).length
-    }
+    },
+    tasks: (function() {
+      try {
+        var taskSheet = spreadsheet_().getSheetByName(MH_TASK_SHEET_);
+        if (!taskSheet) return { open: 0, overdue: 0, review: 0 };
+        var rows = rowsAsObjects_(spreadsheet_(), MH_TASK_SHEET_).filter(function(r) {
+          return String(r['Chat ID'] || '').trim() === profile.chatId;
+        });
+        var today = mhToday_();
+        return {
+          open: rows.filter(function(r) {
+            return ['جديدة', 'قيد التنفيذ', 'بانتظار المراجعة'].indexOf(String(r['الحالة'] || '').trim()) >= 0;
+          }).length,
+          overdue: rows.filter(function(r) {
+            var due = mhDate_(r['تاريخ الاستحقاق']);
+            return !!due && due < today && ['مكتملة', 'ملغاة'].indexOf(String(r['الحالة'] || '').trim()) < 0;
+          }).length,
+          review: rows.filter(function(r) {
+            return String(r['الحالة'] || '').trim() === 'بانتظار المراجعة';
+          }).length
+        };
+      } catch (e) {
+        return { open: 0, overdue: 0, review: 0 };
+      }
+    })()
   };
 }
 
@@ -674,6 +735,7 @@ function managerDashboard_(profile) {
     requests: ['super_admin','admin','supervisor'].includes(role),
     finance: ['super_admin','finance'].includes(role),
     overtime: ['super_admin','admin','finance'].includes(role),
+    tasks: ['super_admin','admin','supervisor'].includes(role),
     system: ['super_admin','admin'].includes(role),
     notifications: ['super_admin','admin','supervisor'].includes(role),
     managers: role === 'super_admin'
@@ -1480,8 +1542,9 @@ const MH_READ_ONLY_ACTIONS_ = [
   'device_registration_options', 'device_list', 'device_detail',
   'device_staff', 'device_inspection_catalog', 'device_inspection_get',
   'my_shifts', 'complaint_thread', 'reward_summary',
-  'repair_price_categories', 'repair_price_models',
-  'repair_price_search', 'repair_price_issues'
+  'tasks_list',
+  'repair_price_categories', 'repair_price_models', 'repair_price_catalog', 'repair_price_parts',
+  'repair_price_search', 'repair_price_search_all', 'repair_price_issues'
 ];
 let MH_READ_CACHE_ENABLED_ = false;
 
@@ -1774,6 +1837,8 @@ function decideCashRequest_(profile, body) {
   if (!Number.isInteger(rowNum)||rowNum<2||!['مقبول','مرفوض','تم الصرف'].includes(decision)) throw new Error('INVALID_DECISION');
   const sh=mhSheet_(MH.SHEETS.cash), map=mhAssertHeaders_(sh,MH_CASH.HEADERS);
   if(rowNum>sh.getLastRow()) throw new Error('CASH_REQUEST_NOT_FOUND');
+
+  let notifyChatId = '', notifyAmount = '';
   const lock=LockService.getScriptLock(); lock.waitLock(15000);
   try {
     const current=String(sh.getRange(rowNum,map['الحالة']).getDisplayValue()).trim();
@@ -1795,8 +1860,14 @@ function decideCashRequest_(profile, body) {
     if(map['تاريخ آخر تحديث']) sh.getRange(rowNum,map['تاريخ آخر تحديث']).setValue(mhNow_());
     if(map['Chat ID آخر مدير قرار']) sh.getRange(rowNum,map['Chat ID آخر مدير قرار']).setValue(profile.chatId);
     if(map['اسم آخر مدير قرار']) sh.getRange(rowNum,map['اسم آخر مدير قرار']).setValue(mhManagerName_(profile));
-    return {decided:true,status:decision};
+
+    notifyChatId = String(sh.getRange(rowNum,map['Chat ID']).getDisplayValue()).trim();
+    notifyAmount = String(sh.getRange(rowNum,map['المبلغ المطلوب بالجنيه']).getDisplayValue()).trim();
   } finally { lock.releaseLock(); }
+
+  // Outside the lock: a Telegram failure must never undo a committed decision.
+  mhNotifyCashDecision_(notifyChatId, decision, notifyAmount, note);
+  return {decided:true,status:decision};
 }
 
 function submitCashSettlement_(profile, body) {
@@ -1840,16 +1911,19 @@ function decideCashSettlement_(profile, body) {
   if (!Number.isInteger(rowNum) || rowNum < 2 || !['مقبول','مرفوض'].includes(decision)) throw new Error('INVALID_DECISION');
   const sh = mhSheet_(MH.SHEETS.cash), map = mhAssertHeaders_(sh, MH_CASH.HEADERS);
   if (rowNum > sh.getLastRow()) throw new Error('CASH_REQUEST_NOT_FOUND');
+  let notifyChatId = '', notifyReturned = 0, notifyExtra = 0;
   const lock = LockService.getScriptLock(); lock.waitLock(15000);
   try {
     const get = h => sh.getRange(rowNum,map[h]).getDisplayValue().trim();
     if (get('حالة التسوية') !== 'بانتظار مراجعة التسوية') throw new Error('CASH_ALREADY_REVIEWED');
+    notifyChatId = get('Chat ID');
     if (decision === 'مرفوض') {
       sh.getRange(rowNum,map['حالة التسوية']).setValue('مرفوضة - تحتاج مراجعة');
       sh.getRange(rowNum,map['حالة العهدة']).setValue('عهدة مفتوحة');
     } else {
       const returned = Number(sh.getRange(rowNum,map['المبلغ المطلوب إرجاعه بالجنيه']).getValue()) || 0;
       const extra = Number(sh.getRange(rowNum,map['المبلغ الإضافي المستحق للموظف بالجنيه']).getValue()) || 0;
+      notifyReturned = returned; notifyExtra = extra;
       sh.getRange(rowNum,map['حالة التسوية']).setValue('تم اعتماد التسوية');
       if (returned > 0) sh.getRange(rowNum,map['حالة العهدة']).setValue('بانتظار تأكيد استلام المتبقي');
       else if (extra > 0) sh.getRange(rowNum,map['حالة العهدة']).setValue('بانتظار صرف التعويض');
@@ -1859,8 +1933,9 @@ function decideCashSettlement_(profile, body) {
     if (map['تاريخ آخر تحديث']) sh.getRange(rowNum,map['تاريخ آخر تحديث']).setValue(mhNow_());
     if (map['Chat ID آخر مدير قرار']) sh.getRange(rowNum,map['Chat ID آخر مدير قرار']).setValue(profile.chatId);
     if (map['اسم آخر مدير قرار']) sh.getRange(rowNum,map['اسم آخر مدير قرار']).setValue(mhManagerName_(profile));
-    return {decided:true,status:decision};
   } finally { lock.releaseLock(); }
+  mhNotifySettlementDecision_(notifyChatId, decision, notifyReturned, notifyExtra);
+  return {decided:true,status:decision};
 }
 
 function confirmCashReturn_(profile, body) {
@@ -1947,6 +2022,14 @@ function createLeaveRequest_(profile, body) {
   try {
     sh.appendRow([id,mhNow_(),profile.chatId,profile.name,type,date,from,to,reason,MH_REQUESTS.PENDING_LEAVE,'','','',days,endDate,'','']);
   } finally { lock.releaseLock(); }
+  mhNotifyManagement_(
+    '📩 طلب إذن جديد بانتظار المراجعة\n━━━━━━━━━━━━━━━━━━\n' +
+    '👤 ' + profile.name + '\n' +
+    '🏷 ' + type + ' · ' + date + '\n' +
+    (reason ? '📝 ' + reason.slice(0, 200) + '\n' : '') +
+    '━━━━━━━━━━━━━━━━━━\nافتح لوحة الإدارة ← طلبات المهندسين.',
+    'طلب إذن جديد'
+  );
   return {submitted:true, requestId:id, status:MH_REQUESTS.PENDING_LEAVE, message:'تم إرسال طلب الإذن. لا يعتبر معتمدًا قبل موافقة الإدارة.'};
 }
 function decideEmployeeRequest_(profile, body) {
@@ -2002,6 +2085,15 @@ function decideLeaveRequest_(profile, body) {
       absRows.forEach(a=>{const d=mhIsoDate_(a['التاريخ']); if(String(a['Chat ID']).trim()===String(get('Chat ID')).trim() && d>=mhIsoDate_(get('تاريخ الإذن')) && d<=(mhIsoDate_(get('تاريخ نهاية الإذن'))||mhIsoDate_(get('تاريخ الإذن'))) && String(a['الحالة'])==='بانتظار مراجعة المدير') { if(absMap['الحالة']) absSh.getRange(a.__row,absMap['الحالة']).setValue('مغلق - إذن معتمد'); if(absMap['قرار المدير']) absSh.getRange(a.__row,absMap['قرار المدير']).setValue('إذن يوم كامل معتمد'); if(absMap['تاريخ القرار']) absSh.getRange(a.__row,absMap['تاريخ القرار']).setValue(mhNow_()); }});
     }
   } finally { lock.releaseLock(); }
+  // Notify the employee of the leave decision. Notification failures are
+  // logged to «سجل الإشعارات» and must not roll back the decision.
+  mhNotifyLeaveDecision_(
+    String(get('Chat ID')).trim(),
+    decision,
+    get('نوع الإذن'),
+    mhIsoDate_(get('تاريخ الإذن')) || get('تاريخ الإذن'),
+    note
+  );
   return {decided:true,status:decision,requestId:get('رقم الطلب')};
 }
 
@@ -2025,8 +2117,16 @@ function createComplaint_(profile, body) {
     set('رقم الشكوى',id);set('التاريخ والوقت',now);set('Chat ID',profile.chatId);set('اسم الموظف',profile.name);
     set('نوع الشكوى',type);set('الشخص المعني',person);set('تفاصيل الشكوى',details);set('الحالة','جديدة');set('تاريخ آخر تحديث',now);
     sh.appendRow(row);
-    return {submitted:true,complaintId:id,status:'جديدة',message:'تم تسجيل الشكوى.'};
   } finally {lock.releaseLock();}
+  mhNotifyManagement_(
+    '🗒 شكوى جديدة من ' + profile.name + '\n━━━━━━━━━━━━━━━━━━\n' +
+    '🏷 ' + type + '\n' +
+    (person ? '👤 بخصوص: ' + person + '\n' : '') +
+    '📝 ' + details.slice(0, 250) + '\n' +
+    '━━━━━━━━━━━━━━━━━━\nافتح لوحة الإدارة ← شكاوى المهندسين.',
+    'شكوى جديدة'
+  );
+  return {submitted:true,complaintId:id,status:'جديدة',message:'تم تسجيل الشكوى.'};
 }
 function complaintRecord_(profile, complaintId) {
   const sh=mhSheet_(MH.SHEETS.complaints); mhAssertHeaders_(sh,MH_COMPLAINT.HEADERS);
@@ -2061,6 +2161,10 @@ function complaintMessage_(profile, body) {
   sh.appendRow(['MSG-'+Utilities.getUuid(),id,profile.chatId,role,profile.name,message,now]);
   c.sheet.getRange(c.row,10).setValue(now);
   c.sheet.getRange(c.row,8).setValue(role==='موظف'?'بانتظار رد الإدارة':'بانتظار رد الموظف');
+  // A manager reply must reach the employee on Telegram, not only in the app.
+  if (role === 'مدير') {
+    mhNotifyComplaintReply_(String(c.data['Chat ID'] || '').trim(), id, 'بانتظار رد الموظف');
+  }
   return {sent:true,createdAt:now};
 }
 function complaintStatus_(profile, body) {
@@ -2126,23 +2230,28 @@ function createManualDeduction_(profile, body) {
   } finally {lock.releaseLock();}
 }
 function decideDeduction_(profile, body) {
-  mhRequireRole_(profile,MH_FINANCE.REVIEW_ROLES);
-  const rowNum=Number(body.row), decision=String(body.decision||'').trim(), note=String(body.note||'').trim();
-  if (!Number.isInteger(rowNum)||rowNum<2||!['معتمد','مرفوض'].includes(decision)||note.length>500) throw new Error('INVALID_DECISION');
-  const sh=mhSheet_(MH.SHEETS.deductions), map=mhAssertHeaders_(sh,MH_FINANCE.DEDUCTION_HEADERS);
-  if(rowNum>sh.getLastRow()) throw new Error('DEDUCTION_NOT_FOUND');
-  const lock=LockService.getScriptLock(); lock.waitLock(15000);
-  try {
-    if(sh.getRange(rowNum,map['الحالة']).getDisplayValue().trim()!=='بانتظار اعتماد المدير') throw new Error('DEDUCTION_ALREADY_REVIEWED');
-    const now=mhNow_();
-    sh.getRange(rowNum,map['الحالة']).setValue(decision);
-    sh.getRange(rowNum,map['تاريخ الاعتماد']).setValue(decision==='معتمد'?now:'');
-    sh.getRange(rowNum,map['منفذ الإجراء']).setValue(profile.chatId);
-    sh.getRange(rowNum,map['ملاحظات']).setValue(note);
-    if(decision==='مرفوض') sh.getRange(rowNum,map['سبب الرفض/الإلغاء']).setValue(note||'مرفوض من الإدارة');
+    mhRequireRole_(profile,MH_FINANCE.REVIEW_ROLES);
+    const rowNum=Number(body.row), decision=String(body.decision||'').trim(), note=String(body.note||'').trim();
+    if (!Number.isInteger(rowNum)||rowNum<2||!['معتمد','مرفوض'].includes(decision)||note.length>500) throw new Error('INVALID_DECISION');
+    const sh=mhSheet_(MH.SHEETS.deductions), map=mhAssertHeaders_(sh,MH_FINANCE.DEDUCTION_HEADERS);
+    if(rowNum>sh.getLastRow()) throw new Error('DEDUCTION_NOT_FOUND');
+    let notifyChatId='', notifyAmount='', notifyReason='';
+    const lock=LockService.getScriptLock(); lock.waitLock(15000);
+    try {
+      if(sh.getRange(rowNum,map['الحالة']).getDisplayValue().trim()!=='بانتظار اعتماد المدير') throw new Error('DEDUCTION_ALREADY_REVIEWED');
+      const now=mhNow_();
+      sh.getRange(rowNum,map['الحالة']).setValue(decision);
+      sh.getRange(rowNum,map['تاريخ الاعتماد']).setValue(decision==='معتمد'?now:'');
+      sh.getRange(rowNum,map['منفذ الإجراء']).setValue(profile.chatId);
+      sh.getRange(rowNum,map['ملاحظات']).setValue(note);
+      if(decision==='مرفوض') sh.getRange(rowNum,map['سبب الرفض/الإلغاء']).setValue(note||'مرفوض من الإدارة');
+      notifyChatId=String(sh.getRange(rowNum,map['Chat ID']).getDisplayValue()).trim();
+      notifyAmount=String(sh.getRange(rowNum,map['المبلغ بالجنيه']).getDisplayValue()).trim();
+      notifyReason=String(sh.getRange(rowNum,map['السبب']).getDisplayValue()).trim();
+    } finally {lock.releaseLock();}
+    mhNotifyDeductionDecision_(notifyChatId, decision, notifyAmount, notifyReason, note);
     return {decided:true,status:decision};
-  } finally {lock.releaseLock();}
-}
+  }
 function createRewardBonus_(profile, body) {
   mhRequireRole_(profile,MH_FINANCE.REVIEW_ROLES);
   const employee=financeEmployee_(String(body.employeeId||''));
@@ -3050,12 +3159,80 @@ function repairPriceCategoriesMini_() {
 function repairPriceModelsMini_(body) {
   const cfg=repairPriceConfigMini_(body.category), book=repairPriceBookMini_();
   const data=repairPriceCategoryDataMini_(book,cfg);
-  const models=data.models.map(function(m){
-    return {row:m.row,name:m.name,issueCount:m.issueCount,minPrice:m.minPrice,maxPrice:m.maxPrice};
-  });
-  const pageSize=12, totalPages=Math.max(1,Math.ceil(models.length/pageSize));
+  const part=String(body.part||'').trim();
+
+  let models;
+  if(part){
+    // A part was chosen: show only models that actually price this part,
+    // and expose that single price so the list answers one question.
+    models=[];
+    data.models.forEach(function(m){
+      const hit=m.issues.filter(function(i){return i.issue===part;})[0];
+      if(!hit) return;
+      models.push({row:m.row,name:m.name,part:part,price:hit.price,priceValue:hit.value,
+        issueCount:m.issueCount,minPrice:m.minPrice,maxPrice:m.maxPrice});
+    });
+    models.sort(function(a,b){
+      const av=a.priceValue===null?Infinity:a.priceValue;
+      const bv=b.priceValue===null?Infinity:b.priceValue;
+      return av-bv || String(a.name).localeCompare(String(b.name),'ar');
+    });
+  }else{
+    models=data.models.map(function(m){
+      return {row:m.row,name:m.name,issueCount:m.issueCount,minPrice:m.minPrice,maxPrice:m.maxPrice};
+    });
+  }
+
+  const pageSize=part?20:12, totalPages=Math.max(1,Math.ceil(models.length/pageSize));
   const page=Math.max(0,Math.min(Number(body.page)||0,totalPages-1));
-  return {category:cfg.key,label:cfg.label,models:models.slice(page*pageSize,(page+1)*pageSize),page,total:models.length,totalPages,pageSize};
+  return {category:cfg.key,label:cfg.label,part:part,models:models.slice(page*pageSize,(page+1)*pageSize),page,total:models.length,totalPages,pageSize};
+}
+
+// One workbook read for the complete model picker; avoids fetching each page
+// separately and rescanning the linked workbook several times.
+function repairPriceCatalogMini_(body) {
+  const cfg=repairPriceConfigMini_(body.category), book=repairPriceBookMini_();
+  const data=repairPriceCategoryDataMini_(book,cfg);
+  return {
+    category:cfg.key,
+    label:cfg.label,
+    total:data.models.length,
+    models:data.models.map(function(m){
+      return {row:m.row,name:m.name,issueCount:m.issueCount,minPrice:m.minPrice,maxPrice:m.maxPrice};
+    })
+  };
+}
+
+/**
+ * Part categories (the price columns) for one device family.
+ * Lets the Mini App ask "which part?" before listing 36 models.
+ */
+function repairPricePartsMini_(body) {
+  const cfg=repairPriceConfigMini_(body.category), book=repairPriceBookMini_();
+  const data=repairPriceCategoryDataMini_(book,cfg);
+
+  const byPart={};
+  data.models.forEach(function(m){
+    m.issues.forEach(function(item){
+      const key=item.issue;
+      if(!byPart[key]) byPart[key]={name:key,modelCount:0,minPrice:null,maxPrice:null};
+      const rec=byPart[key];
+      rec.modelCount++;
+      if(item.value!==null){
+        rec.minPrice=rec.minPrice===null?item.value:Math.min(rec.minPrice,item.value);
+        rec.maxPrice=rec.maxPrice===null?item.value:Math.max(rec.maxPrice,item.value);
+      }
+    });
+  });
+
+  const parts=Object.keys(byPart).map(function(k){return byPart[k];});
+  parts.sort(function(a,b){
+    const av=a.minPrice===null?Infinity:a.minPrice;
+    const bv=b.minPrice===null?Infinity:b.minPrice;
+    return av-bv || String(a.name).localeCompare(String(b.name),'ar');
+  });
+
+  return {category:cfg.key,label:cfg.label,parts:parts,total:parts.length,modelCount:data.models.length};
 }
 function repairPriceSearchMini_(body) {
   const query=String(body.query||'').trim();
@@ -3073,19 +3250,16 @@ function repairPriceSearchMini_(body) {
 function repairPriceIssuesMini_(body) {
   const cfg=repairPriceConfigMini_(body.category), rowNum=Number(body.row);
   if(!Number.isInteger(rowNum) || rowNum<cfg.startRow || rowNum>cfg.endRow) throw new Error('REPAIR_PRICE_MODEL_NOT_FOUND');
-  const book=repairPriceBookMini_(), sh=repairPriceSheetMini_(book,cfg);
-  const allowed=repairPriceModelsMiniForCategory_(book,cfg).some(x=>x.row===rowNum);
-  if(!allowed) throw new Error('REPAIR_PRICE_MODEL_NOT_FOUND');
-  const width=sh.getLastColumn();
-  const headers=sh.getRange(cfg.headerRow,1,1,width).getDisplayValues()[0];
-  const values=sh.getRange(rowNum,1,1,width).getDisplayValues()[0];
-  const issues=[];
-  for(let col=1;col<width;col++) {
-    const issue=String(headers[col]||'').replace(/[\u200e\u200f\uFEFF]/g,'').trim();
-    const price=String(values[col]||'').replace(/[\u200e\u200f\uFEFF]/g,'').trim();
-    if(issue && price) issues.push({issue:issue,price:price});
-  }
-  return {category:cfg.key,label:cfg.label,row:rowNum,model:String(values[0]||'').replace(/\uF8FF/g,'Apple').trim(),issues:issues};
+  const data=repairPriceCategoryDataMini_(repairPriceBookMini_(),cfg);
+  const model=data.models.find(function(item){return item.row===rowNum;});
+  if(!model) throw new Error('REPAIR_PRICE_MODEL_NOT_FOUND');
+  return {
+    category:cfg.key,
+    label:cfg.label,
+    row:rowNum,
+    model:model.name,
+    issues:model.issues.map(function(item){return {issue:item.issue,price:item.price};})
+  };
 }
 
 /**
@@ -3115,6 +3289,7 @@ function repairPriceSearchAllMini_(body) {
   const book = repairPriceBookMini_();
   const modelHits = [];
   const partHits = [];
+  const partGroups = {};
 
   MH_REPAIR_PRICE_CATEGORIES_.forEach(function(cfg) {
     const data = repairPriceCategoryDataMini_(book, cfg);
@@ -3135,6 +3310,17 @@ function repairPriceSearchAllMini_(body) {
       if (mode !== 'models') {
         model.issues.forEach(function(item) {
           if (!matches(item.issue)) return;
+          // Aggregate the same part name across models so the user can open
+          // one category instead of scrolling dozens of rows.
+          if (!partGroups[item.issue]) {
+            partGroups[item.issue] = { issue: item.issue, modelCount: 0, minPrice: null, maxPrice: null };
+          }
+          const group = partGroups[item.issue];
+          group.modelCount++;
+          if (item.value !== null) {
+            group.minPrice = group.minPrice === null ? item.value : Math.min(group.minPrice, item.value);
+            group.maxPrice = group.maxPrice === null ? item.value : Math.max(group.maxPrice, item.value);
+          }
           partHits.push({
             kind: 'part',
             category: cfg.key,
@@ -3168,10 +3354,18 @@ function repairPriceSearchAllMini_(body) {
   const totalPages = Math.max(1, Math.ceil(results.length / pageSize));
   const page = Math.max(0, Math.min(Number(body.page) || 0, totalPages - 1));
 
+  const groups = Object.keys(partGroups).map(function(k) { return partGroups[k]; });
+  groups.sort(function(a, b) {
+    const av = a.minPrice === null ? Infinity : a.minPrice;
+    const bv = b.minPrice === null ? Infinity : b.minPrice;
+    return av - bv || String(a.issue).localeCompare(String(b.issue), 'ar');
+  });
+
   return {
     query: query,
     mode: mode,
     results: results.slice(page * pageSize, (page + 1) * pageSize),
+    partGroups: groups,
     partCount: partHits.length,
     modelCount: modelHits.length,
     total: results.length,
@@ -3188,4 +3382,511 @@ function configureRepairPriceSourceOnceMini_() {
   if(missing.length) throw new Error('REPAIR_PRICE_SHEETS_MISSING:' + missing.join(','));
   PropertiesService.getScriptProperties().setProperty(MH_REPAIR_PRICE_PROPERTY_,MH_REPAIR_PRICE_SOURCE_ID_);
   return {configured:true,workbook:book.getName()};
+}
+
+/* =========================================================
+   V1.13 — TASKS (تسكاتي)
+   Assignment-driven tasks for technicians, created from the
+   manager dashboard or directly in the sheet. Read/write are
+   role-checked server-side; employees only ever see their own.
+========================================================= */
+const MH_TASK_HEADERS = [
+  'رقم المهمة','العنوان','التفاصيل','النوع','Chat ID','اسم الفني','الأولوية',
+  'تاريخ الاستحقاق','الحالة','نسبة الإنجاز','رابط الدليل','ملاحظة الفني',
+  'أنشأها Chat ID','أنشأها','تاريخ الإنشاء','تاريخ آخر تحديث','آخر تحديث بواسطة'
+];
+const MH_TASK_STATUSES = ['جديدة','قيد التنفيذ','بانتظار المراجعة','مكتملة','ملغاة'];
+const MH_TASK_PRIORITIES = ['عادية','مهمة','عاجلة'];
+const MH_TASK_TYPES = ['دعاية','صيانة','تدريب','جودة','أخرى'];
+const MH_TASK_SHEET_ = 'المهام';
+
+function mhTaskSheet_() {
+  const sh = mhEnsureSheet_(MH_TASK_SHEET_, MH_TASK_HEADERS);
+  return sh;
+}
+
+function mhTaskRows_(sh) {
+  return mhRowsObjects_(sh);
+}
+
+function mhTaskRequireStaff_(profile) {
+  mhRequireRole_(profile, ['super_admin','admin','supervisor']);
+}
+
+/** Tasks visible to the caller: employees see only their own. */
+function tasksListMini_(profile, body) {
+  const includeAll = String(body.scope || '') === 'all';
+  if (includeAll) mhTaskRequireStaff_(profile);
+
+  const sh = mhTaskSheet_();
+  const rows = mhTaskRows_(sh);
+  const mine = String(profile.chatId);
+  const statusFilter = String(body.status || '').trim();
+
+  let items = rows.filter(function(r) {
+    if (!includeAll && String(r['Chat ID'] || '').trim() !== mine) return false;
+    if (statusFilter && String(r['الحالة'] || '').trim() !== statusFilter) return false;
+    return true;
+  });
+
+  // Open work first, then by due date, newest last.
+  const weight = function(r) {
+    const s = String(r['الحالة'] || '').trim();
+    if (s === 'جديدة') return 0;
+    if (s === 'قيد التنفيذ') return 1;
+    if (s === 'بانتظار المراجعة') return 2;
+    if (s === 'مكتملة') return 4;
+    return 5;
+  };
+  items.sort(function(a, b) {
+    const w = weight(a) - weight(b);
+    if (w) return w;
+    const da = String(a['تاريخ الاستحقاق'] || '');
+    const db = String(b['تاريخ الاستحقاق'] || '');
+    return da.localeCompare(db);
+  });
+
+  const today = mhToday_();
+  const mapped = items.slice(0, 200).map(function(r) {
+    const due = mhDate_(r['تاريخ الاستحقاق']);
+    return {
+      id: String(r['رقم المهمة'] || ''),
+      title: String(r['العنوان'] || ''),
+      details: String(r['التفاصيل'] || ''),
+      type: String(r['النوع'] || ''),
+      employeeId: String(r['Chat ID'] || ''),
+      employeeName: String(r['اسم الفني'] || ''),
+      priority: String(r['الأولوية'] || 'عادية'),
+      dueDate: due,
+      status: String(r['الحالة'] || 'جديدة'),
+      progress: Number(r['نسبة الإنجاز'] || 0),
+      proofUrl: String(r['رابط الدليل'] || ''),
+      employeeNote: String(r['ملاحظة الفني'] || ''),
+      createdBy: String(r['أنشأها'] || ''),
+      createdAt: String(r['تاريخ الإنشاء'] || ''),
+      updatedAt: String(r['تاريخ آخر تحديث'] || ''),
+      overdue: !!due && due < today && !['مكتملة','ملغاة'].includes(String(r['الحالة'] || '').trim())
+    };
+  });
+
+  const summary = {
+    total: mapped.length,
+    open: mapped.filter(function(t) { return ['جديدة','قيد التنفيذ','بانتظار المراجعة'].indexOf(t.status) >= 0; }).length,
+    done: mapped.filter(function(t) { return t.status === 'مكتملة'; }).length,
+    overdue: mapped.filter(function(t) { return t.overdue; }).length
+  };
+
+  return { tasks: mapped, summary: summary, today: today, statuses: MH_TASK_STATUSES, priorities: MH_TASK_PRIORITIES, types: MH_TASK_TYPES };
+}
+
+/** Update progress / status / proof from the technician side. */
+function tasksUpdateMini_(profile, body) {
+  const id = String(body.taskId || '').trim();
+  if (!id) throw new Error('TASK_NOT_FOUND');
+
+  const sh = mhTaskSheet_();
+  mhAssertHeaders_(sh, MH_TASK_HEADERS);
+  const map = mhHeaderMap_(sh);
+  const rows = mhTaskRows_(sh);
+  const found = rows.find(function(r) { return String(r['رقم المهمة'] || '').trim() === id; });
+  if (!found) throw new Error('TASK_NOT_FOUND');
+
+  const isStaff = ['super_admin','admin','supervisor','finance'].indexOf(profile.role) >= 0;
+  if (!isStaff && String(found['Chat ID'] || '').trim() !== String(profile.chatId)) throw new Error('FORBIDDEN');
+
+  const currentStatus = String(found['الحالة'] || 'جديدة').trim();
+  const nextStatus = String(body.status || currentStatus).trim();
+  if (MH_TASK_STATUSES.indexOf(nextStatus) < 0) throw new Error('INVALID_TASK_STATUS');
+  // Only a reviewer may close or cancel; the assignee may move work forward.
+  if (['مكتملة','ملغاة'].indexOf(nextStatus) >= 0 && !isStaff && nextStatus !== currentStatus) {
+    if (currentStatus !== 'بانتظار المراجعة') throw new Error('TASK_REVIEW_REQUIRED');
+  }
+
+  let progress = body.progress === undefined ? Number(found['نسبة الإنجاز'] || 0) : Number(body.progress);
+  if (!isFinite(progress) || progress < 0 || progress > 100) throw new Error('INVALID_TASK_PROGRESS');
+  progress = Math.round(progress);
+
+  const proofUrl = body.proofUrl === undefined ? String(found['رابط الدليل'] || '') : String(body.proofUrl || '').trim();
+  if (proofUrl.length > 500) throw new Error('INVALID_TASK_PROOF');
+  const note = body.note === undefined ? String(found['ملاحظة الفني'] || '') : String(body.note || '').trim();
+  if (note.length > 1000) throw new Error('INVALID_TASK_NOTE');
+
+  const lock = LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    const set = function(header, value) {
+      if (map[header]) sh.getRange(found.__row, map[header]).setValue(value);
+    };
+    set('الحالة', nextStatus);
+    set('نسبة الإنجاز', progress);
+    set('رابط الدليل', proofUrl);
+    set('ملاحظة الفني', note);
+    set('تاريخ آخر تحديث', mhStamp_());
+    set('آخر تحديث بواسطة', String(profile.name || profile.chatId));
+    if (nextStatus === 'مكتملة') set('نسبة الإنجاز', 100);
+  } finally { lock.releaseLock(); }
+
+  return {
+    updated: true,
+    taskId: id,
+    status: nextStatus,
+    progress: nextStatus === 'مكتملة' ? 100 : progress,
+    message: nextStatus === 'بانتظار المراجعة'
+      ? 'تم إرسال المهمة للمراجعة. سيتم إبلاغك بعد الاعتماد.'
+      : 'تم تحديث المهمة.'
+  };
+}
+
+/** Create one task, or many at once for a whole team. */
+function tasksCreateMini_(profile, body) {
+  mhTaskRequireStaff_(profile);
+  const sh = mhTaskSheet_();
+  mhAssertHeaders_(sh, MH_TASK_HEADERS);
+
+  const title = String(body.title || '').trim();
+  const details = String(body.details || '').trim();
+  const type = String(body.type || 'دعاية').trim();
+  const priority = String(body.priority || 'عادية').trim();
+  const dueDate = mhIsoDate_(body.dueDate) || mhToday_();
+  if (title.length < 3 || title.length > 120) throw new Error('INVALID_TASK_TITLE');
+  if (details.length > 1500) throw new Error('INVALID_TASK_DETAILS');
+  if (MH_TASK_TYPES.indexOf(type) < 0) throw new Error('INVALID_TASK_TYPE');
+  if (MH_TASK_PRIORITIES.indexOf(priority) < 0) throw new Error('INVALID_TASK_PRIORITY');
+
+  const employees = rowsAsObjects_(spreadsheet_(), MH.SHEETS.employees).filter(function(r) {
+    return String(r['Chat ID'] || '').trim() &&
+      String(r['الحالة'] || 'نشط').trim() === 'نشط' &&
+      String(r['حالة الحساب'] || 'نشط').trim() === 'نشط';
+  });
+  const byId = {};
+  employees.forEach(function(r) { byId[String(r['Chat ID']).trim()] = String(r['اسم الموظف'] || ''); });
+
+  const requested = Array.isArray(body.employeeIds) ? body.employeeIds.map(String) : [];
+  const targets = requested.length && requested.indexOf('all') < 0
+    ? requested.filter(function(id) { return byId[id]; })
+    : (requested.indexOf('all') >= 0 ? Object.keys(byId) : []);
+  if (!targets.length) throw new Error('TASK_TARGET_REQUIRED');
+
+  const now = mhStamp_();
+  const created = [];
+  const lock = LockService.getScriptLock(); lock.waitLock(20000);
+  try {
+    const startRow = sh.getLastRow() + 1;
+    const rows = targets.map(function(id, index) {
+      const taskId = 'TSK-' + Utilities.formatDate(new Date(), MH.TZ, 'yyyyMMdd') + '-' +
+        String(startRow + index).padStart(3, '0');
+      created.push(taskId);
+      return [
+        taskId, title, details, type, id, byId[id] || '', priority, dueDate,
+        'جديدة', 0, '', '', String(profile.chatId), String(profile.name || ''), now, now, String(profile.name || '')
+      ];
+    });
+    sh.getRange(startRow, 1, rows.length, MH_TASK_HEADERS.length).setValues(rows);
+  } finally { lock.releaseLock(); }
+
+  // Notify each assignee in Telegram; failures are logged, never fatal.
+  let notified = 0;
+  targets.forEach(function(id) {
+    try {
+      mhTelegramSend_(id,
+        '📌 مهمة جديدة من إدارة MobiHub\n' +
+        '━━━━━━━━━━━━━━━━━━\n' +
+        '📝 ' + title + '\n' +
+        (details ? '📄 ' + details + '\n' : '') +
+        '🏷 النوع: ' + type + ' · الأولوية: ' + priority + '\n' +
+        '📅 الاستحقاق: ' + dueDate + '\n' +
+        '━━━━━━━━━━━━━━━━━━\n' +
+        'افتح التطبيق ← تسكاتي لمتابعتها.');
+      mhAppendNotificationLog_(id, 'مهمة جديدة', 'تم الإرسال', '');
+      notified++;
+    } catch (e) {
+      mhAppendNotificationLog_(id, 'مهمة جديدة', 'فشل', String(e && e.message || e));
+    }
+  });
+
+  return { created: created.length, taskIds: created, notified: notified, total: targets.length };
+}
+
+/** Manager review: approve a submitted task or send it back. */
+function tasksReviewMini_(profile, body) {
+  mhTaskRequireStaff_(profile);
+  const id = String(body.taskId || '').trim();
+  const decision = String(body.decision || '').trim();
+  if (['اعتماد','إعادة'].indexOf(decision) < 0) throw new Error('INVALID_TASK_DECISION');
+
+  const sh = mhTaskSheet_();
+  mhAssertHeaders_(sh, MH_TASK_HEADERS);
+  const map = mhHeaderMap_(sh);
+  const found = mhTaskRows_(sh).find(function(r) { return String(r['رقم المهمة'] || '').trim() === id; });
+  if (!found) throw new Error('TASK_NOT_FOUND');
+  if (String(found['الحالة'] || '').trim() !== 'بانتظار المراجعة') throw new Error('TASK_NOT_SUBMITTED');
+
+  const note = String(body.note || '').trim();
+  if (note.length > 1000) throw new Error('INVALID_TASK_NOTE');
+
+  const lock = LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    sh.getRange(found.__row, map['الحالة']).setValue(decision === 'اعتماد' ? 'مكتملة' : 'قيد التنفيذ');
+    if (decision === 'اعتماد') sh.getRange(found.__row, map['نسبة الإنجاز']).setValue(100);
+    sh.getRange(found.__row, map['تاريخ آخر تحديث']).setValue(mhStamp_());
+    sh.getRange(found.__row, map['آخر تحديث بواسطة']).setValue(String(profile.name || profile.chatId));
+    if (note && map['ملاحظة الفني']) sh.getRange(found.__row, map['ملاحظة الفني']).setValue(note);
+  } finally { lock.releaseLock(); }
+
+  try {
+    mhTelegramSend_(String(found['Chat ID'] || '').trim(),
+      decision === 'اعتماد'
+        ? '✅ تم اعتماد مهمتك: ' + String(found['العنوان'] || '') + '\nشكرًا لالتزامك.'
+        : '🔄 أُعيدت مهمتك للمتابعة: ' + String(found['العنوان'] || '') + (note ? '\nملاحظة المدير: ' + note : ''));
+  } catch (e) { /* notification failure must not block the decision */ }
+
+  return { updated: true, taskId: id, status: decision === 'اعتماد' ? 'مكتملة' : 'قيد التنفيذ' };
+}
+
+/**
+ * Seeds the advertising starter tasks for every active technician.
+ * Idempotent: skips technicians who already have an advertising task.
+ */
+function tasksSeedMarketingMini_(profile) {
+  mhTaskRequireStaff_(profile);
+  const employees = rowsAsObjects_(spreadsheet_(), MH.SHEETS.employees).filter(function(r) {
+    return String(r['Chat ID'] || '').trim() &&
+      String(r['الحالة'] || 'نشط').trim() === 'نشط' &&
+      String(r['حالة الحساب'] || 'نشط').trim() === 'نشط';
+  });
+  const existing = mhTaskRows_(mhTaskSheet_());
+  const already = {};
+  existing.forEach(function(r) {
+    if (String(r['النوع'] || '').trim() === 'دعاية') already[String(r['Chat ID'] || '').trim()] = true;
+  });
+
+  const seed = [
+    { title: '٥ ستوريات دعائية للمركز', details: 'صوّر ٥ ستوريات داخل المركز: واجهة المحل، جهاز أثناء الإصلاح، فريق العمل، قبل/بعد لإصلاح، وسعر إصلاح مميز. أضف هاشتاج MobiHub.', priority: 'مهمة' },
+    { title: 'بوست واحد على فيسبوك', details: 'انشر بوستًا يضم صورة الجهاز مع وصف مشكلة وحل، واذكر السعر يبدأ من كام؟ واسم المركز ورقم التواصل.', priority: 'مهمة' },
+    { title: 'فيديو قصير (ريلز/تيك توك)', details: 'فيديو ٢٠–٤٠ ثانية يوضح إصلاح سريع أو نصيحة صيانة. اكتب تعليقًا يذكر MobiHub.', priority: 'عادية' }
+  ];
+
+  const due = mhAddDays_(mhToday_(), 7);
+  const now = mhStamp_();
+  const sh = mhTaskSheet_();
+  mhAssertHeaders_(sh, MH_TASK_HEADERS);
+
+  const targets = employees.filter(function(r) { return !already[String(r['Chat ID']).trim()]; });
+  if (!targets.length) return { seeded: 0, skipped: employees.length, message: 'كل الفنيين لديهم مهام دعاية بالفعل.' };
+
+  const lock = LockService.getScriptLock(); lock.waitLock(20000);
+  let rowPointer = sh.getLastRow() + 1;
+  let created = 0;
+  try {
+    targets.forEach(function(emp) {
+      const chatId = String(emp['Chat ID']).trim();
+      const name = String(emp['اسم الموظف'] || '');
+      const rows = seed.map(function(task, index) {
+        const taskId = 'TSK-' + Utilities.formatDate(new Date(), MH.TZ, 'yyyyMMdd') + '-' + String(rowPointer).padStart(3, '0');
+        rowPointer++;
+        created++;
+        return [
+          taskId, task.title, task.details, 'دعاية', chatId, name, task.priority,
+          due, 'جديدة', 0, '', '', String(profile.chatId), String(profile.name || ''), now, now, String(profile.name || '')
+        ];
+      });
+      sh.getRange(sh.getLastRow() + 1, 1, rows.length, MH_TASK_HEADERS.length).setValues(rows);
+    });
+  } finally { lock.releaseLock(); }
+
+  return { seeded: created, technicians: targets.length, dueDate: due };
+}
+
+/* =========================================================
+   V1.13 — OUTBOUND NOTIFICATIONS
+   Every decision made in the dashboard now notifies the
+   affected employee on Telegram. Failures are logged to
+   «سجل الإشعارات» and never block the decision itself.
+========================================================= */
+
+function mhNotifyEmployee_(chatId, text, eventType) {
+  const id = String(chatId || '').trim();
+  if (!id) return false;
+  try {
+    mhTelegramSend_(id, text);
+    mhAppendNotificationLog_(id, eventType || 'إشعار', 'تم الإرسال', '');
+    return true;
+  } catch (e) {
+    mhAppendNotificationLog_(id, eventType || 'إشعار', 'فشل', String(e && e.message || e));
+    return false;
+  }
+}
+
+/** Leave / permission decision → assignee. */
+function mhNotifyLeaveDecision_(chatId, decision, leaveType, date, note) {
+  const head = decision === 'مقبول' ? '✅ تمت الموافقة على طلب إذنك' : '❌ تم رفض طلب إذنك';
+  return mhNotifyEmployee_(chatId,
+    head + '\n━━━━━━━━━━━━━━━━━━\n' +
+    '📅 التاريخ: ' + (date || '—') + '\n' +
+    '🏷 النوع: ' + (leaveType || '—') + '\n' +
+    (note ? '📝 ملاحظة المدير: ' + note + '\n' : '') +
+    '━━━━━━━━━━━━━━━━━━\n' +
+    (decision === 'مقبول' ? 'يمكنك متابعة التفاصيل من التطبيق ← طلباتي.' : 'يمكنك تقديم طلب جديد إن لزم.'),
+    'قرار إذن'
+  );
+}
+
+/** Cash advance / custody decision → requester. */
+function mhNotifyCashDecision_(chatId, decision, amount, note) {
+  const head = decision === 'مرفوض' ? '❌ تم رفض طلب السلفة'
+    : decision === 'تم الصرف' ? '💸 تم صرف مبلغ السلفة'
+    : '✅ تمت الموافقة على طلب السلفة';
+  return mhNotifyEmployee_(chatId,
+    head + '\n━━━━━━━━━━━━━━━━━━\n' +
+    (amount ? '💵 المبلغ: ' + amount + ' جنيه\n' : '') +
+    (note ? '📝 ملاحظة المدير: ' + note + '\n' : '') +
+    '━━━━━━━━━━━━━━━━━━\n' +
+    (decision === 'تم الصرف' ? 'لا تنسَ تقديم التسوية من التطبيق بعد انتهاء العهدة.' : 'افتح التطبيق ← السلف والعهد للمتابعة.'),
+    'قرار سلفة'
+  );
+}
+
+/** Deduction decision → employee. */
+function mhNotifyDeductionDecision_(chatId, decision, amount, reason, note) {
+  const head = decision === 'معتمد' ? '⚠️ تم اعتماد خصم على حسابك' : '✅ تم رفض الخصم المقترح';
+  return mhNotifyEmployee_(chatId,
+    head + '\n━━━━━━━━━━━━━━━━━━\n' +
+    (amount ? '💵 المبلغ: ' + amount + ' جنيه\n' : '') +
+    (reason ? '📄 السبب: ' + reason + '\n' : '') +
+    (note ? '📝 ملاحظات: ' + note + '\n' : '') +
+    '━━━━━━━━━━━━━━━━━━\n' +
+    'افتح التطبيق ← خصوماتي للتفاصيل.',
+    'قرار خصم'
+  );
+}
+
+/** Cash settlement decision → employee. */
+function mhNotifySettlementDecision_(chatId, decision, returned, extra) {
+  return mhNotifyEmployee_(chatId,
+    (decision === 'مقبول' ? '✅ تم اعتماد تسوية العهدة' : '🔄 تحتاج تسوية عهدتك للمراجعة مرة أخرى') +
+    '\n━━━━━━━━━━━━━━━━━━\n' +
+    (returned > 0 ? '💵 المطلوب إرجاعه: ' + returned + ' جنيه\n' : '') +
+    (extra > 0 ? '➕ المستحق لك: ' + extra + ' جنيه\n' : '') +
+    '━━━━━━━━━━━━━━━━━━\nافتح التطبيق ← السلف والعهد.',
+    'قرار تسوية'
+  );
+}
+
+/** A new complaint replied to by management → complainant. */
+function mhNotifyComplaintReply_(chatId, complaintId, status) {
+  return mhNotifyEmployee_(chatId,
+    '💬 رد جديد على شكواك\n━━━━━━━━━━━━━━━━━━\n' +
+    (complaintId ? '🆔 رقم الشكوى: ' + complaintId + '\n' : '') +
+    (status ? '📌 الحالة الآن: ' + status + '\n' : '') +
+    '━━━━━━━━━━━━━━━━━━\nافتح التطبيق ← شكاويي للرد.',
+    'رد على شكوى'
+  );
+}
+
+/** Request submitted by an employee → notify the management team. */
+function mhNotifyManagement_(message, eventType) {
+  let recipients = [];
+  try {
+    const managers = rowsAsObjects_(spreadsheet_(), MH.SHEETS.managers);
+    managers.forEach(function(r) {
+      const id = String(r['Chat ID'] || '').trim();
+      const role = String(r['الصلاحية'] || '').trim();
+      if (!id) return;
+      if (String(r['الحالة'] || 'نشط').trim() !== 'نشط') return;
+      if (['Super Admin', 'Admin', 'Supervisor'].indexOf(role) < 0) return;
+      if (recipients.indexOf(id) < 0) recipients.push(id);
+    });
+  } catch (e) { /* managers sheet missing must not break submission */ }
+
+  recipients.forEach(function(id) { mhNotifyEmployee_(id, message, eventType || 'إشعار إدارة'); });
+  return recipients.length;
+}
+
+/* =========================================================
+   V1.13 — NOTIFICATION DIAGNOSTICS
+   Lets a manager verify Telegram delivery and switch every
+   notification flag on in one action.
+========================================================= */
+
+/** Every notification toggle the system understands. */
+const MH_NOTIFICATION_KEYS_ = [
+  'tasks.assign','tasks.review','requests.new','leaves.decide','cash.decide',
+  'cash.settlement','deduction.decide','complaints.reply','complaints.new'
+];
+
+function mhEnsureNotificationSettings_() {
+  const sh = mhEnsureSheet_('إعدادات الإشعارات', MH_NOTIFICATION_SETTING_HEADERS);
+  const map = mhHeaderMap_(sh);
+  const rows = mhRowsObjects_(sh);
+  const existing = {};
+  rows.forEach(function(r) { existing[String(r['الإعداد'] || '').trim()] = r.__row; });
+
+  const descriptions = {
+    'tasks.assign': 'إشعار الفني عند إسناد مهمة جديدة',
+    'tasks.review': 'إشعار الفني عند اعتماد أو إعادة مهمة',
+    'requests.new': 'إشعار الإدارة عند وصول طلب أو إذن جديد',
+    'leaves.decide': 'إشعار الموظف بقرار طلب الإذن',
+    'cash.decide': 'إشعار الموظف بقرار السلفة أو الصرف',
+    'cash.settlement': 'إشعار الموظف بقرار تسوية العهدة',
+    'deduction.decide': 'إشعار الموظف بقرار الخصم',
+    'complaints.reply': 'إشعار الموظف عند رد الإدارة على الشكوى',
+    'complaints.new': 'إشعار الإدارة عند شكوى جديدة'
+  };
+
+  MH_NOTIFICATION_KEYS_.forEach(function(key) {
+    if (existing[key]) return;
+    sh.appendRow([key, 'TRUE', descriptions[key] || '']);
+  });
+  return sh;
+}
+
+/** Reads all flags; missing flags default to enabled. */
+function mhNotificationFlags_() {
+  const flags = {};
+  MH_NOTIFICATION_KEYS_.forEach(function(k) { flags[k] = true; });
+  try {
+    const rows = mhRowsObjects_(mhEnsureSheet_('إعدادات الإشعارات', MH_NOTIFICATION_SETTING_HEADERS));
+    rows.forEach(function(r) {
+      const key = String(r['الإعداد'] || '').trim();
+      if (!key) return;
+      flags[key] = String(r['القيمة'] || '').toUpperCase() !== 'FALSE';
+    });
+  } catch (e) { /* missing sheet means everything stays enabled */ }
+  return flags;
+}
+
+/** Manager action: turn every notification on. */
+function notificationsEnableAllMini_(profile) {
+  mhRequireRole_(profile, ['super_admin','admin']);
+  const sh = mhEnsureNotificationSettings_();
+  const map = mhHeaderMap_(sh);
+  mhRowsObjects_(sh).forEach(function(r) {
+    const key = String(r['الإعداد'] || '').trim();
+    if (MH_NOTIFICATION_KEYS_.indexOf(key) < 0) return;
+    sh.getRange(r.__row, map['القيمة']).setValue('TRUE');
+  });
+  return { enabled: MH_NOTIFICATION_KEYS_.length, keys: MH_NOTIFICATION_KEYS_ };
+}
+
+/**
+ * Manager action: send a real Telegram message to the caller so the
+ * notification path can be verified end to end.
+ */
+function notificationsTestMini_(profile) {
+  mhRequireRole_(profile, ['super_admin','admin','supervisor','finance']);
+  const ok = mhNotifyEmployee_(
+    profile.chatId,
+    '✅ اختبار الإشعارات\n━━━━━━━━━━━━━━━━━━\n' +
+    'وصلتك هذه الرسالة من MobiHub، أي أن قناة الإشعارات تعمل.\n' +
+    '⏱ ' + mhStamp_(),
+    'اختبار إشعار'
+  );
+  return {
+    delivered: ok,
+    chatId: String(profile.chatId),
+    botConfigured: !!(PropertiesService.getScriptProperties().getProperty('BOT_TOKEN') ||
+      PropertiesService.getScriptProperties().getProperty('MOBIHUB_TELEGRAM_BOT_TOKEN')),
+    message: ok
+      ? 'تم إرسال رسالة اختبار إلى تلجرام.'
+      : 'تعذر الإرسال. تأكد أنك بدأت محادثة مع البوت (/start) ثم أعد المحاولة.'
+  };
 }

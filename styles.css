@@ -1222,10 +1222,13 @@ body.modal-open{overflow:hidden}
 .manager-module-panel{
   display:flex;flex-direction:column;
   max-height:86vh;
+  min-height:0;
 }
 .manager-module-heading{display:none!important}
 .manager-module-content{
   display:block;
+  flex:1 1 auto;
+  min-height:0;
   overflow-y:auto;
   overscroll-behavior:contain;
   -webkit-overflow-scrolling:touch;
@@ -1805,6 +1808,17 @@ footer{
 .task-waiting-note{border:1px solid var(--warn);background:var(--warn-wash);color:var(--warn)}
 
 .task-edit{display:grid;gap:9px}
+.task-actions-sticky{
+  position:sticky;bottom:0;
+  display:grid;gap:8px;
+  margin-top:4px;
+  padding:10px 0 calc(2px + env(safe-area-inset-bottom,0px));
+  background:linear-gradient(to top,rgba(12,20,29,.98) 60%,rgba(12,20,29,0));
+  z-index:2;
+}
+[data-theme="light"] .task-actions-sticky{
+  background:linear-gradient(to top,rgba(241,246,250,.98) 60%,rgba(241,246,250,0));
+}
 .task-edit label{margin:0}
 .task-edit input[type="range"]{
   width:100%;margin:6px 0 0;
@@ -1831,6 +1845,14 @@ footer{
 }
 .task-employee-picker input{width:16px;height:16px;margin:0;accent-color:var(--brand)}
 .task-pick-all{border-bottom:1px dashed var(--line);padding-bottom:7px !important}
+
+.notification-tools{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:8px;
+  margin:4px 0 10px;
+}
+.notification-tools button{min-height:40px;font-size:11.5px}
 
 /* --- Part categories: the step that keeps the screen short --- */
 .price-generation-grid{
