@@ -368,8 +368,9 @@
     buildWorkspace(currentRole, data.permissions || {});
     // Manager panels stay hidden on the landing page and are moved into a modal only when opened.
     if (workspaceRole === 'manager') {
-      if (data.managerDashboard) renderManagerDashboard(data.managerDashboard);
-      else loadManagerDashboard();
+      // The console is the only dashboard. Never paint the legacy tiles first:
+      // that caused a visible flash of the old layout before the new one loaded.
+      loadManagerDashboard();
     }
   }
 
@@ -415,13 +416,39 @@
   }
 
   async function renderConsoleInto(host) {
-    host.innerHTML = '<div class="manager-loading">جاري تحميل اللوحة...</div>';
+    if (!host) return;
+
+    // The console owns its own slot so the module grid below survives.
+    let slot = host.querySelector('#consoleSlot');
+    if (!slot) {
+      slot = document.createElement('div');
+      slot.id = 'consoleSlot';
+      // Insert before the module grid when present, otherwise append.
+      const modules = host.querySelector('#managerModules');
+      if (modules && modules.parentNode === host) host.insertBefore(slot, modules);
+      else host.appendChild(slot);
+    }
+    slot.innerHTML = '<div class="manager-loading">جاري تحميل اللوحة...</div>';
+
     try {
       const data = await api('console_overview');
       consoleState.data = data;
-      drawConsoleInto(host);
+      drawConsoleInto(slot);
+      // Hide the legacy dashboard chrome: the hero, the "نظرة عامة" header and
+      // the old metric tiles. They would otherwise stack above the console.
+      const legacyHero = host.querySelector('.manager-hero');
+      if (legacyHero) legacyHero.classList.add('hidden');
+      const legacyHead = host.querySelector('.manager-dashboard-head');
+      if (legacyHead) legacyHead.classList.add('hidden');
+      const metrics = $('managerMetrics');
+      if (metrics) metrics.classList.add('hidden');
+      const sectionHead = host.querySelector('.manager-section-head');
+      if (sectionHead) sectionHead.classList.add('hidden');
+      // Keep the legacy date line in sync (it is hidden but useful if shown later).
+      const dateEl = $('managerDashboardDate');
+      if (dateEl) dateEl.textContent = 'اليوم ' + (data.date || '') + ' · ' + (data.month || '');
     } catch (e) {
-      host.innerHTML = '<div class="manager-load-error">' + escapeHtml(e.message) + '</div>';
+      slot.innerHTML = '<div class="manager-load-error">' + escapeHtml(e.message) + '</div>';
     }
   }
 
