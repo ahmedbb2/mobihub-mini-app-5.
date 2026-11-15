@@ -857,6 +857,9 @@ input[type="number"]{direction:ltr;text-align:right;font-variant-numeric:tabular
   display:flex;align-items:center;justify-content:center;
   padding:14px;
   padding-bottom:calc(14px + env(safe-area-inset-bottom,0px));
+  /* Telegram WebView: allow the sheet itself to own the scroll. */
+  overflow:hidden;
+  touch-action:pan-y;
 }
 .modal-backdrop{
   position:absolute;inset:0;
@@ -911,11 +914,45 @@ input[type="number"]{direction:ltr;text-align:right;font-variant-numeric:tabular
 
 .modal-body{
   flex:1 1 auto;
+  min-height:0;
   overflow-y:auto;
   overscroll-behavior:contain;
   padding:13px 1px 2px;
   -webkit-overflow-scrolling:touch;
 }
+
+/* When a manager panel is inside the modal, .modal-body is the single
+ * scroll container. The panel must not create a second nested scroller:
+ * on Telegram's WebView a nested scroll area swallows the touch gesture
+ * and the page appears stuck. */
+.modal-body > .manager-module-panel{
+  max-height:none;
+  min-height:0;
+  display:block;
+  overflow:visible;
+}
+.modal-body > .manager-module-panel .manager-module-content{
+  overflow:visible;
+  max-height:none;
+  flex:none;
+}
+
+/* Telegram WebView safety net: some builds ignore overflow-y on nested
+ * flex children. These rules guarantee the body stays the only scroller
+ * and that momentum scrolling keeps working inside it. */
+.app-modal .modal-sheet{overflow:hidden}
+.app-modal .modal-body{
+  overflow-y:auto !important;
+  -webkit-overflow-scrolling:touch;
+  touch-action:pan-y;
+}
+.app-modal .modal-body *{touch-action:pan-y}
+/* Inputs must stay interactive inside a pan-y container. */
+.app-modal .modal-body input,
+.app-modal .modal-body select,
+.app-modal .modal-body textarea,
+.app-modal .modal-body button,
+.app-modal .modal-body a{ touch-action:auto; }
 
 body.modal-open{overflow:hidden}
 
