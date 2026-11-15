@@ -1,0 +1,24 @@
+MobiHub Admin Phase 5 — Static Integration Audit
+=================================================
+
+Client API calls found: 86
+Server dispatch actions found: 95
+Client actions with no direct server case: 0
+All direct client actions have matching server dispatch cases.
+
+Static DOM lookups found: 114
+DOM lookups not found as literal IDs in HTML: 2
+- complaintReply
+- sendComplaintReply
+
+Duplicate MH.SHEETS keys detected: 0
+No duplicate sheet keys detected in the inspected object.
+
+Suspicious CSS declaration lines: 1
+- line 141: font-size:11px;font-weight:800 検;font-weight:800;
+
+Syntax checks:
+- app.js: PASS 
+- Code.gs: PASS 
+
+Note: this is a static source audit. It does not replace runtime tests in Telegram or live Google Sheets.

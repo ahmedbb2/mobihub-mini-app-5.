@@ -251,7 +251,7 @@
   }
 
 
-  const MANAGER_ROLES = ['super_admin','admin','finance','supervisor'];
+  const MANAGER_ROLES = ['super_admin','admin','finance','supervisor','procurement'];
   function buildWorkspace(role, permissions) {
     // Workspace selection is authoritative for the visible shell. The role
     // still controls server permissions; it must not decide which shell renders.
@@ -314,7 +314,9 @@
       // Employee navigation mirrors the legacy bot keyboard; no secondary scroll navigation.
       nav.innerHTML = '';
       nav.classList.add('hidden');
-      $('stats').classList.add('hidden');
+      // Employee summary counters are useful at-a-glance context; keep them visible
+      // above the service groups. The manager workspace still keeps them hidden.
+      $('stats').classList.remove('hidden');
       $('attendance').classList.add('hidden');
     }
     if (isManager) {
@@ -328,14 +330,16 @@
    * A missing list means "no restrictions" so old hubs keep working. */
   function applyVisibleButtons(list) {
     const all = document.querySelectorAll('[data-home-action]');
-    if (!Array.isArray(list) || !list.length) {
+    // A missing/non-array value means an older API response with no visibility
+    // policy. An empty array is an explicit policy: no standard tiles are visible.
+    if (!Array.isArray(list)) {
       all.forEach(el => el.classList.remove('is-hidden-by-admin'));
       return;
     }
     const allowed = new Set(list);
     all.forEach(el => {
       const key = el.getAttribute('data-home-action');
-      // device-register keeps its own permission logic, never force-shown.
+      // Device registration is separately gated by device_registration_options.
       if (key === 'device-register') return;
       el.classList.toggle('is-hidden-by-admin', !allowed.has(key));
     });
@@ -1853,6 +1857,8 @@
     if (!open) { badge.classList.add('hidden'); badge.textContent = '0'; return; }
     badge.textContent = open > 99 ? '99+' : String(open);
     badge.classList.toggle('is-urgent', overdue > 0);
+    badge.title = overdue > 0 ? `${open} مهمة مفتوحة، منها ${overdue} متأخرة` : `${open} مهمة مفتوحة`;
+    badge.setAttribute('aria-label', badge.title);
     badge.classList.remove('hidden');
   }
 
@@ -3631,9 +3637,10 @@
   function drawConsoleShell(content) {
     const d = consoleState.data || {};
     const tabs = CONSOLE_TABS.filter(function(t) {
-      if (t.key === 'team') return d.modules && (d.modules.staff || d.modules.daily);
+      if (t.key === 'team') return d.modules && (d.modules.staff || d.modules.daily || d.modules.procurement);
       if (t.key === 'money') return d.modules && d.modules.finance;
-      if (t.key === 'operations') return d.modules && (d.modules.devices || d.modules.tasks);
+      if (t.key === 'operations') return d.modules && (d.modules.devices || d.modules.tasks || d.modules.procurement);
+      if (t.key === 'reports') return d.role !== 'procurement';
       return true;
     });
 
@@ -3878,9 +3885,11 @@
       parts: function() { openPartAdminPanel(); },
       procurement: function() { openProcurementPanel(); },
       managers: function() { openManagerModule('managers'); },
-      buttonsMatrix: function() { openButtonsMatrix(); },
+      buttonsMatrix: function() { openManagerModule('buttonsMatrix'); },
+      notificationMatrix: function() { openManagerModule('notificationMatrix'); },
       requests: function() { openManagerModule('requests'); },
-      notifications: function() { openManagerModule('notifications'); }
+      notifications: function() { openManagerModule('notifications'); },
+      system: function() { openManagerModule('system'); }
     };
     const fn = map[key];
     if (fn) fn();

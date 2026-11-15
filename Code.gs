@@ -664,7 +664,7 @@ function bootstrap_(profile) {
   };
 
   const isManagement = [
-    'super_admin', 'admin', 'finance', 'supervisor'
+    'super_admin', 'admin', 'finance', 'supervisor', 'procurement'
   ].indexOf(profile.role) >= 0;
 
   const complaints = rowsAsObjects_(ss, MH.SHEETS.complaints);
@@ -818,7 +818,7 @@ function listData_(profile, entity) {
  */
 function managerDashboard_(profile) {
   const role = String(profile.role || '');
-  mhRequireRole_(profile, ['super_admin','admin','finance','supervisor']);
+  mhRequireRole_(profile, ['super_admin','admin','finance','supervisor','procurement']);
   const ss = spreadsheet_();
   const today = mhToday_();
   const month = today.slice(0,7);
@@ -5404,7 +5404,7 @@ function consoleOverviewMini_(profile) {
     overtime: ['super_admin','finance','admin'].includes(role),
     // الأجهزة والتقارير
     devices: ['super_admin','admin'].includes(role),
-    system: ['super_admin','admin','supervisor','finance'].includes(role),
+    system: ['super_admin','admin'].includes(role),
     // الإشعارات والصلاحيات
     notifications: ['super_admin','admin','supervisor'].includes(role),
     notificationMatrix: ['super_admin','admin'].includes(role),

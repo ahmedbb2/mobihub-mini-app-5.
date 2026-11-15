@@ -1,22 +1,23 @@
-MobiHub Mini App — Admin Phase 1
+MobiHub Admin Phase 6
+=====================
 
-Changes:
-1. Aligned the Finance module permission for Admin across bootstrap_ and managerDashboard_.
-   This fixes the mismatch where Admin could open the new console Finance module but the legacy/bootstrap permission hid the Cash Review panel.
-2. Added a historical list for reviewed deductions alongside the existing pending deduction queue.
-3. Added an additional-rewards history list in the manager reward administration view.
-4. Refreshes reward history after a new reward is recorded.
-5. Preserved existing action names, sheet names, columns, formulas, and current 52-point performance scoring logic.
+Scope: final static CSS cleanup from the integration audit.
 
-Validation completed:
-- app.js: node --check passed.
-- Code.gs: copied to JavaScript syntax checker; node --check passed.
-- index.html: HTMLParser parse passed.
-- HTML IDs: 115 IDs checked; no duplicate IDs.
-- Required history containers and UI hooks verified.
-- Admin Finance permission alignment verified in backend source.
+Change:
+- Removed an invalid stray character sequence from the workspace-switch font-weight declaration.
+- Preserved the intended font-size and font-weight values.
 
-Important:
-- No Google Apps Script deployment was performed.
-- No live spreadsheet data was changed.
-- Deploy only after reviewing the included source files and running the live role tests.
+Validation:
+- app.js syntax check passed.
+- Code.gs syntax check passed.
+- The suspicious CSS declaration found in Phase 5 is no longer present.
+- All 21 employee home-action keys remain unchanged from Phase 3.
+- All 86 directly detected client API action calls have matching server dispatch cases.
+- The two DOM IDs absent from the static HTML are intentionally created inside the dynamic complaint-detail template.
+
+Preservation:
+- No API, business logic, role permissions, Sheets, headers, or records changed.
+- No deployment or live writes were performed.
+
+Remaining:
+- Runtime validation with real Telegram accounts and the connected Google Sheet.
