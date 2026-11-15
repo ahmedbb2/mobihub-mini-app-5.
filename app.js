@@ -2199,60 +2199,200 @@
     }
   }
 
+  /* ============================================================
+   * CREATE TASK — rebuilt picker
+   * The old markup nested <label> inside <label>, so a click was
+   * swallowed by the outer label and the checkbox never toggled.
+   * This version uses plain rows, an explicit hit area, a search
+   * box, and visible selected chips.
+   * ============================================================ */
+
+  let taskPickerState = { selected: [], query: '', employees: [] };
+
   async function renderTaskCreateForm(content) {
+    taskPickerState = { selected: [], query: '', employees: [] };
     content.innerHTML = '<div class="manager-loading">جاري تحميل الفنيين...</div>';
     try {
-      const employees = await api('active_employees');
-      content.innerHTML = `<div class="tasks-screen">
-        <div class="price-screen-head">
-          <button type="button" class="price-back" id="taskCreateBack">← المهام</button>
-          <div><h4>مهمة جديدة</h4><small>تُرسل إشعارات للمعينين تلقائيًا</small></div>
-        </div>
-        <label>عنوان المهمة<input id="taskTitleInput" maxlength="120" placeholder="مثال: ٥ ستوريات دعائية"></label>
-        <label>التفاصيل<textarea id="taskDetailsInput" rows="3" maxlength="1500" placeholder="اشرح المطلوب بدقة..."></textarea></label>
-        <label>النوع<select id="taskTypeInput"><option>دعاية</option><option>صيانة</option><option>تدريب</option><option>جودة</option><option>أخرى</option></select></label>
-        <label>الأولوية<select id="taskPriorityInput"><option>عادية</option><option>مهمة</option><option>عاجلة</option></select></label>
-        <label>تاريخ الاستحقاق<input id="taskDueInput" type="date"></label>
-        <label>الفنيون
-          <div class="task-employee-picker">
-            <label class="task-pick-all"><input type="checkbox" id="taskPickAll"> كل الفنيين (${employees.length})</label>
-            ${employees.map(e => `<label><input type="checkbox" class="task-emp" value="${escapeHtml(e['Chat ID'])}"> ${escapeHtml(e['اسم الموظف'])}</label>`).join('')}
-          </div>
-        </label>
-        <button type="button" class="primary-btn" id="taskCreateSubmit">إنشاء المهمة</button>
-      </div>`;
-
-      const today = new Date().toISOString().slice(0, 10);
-      content.querySelector('#taskDueInput').value = today;
-
-      content.querySelector('#taskCreateBack').addEventListener('click', () => renderTaskAdmin(content));
-      content.querySelector('#taskPickAll').addEventListener('change', ev => {
-        content.querySelectorAll('.task-emp').forEach(box => { box.checked = ev.target.checked; });
-      });
-
-      content.querySelector('#taskCreateSubmit').addEventListener('click', async ev => {
-        const btn = ev.currentTarget;
-        const ids = [...content.querySelectorAll('.task-emp:checked')].map(b => b.value);
-        if (content.querySelector('#taskPickAll').checked) ids.length = 0;
-        btn.disabled = true;
-        try {
-          const res = await api('task_create', {
-            title: content.querySelector('#taskTitleInput').value.trim(),
-            details: content.querySelector('#taskDetailsInput').value.trim(),
-            type: content.querySelector('#taskTypeInput').value,
-            priority: content.querySelector('#taskPriorityInput').value,
-            dueDate: content.querySelector('#taskDueInput').value,
-            employeeIds: content.querySelector('#taskPickAll').checked ? ['all'] : ids
-          });
-          if (tg?.showAlert) tg.showAlert(`تم إنشاء ${res.created} مهمة · إشعارات: ${res.notified}/${res.total}`);
-          renderTaskAdmin(content);
-        } catch (e) {
-          if (tg?.showAlert) tg.showAlert(e.message);
-          btn.disabled = false;
-        }
-      });
+      const employees = (await api('active_employees')) || [];
+      taskPickerState.employees = employees;
+      drawTaskCreateForm(content);
     } catch (e) {
       content.innerHTML = `<div class="manager-load-error">${escapeHtml(e.message)}</div>`;
+    }
+  }
+
+  function drawTaskCreateForm(content) {
+    const employees = taskPickerState.employees;
+
+    content.innerHTML = `<div class="tasks-screen">
+      <div class="price-screen-head">
+        <button type="button" class="price-back" id="taskCreateBack">← المهام</button>
+        <div><h4>مهمة جديدة</h4><small>يصل إشعار لكل فني معيّن</small></div>
+      </div>
+
+      <label>عنوان المهمة<input id="taskTitleInput" maxlength="120" placeholder="مثال: ٥ ستوريات دعائية"></label>
+      <label>التفاصيل<textarea id="taskDetailsInput" rows="3" maxlength="1500" placeholder="اشرح المطلوب بدقة..."></textarea></label>
+
+      <div class="task-form-row">
+        <label>النوع<select id="taskTypeInput"><option>دعاية</option><option>صيانة</option><option>تدريب</option><option>جودة</option><option>أخرى</option></select></label>
+        <label>الأولوية<select id="taskPriorityInput"><option>عادية</option><option>مهمة</option><option>عاجلة</option></select></label>
+      </div>
+
+      <label>تاريخ الاستحقاق<input id="taskDueInput" type="date"></label>
+
+      <section class="task-assign">
+        <div class="task-assign-head">
+          <b>الفنيون المسؤولون</b>
+          <span id="taskAssignCount">لم يتم اختيار أحد</span>
+        </div>
+
+        <div id="taskSelectedChips" class="task-chips"></div>
+
+        <div class="task-assign-tools">
+          <input id="taskEmpSearch" type="search" placeholder="ابحث بالاسم…" autocomplete="off">
+          <button type="button" class="task-mini-btn" id="taskPickAll">اختيار الكل</button>
+          <button type="button" class="task-mini-btn" id="taskPickNone">مسح</button>
+        </div>
+
+        <div id="taskEmpList" class="task-emp-list"></div>
+      </section>
+
+      <div class="task-actions-sticky">
+        <button type="button" class="primary-btn" id="taskCreateSubmit">إنشاء المهمة</button>
+      </div>
+      <p id="taskCreateMsg" class="inline-message hidden" aria-live="polite"></p>
+    </div>`;
+
+    content.querySelector('#taskDueInput').value = new Date().toISOString().slice(0, 10);
+    content.querySelector('#taskCreateBack').addEventListener('click', () => renderTaskAdmin(content));
+
+    drawTaskEmpList(content);
+    drawTaskChips(content);
+
+    content.querySelector('#taskEmpSearch').addEventListener('input', ev => {
+      taskPickerState.query = ev.target.value;
+      drawTaskEmpList(content);
+    });
+    content.querySelector('#taskPickAll').addEventListener('click', () => {
+      const visible = filteredTaskEmployees();
+      const set = new Set(taskPickerState.selected);
+      visible.forEach(e => set.add(String(e['Chat ID'])));
+      taskPickerState.selected = [...set];
+      drawTaskEmpList(content);
+      drawTaskChips(content);
+    });
+    content.querySelector('#taskPickNone').addEventListener('click', () => {
+      taskPickerState.selected = [];
+      drawTaskEmpList(content);
+      drawTaskChips(content);
+    });
+
+    content.querySelector('#taskCreateSubmit').addEventListener('click', () => submitTaskCreate(content));
+  }
+
+  function filteredTaskEmployees() {
+    const q = String(taskPickerState.query || '').trim().toLowerCase();
+    const list = taskPickerState.employees || [];
+    if (!q) return list;
+    return list.filter(function(e) {
+      return String(e['اسم الموظف'] || '').toLowerCase().indexOf(q) >= 0 ||
+        String(e['Chat ID'] || '').indexOf(q) >= 0;
+    });
+  }
+
+  function drawTaskEmpList(content) {
+    const holder = content.querySelector('#taskEmpList');
+    if (!holder) return;
+    const list = filteredTaskEmployees();
+    if (!list.length) {
+      holder.innerHTML = '<p class="console-empty">لا يوجد فني مطابق.</p>';
+      return;
+    }
+    const selected = new Set(taskPickerState.selected);
+    holder.innerHTML = list.map(function(e) {
+      const id = String(e['Chat ID'] || '');
+      const on = selected.has(id);
+      return `<button type="button" class="task-emp-row${on ? ' is-on' : ''}" data-emp-id="${escapeHtml(id)}">
+        <span class="task-emp-check">${on ? '✓' : ''}</span>
+        <span class="task-emp-name">${escapeHtml(String(e['اسم الموظف'] || 'فني'))}</span>
+      </button>`;
+    }).join('');
+
+    // A real button per row: no nested labels, so the tap always lands.
+    holder.querySelectorAll('[data-emp-id]').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        const id = btn.dataset.empId;
+        const set = new Set(taskPickerState.selected);
+        if (set.has(id)) set.delete(id); else set.add(id);
+        taskPickerState.selected = [...set];
+        drawTaskEmpList(content);
+        drawTaskChips(content);
+      });
+    });
+  }
+
+  function drawTaskChips(content) {
+    const chips = content.querySelector('#taskSelectedChips');
+    const counter = content.querySelector('#taskAssignCount');
+    const byId = {};
+    (taskPickerState.employees || []).forEach(function(e) { byId[String(e['Chat ID'])] = String(e['اسم الموظف'] || 'فني'); });
+
+    const selected = taskPickerState.selected || [];
+    if (!selected.length) {
+      chips.innerHTML = '<span class="task-chips-empty">لم يتم اختيار فني بعد</span>';
+      counter.textContent = 'لم يتم اختيار أحد';
+      return;
+    }
+    counter.textContent = selected.length + ' فني مختار';
+    chips.innerHTML = selected.map(function(id) {
+      return `<span class="task-chip">${escapeHtml(byId[id] || id)}<button type="button" data-chip-remove="${escapeHtml(id)}" aria-label="إزالة">×</button></span>`;
+    }).join('');
+    chips.querySelectorAll('[data-chip-remove]').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        taskPickerState.selected = taskPickerState.selected.filter(function(x) { return x !== btn.dataset.chipRemove; });
+        drawTaskEmpList(content);
+        drawTaskChips(content);
+      });
+    });
+  }
+
+  async function submitTaskCreate(content) {
+    const btn = content.querySelector('#taskCreateSubmit');
+    const msg = content.querySelector('#taskCreateMsg');
+    const fail = function(text) {
+      msg.textContent = text;
+      msg.classList.remove('hidden');
+      btn.disabled = false;
+      btn.textContent = 'إنشاء المهمة';
+      msg.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    };
+
+    const title = content.querySelector('#taskTitleInput').value.trim();
+    const details = content.querySelector('#taskDetailsInput').value.trim();
+    const dueDate = content.querySelector('#taskDueInput').value;
+    const ids = taskPickerState.selected.slice();
+
+    if (title.length < 3) return fail('اكتب عنوان المهمة (٣ أحرف على الأقل).');
+    if (!ids.length) return fail('اختر فنيًا واحدًا على الأقل.');
+    if (!dueDate) return fail('حدد تاريخ الاستحقاق.');
+
+    btn.disabled = true;
+    btn.textContent = 'جارٍ الإنشاء...';
+    msg.classList.add('hidden');
+
+    try {
+      const res = await api('task_create', {
+        title: title,
+        details: details,
+        type: content.querySelector('#taskTypeInput').value,
+        priority: content.querySelector('#taskPriorityInput').value,
+        dueDate: dueDate,
+        employeeIds: ids
+      });
+      if (tg?.showAlert) tg.showAlert('تم إنشاء ' + res.created + ' مهمة · إشعارات: ' + res.notified + '/' + res.total);
+      renderTaskAdmin(content);
+    } catch (e) {
+      fail(e.message || 'تعذر إنشاء المهمة.');
     }
   }
 
@@ -3831,7 +3971,7 @@
   document.querySelectorAll('[data-entity]').forEach(btn => btn.addEventListener('click', () => showList(btn.dataset.entity)));
   $('backBtn').addEventListener('click', () => { const title=$('resultTitle').textContent; $('results').classList.add('hidden'); if(['الطلبات العامة','طلبات الأذونات','السلف والعهد'].includes(title)) showRequestPicker(); else closeModal(); });
   // Exposed for automated UI previews; never used by app logic.
-  window.__mhConsole = { render: renderConsoleInto, setTab: function(t){ consoleState.tab = t; } };
+  window.__mhConsole = { render: renderConsoleInto, setTab: function(t){ consoleState.tab = t; }, taskForm: renderTaskCreateForm, taskAdmin: openTaskAdminPanel };
   initTheme();
   start();
 })();

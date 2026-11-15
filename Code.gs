@@ -3746,10 +3746,14 @@ function tasksCreateMini_(profile, body) {
   const byId = {};
   employees.forEach(function(r) { byId[String(r['Chat ID']).trim()] = String(r['اسم الموظف'] || ''); });
 
-  const requested = Array.isArray(body.employeeIds) ? body.employeeIds.map(String) : [];
-  const targets = requested.length && requested.indexOf('all') < 0
-    ? requested.filter(function(id) { return byId[id]; })
-    : (requested.indexOf('all') >= 0 ? Object.keys(byId) : []);
+  // Normalise incoming ids: the UI may send numbers or padded strings.
+  const requested = Array.isArray(body.employeeIds)
+    ? body.employeeIds.map(function(v) { return String(v == null ? '' : v).trim(); }).filter(Boolean)
+    : [];
+  const wantsAll = requested.indexOf('all') >= 0;
+  const targets = wantsAll
+    ? Object.keys(byId)
+    : requested.filter(function(id) { return byId[id]; });
   if (!targets.length) throw new Error('TASK_TARGET_REQUIRED');
 
   const now = mhStamp_();
