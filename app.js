@@ -2576,6 +2576,88 @@
     }
   }
 
+  /* ============================================================
+   * INTAKE INSPECTION — the real checklist experience
+   * One test at a time with its instruction and a note box,
+   * exactly like «فحص الجهاز», but running inside the intake card
+   * so the answers travel with the new job card.
+   * ============================================================ */
+  function openIntakeInspection(content) {
+    if (!intake.checklist.length) {
+      if (tg?.showAlert) tg.showAlert('لا توجد قائمة فحص لهذا الموديل.');
+      return;
+    }
+    intake.inspectIndex = intake.checklist.findIndex(c => !c.result);
+    if (intake.inspectIndex < 0) intake.inspectIndex = 0;
+    drawIntakeInspection(content);
+  }
+
+  function drawIntakeInspection(content) {
+    const list = intake.checklist;
+    const total = list.length;
+    const step = Math.min(Math.max(intake.inspectIndex, 0), total - 1);
+    const item = list[step];
+    const answered = list.filter(c => c.result).length;
+    const percent = total ? Math.round((answered / total) * 100) : 0;
+    const issues = list.filter(c => c.result === 'مشكلة').length;
+
+    content.innerHTML = `<div class="inspection-wizard">
+      <div class="inspection-wizard-head">
+        <span class="inspection-wizard-kicker">فحص عند الاستلام · ${escapeHtml(intake.model)}</span>
+        <h4>${escapeHtml(item.name)}</h4>
+        <small>تم تقييم ${answered} من ${total}${issues ? ' · مشاكل: ' + issues : ''}</small>
+      </div>
+      <div class="inspection-progress"><span style="width:${percent}%"></span></div>
+
+      <div class="inspection-step">
+        <div class="inspection-step-index">اختبار ${step + 1} من ${total}</div>
+        <b>${escapeHtml(item.name)}</b>
+        ${item.instruction ? `<p class="inspection-step-instruction">${escapeHtml(item.instruction)}</p>` : ''}
+        <div class="inspection-result-group">
+          ${[['سليم','ok'],['مشكلة','bad'],['لم يختبر','skip']].map(([value, kind]) =>
+            `<button type="button" class="inspection-result-btn is-${kind}${item.result === value ? ' is-selected' : ''}" data-result="${value}">${value}</button>`).join('')}
+        </div>
+        <label>ملاحظات
+          <textarea id="intakeInspectNote" rows="2" maxlength="500" placeholder="ملاحظة اختيارية على هذا الاختبار">${escapeHtml(item.note || '')}</textarea>
+        </label>
+      </div>
+
+      <div class="inspection-nav">
+        <button type="button" class="secondary-btn" id="intakeInspectPrev"${step === 0 ? ' disabled' : ''}>السابق</button>
+        <button type="button" class="secondary-btn" id="intakeInspectNext"${step === total - 1 ? ' disabled' : ''}>التالي</button>
+      </div>
+      <button type="button" class="primary-btn" id="intakeInspectDone">إنهاء الفحص والرجوع للبطاقة</button>
+    </div>`;
+
+    content.querySelectorAll('[data-result]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        item.result = btn.dataset.result;
+        item.note = content.querySelector('#intakeInspectNote').value;
+        // Jump to the next untested item, like the standalone inspection.
+        const next = list.findIndex((c, i) => i > step && !c.result);
+        intake.inspectIndex = next >= 0 ? next : Math.min(step + 1, total - 1);
+        drawIntakeInspection(content);
+      });
+    });
+
+    content.querySelector('#intakeInspectNote').addEventListener('input', ev => {
+      item.note = ev.target.value;
+    });
+    content.querySelector('#intakeInspectPrev').addEventListener('click', () => {
+      item.note = content.querySelector('#intakeInspectNote').value;
+      if (step > 0) { intake.inspectIndex = step - 1; drawIntakeInspection(content); }
+    });
+    content.querySelector('#intakeInspectNext').addEventListener('click', () => {
+      item.note = content.querySelector('#intakeInspectNote').value;
+      if (step < total - 1) { intake.inspectIndex = step + 1; drawIntakeInspection(content); }
+    });
+    content.querySelector('#intakeInspectDone').addEventListener('click', () => {
+      item.note = content.querySelector('#intakeInspectNote').value;
+      intake.step = 4;
+      renderIntakeStep(content);
+    });
+  }
+
   function intakeStepsBar(step) {
     const labels = ['العميل', 'نوع الجهاز', 'الموديل', 'الفحص والبيانات'];
     return `<div class="intake-steps">
@@ -2856,8 +2938,8 @@
 
         <section class="intake-card hidden" id="intakeInspectionCard">
           <header class="intake-card-head"><span>✅</span><h4>فحص الجهاز عند الاستلام</h4></header>
-          <p class="intake-note" id="intakeInspectionNote"></p>
-          <div class="intake-inspection" id="intakeInspectionBody"></div>
+          <p class="intake-note" id="intakeInspectionSummary">الجهاز يعمل — ابدأ الفحص خطوة بخطوة بالشرح والملاحظات.</p>
+          <button type="button" class="primary-btn" id="intakeStartInspection">بدء فحص الجهاز</button>
         </section>
 
         <section class="intake-card">
@@ -2960,15 +3042,17 @@
 
         if (intake.powersOn === 'يعمل') {
           card.classList.remove('hidden');
-          hint.textContent = 'الجهاز يعمل — أكمل قائمة الفحص أدناه.';
-          buildInspectionList(content);
+          hint.textContent = 'الجهاز يعمل — يمكنك فحصه الآن.';
+          updateInspectionSummary(content);
         } else {
           card.classList.add('hidden');
           hint.textContent = 'الجهاز لا يعمل — لا حاجة لقائمة الفحص.';
-          intake.checklist.forEach(item => { item.result = ''; });
+          intake.checklist.forEach(item => { item.result = ''; item.note = ''; });
         }
       });
     });
+
+    content.querySelector('#intakeStartInspection').addEventListener('click', () => openIntakeInspection(content));
 
     content.querySelectorAll('[data-part-price]').forEach(chip => {
       chip.addEventListener('click', () => {
@@ -3004,12 +3088,24 @@
       if (!isFinite(estimate) || estimate < 0 || estimate > 1000000) return fail('التكلفة التقديرية غير صحيحة.');
       if (!isFinite(deposit) || deposit < 0 || deposit > 1000000) return fail('العربون غير صحيح.');
 
-      const issues = intake.powersOn === 'يعمل'
-        ? intake.checklist.filter(c => c.result === 'مشكلة').map(c => c.name)
+      // Carry the real inspection outcome into the card: failed items plus
+      // any note the technician wrote on a specific test.
+      const failedItems = intake.powersOn === 'يعمل'
+        ? intake.checklist.filter(c => c.result === 'مشكلة')
         : [];
-      const fullProblem = issues.length
-        ? problem + '\n\nمشاكل الفحص: ' + issues.join(' · ')
-        : problem;
+      const notedItems = intake.powersOn === 'يعمل'
+        ? intake.checklist.filter(c => c.note && c.note.trim())
+        : [];
+      let fullProblem = problem;
+      if (failedItems.length) {
+        fullProblem += '\n\nمشاكل الفحص: ' + failedItems.map(c => c.name).join(' · ');
+      }
+      if (notedItems.length) {
+        fullProblem += '\n\nملاحظات الفحص: ' + notedItems.map(c => c.name + ' — ' + c.note.trim()).join(' | ');
+      }
+      const inspectedCount = intake.powersOn === 'يعمل'
+        ? intake.checklist.filter(c => c.result).length
+        : 0;
 
       btn.disabled = true;
       btn.textContent = 'جارٍ الإنشاء...';
@@ -3028,6 +3124,7 @@
           problem: fullProblem,
           accessories: intake.accessories,
           powersOn: intake.powersOn,
+          inspectedCount: inspectedCount,
           estimate: estimate,
           deposit: deposit,
           dueDate: content.querySelector('#intakeDue').value,
@@ -3042,36 +3139,27 @@
     });
   }
 
-  /* Builds the checklist lazily — only when the device is reported working. */
-  function buildInspectionList(content) {
-    const body = content.querySelector('#intakeInspectionBody');
-    const note = content.querySelector('#intakeInspectionNote');
-    if (!intake.checklist.length) {
-      note.textContent = 'لا توجد قائمة فحص مسجّلة لهذا النوع.';
-      body.innerHTML = '';
+  /* Summarises the inspection state on the intake card. */
+  function updateInspectionSummary(content) {
+    const summary = content.querySelector('#intakeInspectionSummary');
+    const button = content.querySelector('#intakeStartInspection');
+    if (!summary) return;
+    const total = intake.checklist.length;
+    if (!total) {
+      summary.textContent = 'لا توجد قائمة فحص مسجّلة لهذا النوع.';
+      if (button) button.classList.add('hidden');
       return;
     }
-    note.textContent = `${intake.checklist.length} اختبار — حدّد نتيجة كل اختبار.`;
-    body.innerHTML = intake.checklist.map(item => `<div class="intake-inspect-row" data-inspect="${item.index}">
-      <b>${escapeHtml(item.name)}</b>
-      <div class="intake-inspect-actions">
-        <button type="button" data-result="سليم" data-index="${item.index}">سليم</button>
-        <button type="button" data-result="مشكلة" data-index="${item.index}">مشكلة</button>
-      </div>
-    </div>`).join('');
-
-    body.querySelectorAll('[data-result]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const index = Number(btn.dataset.index);
-        const entry = intake.checklist.find(c => c.index === index);
-        if (entry) entry.result = btn.dataset.result;
-        const row = btn.closest('.intake-inspect-row');
-        row.querySelectorAll('[data-result]').forEach(b => b.classList.toggle('is-on', b === btn));
-        row.classList.toggle('has-issue', btn.dataset.result === 'مشكلة');
-      });
-    });
+    const done = intake.checklist.filter(c => c.result).length;
+    const issues = intake.checklist.filter(c => c.result === 'مشكلة').length;
+    summary.textContent = done
+      ? `تم تقييم ${done} من ${total}${issues ? ' · مشاكل: ' + issues : ''}`
+      : `${total} اختبار — بالشرح والملاحظات لكل اختبار.`;
+    if (button) {
+      button.classList.remove('hidden');
+      button.textContent = done ? 'متابعة فحص الجهاز' : 'بدء فحص الجهاز';
+    }
   }
-
 
   $('workspaceSwitch').addEventListener('click', switchWorkspace);
   $('refreshManagerDashboard').addEventListener('click',loadManagerDashboard);
