@@ -312,6 +312,12 @@ function doPost(e) {
       case 'task_review':
         data = tasksReviewMini_(profile, body);
         break;
+      case 'task_edit':
+        data = tasksEditMini_(profile, body);
+        break;
+      case 'task_assignees':
+        data = tasksAssigneesMini_(profile);
+        break;
       case 'task_seed_marketing':
         data = tasksSeedMarketingMini_(profile);
         break;
@@ -3393,7 +3399,7 @@ function configureRepairPriceSourceOnceMini_() {
 const MH_TASK_HEADERS = [
   'رقم المهمة','العنوان','التفاصيل','النوع','Chat ID','اسم الفني','الأولوية',
   'تاريخ الاستحقاق','الحالة','نسبة الإنجاز','رابط الدليل','ملاحظة الفني',
-  'أنشأها Chat ID','أنشأها','تاريخ الإنشاء','تاريخ آخر تحديث','آخر تحديث بواسطة'
+  'ملاحظة المراجعة','أنشأها Chat ID','أنشأها','تاريخ الإنشاء','تاريخ آخر تحديث','آخر تحديث بواسطة'
 ];
 const MH_TASK_STATUSES = ['جديدة','قيد التنفيذ','بانتظار المراجعة','مكتملة','ملغاة'];
 const MH_TASK_PRIORITIES = ['عادية','مهمة','عاجلة'];
@@ -3401,7 +3407,24 @@ const MH_TASK_TYPES = ['دعاية','صيانة','تدريب','جودة','أخر
 const MH_TASK_SHEET_ = 'المهام';
 
 function mhTaskSheet_() {
-  const sh = mhEnsureSheet_(MH_TASK_SHEET_, MH_TASK_HEADERS);
+  const ss = spreadsheet_();
+  let sh = ss.getSheetByName(MH_TASK_SHEET_);
+  if (!sh) {
+    sh = ss.insertSheet(MH_TASK_SHEET_);
+    sh.getRange(1, 1, 1, MH_TASK_HEADERS.length).setValues([MH_TASK_HEADERS]);
+    sh.setFrozenRows(1);
+    return sh;
+  }
+  // An older task sheet may predate a column (e.g. ملاحظة المراجعة).
+  // Append only the missing headers so existing rows are never disturbed.
+  const width = Math.max(sh.getLastColumn(), 1);
+  const existing = sh.getRange(1, 1, 1, width).getDisplayValues()[0]
+    .map(function(h) { return String(h).trim(); });
+  const missing = MH_TASK_HEADERS.filter(function(h) { return existing.indexOf(h) < 0; });
+  if (missing.length) {
+    sh.getRange(1, width + 1, 1, missing.length).setValues([missing]);
+  }
+  if (sh.getFrozenRows() === 0) sh.setFrozenRows(1);
   return sh;
 }
 
@@ -3462,6 +3485,7 @@ function tasksListMini_(profile, body) {
       progress: Number(r['نسبة الإنجاز'] || 0),
       proofUrl: String(r['رابط الدليل'] || ''),
       employeeNote: String(r['ملاحظة الفني'] || ''),
+      reviewNote: String(r['ملاحظة المراجعة'] || ''),
       createdBy: String(r['أنشأها'] || ''),
       createdAt: String(r['تاريخ الإنشاء'] || ''),
       updatedAt: String(r['تاريخ آخر تحديث'] || ''),
@@ -3629,7 +3653,10 @@ function tasksReviewMini_(profile, body) {
     if (decision === 'اعتماد') sh.getRange(found.__row, map['نسبة الإنجاز']).setValue(100);
     sh.getRange(found.__row, map['تاريخ آخر تحديث']).setValue(mhStamp_());
     sh.getRange(found.__row, map['آخر تحديث بواسطة']).setValue(String(profile.name || profile.chatId));
-    if (note && map['ملاحظة الفني']) sh.getRange(found.__row, map['ملاحظة الفني']).setValue(note);
+    // Review notes get their own column; the technician's note must survive.
+    if (note) {
+      if (map['ملاحظة المراجعة']) sh.getRange(found.__row, map['ملاحظة المراجعة']).setValue(note);
+    }
   } finally { lock.releaseLock(); }
 
   try {
@@ -3888,5 +3915,119 @@ function notificationsTestMini_(profile) {
     message: ok
       ? 'تم إرسال رسالة اختبار إلى تلجرام.'
       : 'تعذر الإرسال. تأكد أنك بدأت محادثة مع البوت (/start) ثم أعد المحاولة.'
+  };
+}
+
+/**
+ * Manager edit of an existing task: text, type, priority, due date,
+ * reassignment to another technician, and status override.
+ * Assignment changes notify both the old and the new technician.
+ */
+function tasksEditMini_(profile, body) {
+  mhTaskRequireStaff_(profile);
+  const id = String(body.taskId || '').trim();
+  if (!id) throw new Error('TASK_NOT_FOUND');
+
+  const sh = mhTaskSheet_();
+  mhAssertHeaders_(sh, MH_TASK_HEADERS);
+  const map = mhHeaderMap_(sh);
+  const found = mhTaskRows_(sh).find(function(r) { return String(r['رقم المهمة'] || '').trim() === id; });
+  if (!found) throw new Error('TASK_NOT_FOUND');
+
+  const oldChatId = String(found['Chat ID'] || '').trim();
+  const oldName = String(found['اسم الفني'] || '');
+
+  const title = body.title === undefined ? String(found['العنوان'] || '') : String(body.title || '').trim();
+  const details = body.details === undefined ? String(found['التفاصيل'] || '') : String(body.details || '').trim();
+  const type = body.type === undefined ? String(found['النوع'] || '') : String(body.type || '').trim();
+  const priority = body.priority === undefined ? String(found['الأولوية'] || 'عادية') : String(body.priority || '').trim();
+  const dueDate = body.dueDate === undefined ? mhDate_(found['تاريخ الاستحقاق']) : (mhIsoDate_(body.dueDate) || '');
+  const status = body.status === undefined ? String(found['الحالة'] || 'جديدة') : String(body.status || '').trim();
+  const targetChatId = body.employeeId === undefined ? oldChatId : String(body.employeeId || '').trim();
+
+  if (title.length < 3 || title.length > 120) throw new Error('INVALID_TASK_TITLE');
+  if (details.length > 1500) throw new Error('INVALID_TASK_DETAILS');
+  if (MH_TASK_TYPES.indexOf(type) < 0) throw new Error('INVALID_TASK_TYPE');
+  if (MH_TASK_PRIORITIES.indexOf(priority) < 0) throw new Error('INVALID_TASK_PRIORITY');
+  if (MH_TASK_STATUSES.indexOf(status) < 0) throw new Error('INVALID_TASK_STATUS');
+
+  // Resolve the assignee (allows moving a task to a different technician).
+  let targetName = oldName;
+  if (targetChatId !== oldChatId) {
+    const emp = rowsAsObjects_(spreadsheet_(), MH.SHEETS.employees).find(function(r) {
+      return String(r['Chat ID'] || '').trim() === targetChatId &&
+        String(r['الحالة'] || 'نشط').trim() === 'نشط' &&
+        String(r['حالة الحساب'] || 'نشط').trim() === 'نشط';
+    });
+    if (!emp) throw new Error('EMPLOYEE_NOT_FOUND_OR_INACTIVE');
+    targetName = String(emp['اسم الموظف'] || '');
+  }
+
+  const lock = LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    const set = function(header, value) {
+      if (map[header]) sh.getRange(found.__row, map[header]).setValue(value);
+    };
+    set('العنوان', title);
+    set('التفاصيل', details);
+    set('النوع', type);
+    set('الأولوية', priority);
+    set('تاريخ الاستحقاق', dueDate);
+    set('الحالة', status);
+    if (status === 'مكتملة') set('نسبة الإنجاز', 100);
+    if (targetChatId !== oldChatId) {
+      set('Chat ID', targetChatId);
+      set('اسم الفني', targetName);
+      set('نسبة الإنجاز', 0);
+      set('رابط الدليل', '');
+      set('ملاحظة الفني', '');
+      set('الحالة', 'جديدة');
+    }
+    set('تاريخ آخر تحديث', mhStamp_());
+    set('آخر تحديث بواسطة', String(profile.name || profile.chatId));
+  } finally { lock.releaseLock(); }
+
+  // Notify the new assignee; tell the previous one when the task moved away.
+  if (targetChatId !== oldChatId) {
+    mhNotifyEmployee_(targetChatId,
+      '📌 أُسندت إليك مهمة\n━━━━━━━━━━━━━━━━━━\n' +
+      '📝 ' + title + '\n' +
+      '🏷 ' + type + ' · ' + priority + '\n' +
+      '📅 الاستحقاق: ' + (dueDate || 'بدون تاريخ') + '\n' +
+      '━━━━━━━━━━━━━━━━━━\nافتح التطبيق ← تسكاتي.',
+      'إسناد مهمة');
+    if (oldChatId) {
+      mhNotifyEmployee_(oldChatId,
+        '↩️ نُقلت المهمة إلى فني آخر\n━━━━━━━━━━━━━━━━━━\n📝 ' + title + '\nلم تعد مطلوبة منك.',
+        'إلغاء إسناد');
+    }
+  }
+
+  return {
+    updated: true,
+    taskId: id,
+    reassigned: targetChatId !== oldChatId,
+    employeeId: targetChatId,
+    employeeName: targetName,
+    status,
+    message: targetChatId !== oldChatId
+      ? 'تم تحديث المهمة وإسنادها إلى ' + targetName
+      : 'تم تحديث المهمة.'
+  };
+}
+
+/** Technicians eligible for assignment (used by the edit form). */
+function tasksAssigneesMini_(profile) {
+  mhTaskRequireStaff_(profile);
+  return {
+    employees: rowsAsObjects_(spreadsheet_(), MH.SHEETS.employees)
+      .filter(function(r) {
+        return String(r['Chat ID'] || '').trim() &&
+          String(r['الحالة'] || 'نشط').trim() === 'نشط' &&
+          String(r['حالة الحساب'] || 'نشط').trim() === 'نشط';
+      })
+      .map(function(r) {
+        return { id: String(r['Chat ID']).trim(), name: String(r['اسم الموظف'] || '') };
+      })
   };
 }

@@ -1854,6 +1854,49 @@ footer{
 }
 .notification-tools button{min-height:40px;font-size:11.5px}
 
+.task-proof-box{
+  display:grid;gap:7px;
+  padding:12px 13px;
+  border-radius:var(--r-md);
+  border:1px solid var(--line);
+  background:rgba(255,255,255,.025);
+}
+.task-proof-link{
+  display:inline-flex;align-items:center;gap:6px;
+  align-self:start;
+  padding:8px 13px;
+  border-radius:var(--r-pill);
+  border:1px solid var(--brand-line);
+  background:var(--brand-wash);
+  color:var(--brand-2);
+  font-size:11.5px;font-weight:800;
+  text-decoration:none;
+}
+.task-proof-box small{
+  font-size:10px;color:var(--text-3);
+  word-break:break-all;line-height:1.6;
+}
+.task-proof-text{
+  font-size:11.5px;line-height:1.85;color:var(--text-2);
+  white-space:pre-wrap;word-break:break-word;
+}
+.task-note-label{
+  margin-top:3px;
+  font-size:10px;font-weight:800;letter-spacing:.3px;
+  color:var(--text-3);
+}
+.task-review-note{
+  padding:11px 13px;
+  border-radius:var(--r-sm);
+  border:1px solid var(--warn);
+  background:var(--warn-wash);
+}
+.task-review-note b{display:block;font-size:11px;color:var(--warn);margin-bottom:3px}
+.task-review-note p{margin:0;font-size:11.5px;line-height:1.8;color:var(--text-2)}
+
+.task-row[data-task-open]{cursor:pointer}
+.task-row.is-review[data-task-open]:hover{border-color:var(--brand-line)}
+
 /* --- Part categories: the step that keeps the screen short --- */
 .price-generation-grid{
   display:grid;
@@ -2121,3 +2164,6 @@ footer{
 [data-theme="light"] .task-mini-btn{background:rgba(15,35,55,.05)}
 [data-theme="light"] .task-badge{color:#20140A}
 [data-theme="light"] .task-badge.is-urgent{color:#fff}
+[data-theme="light"] .task-proof-box{background:rgba(15,35,55,.035)}
+[data-theme="light"] .task-proof-link{background:var(--brand-wash)}
+[data-theme="light"] .task-review-note{background:var(--warn-wash)}
