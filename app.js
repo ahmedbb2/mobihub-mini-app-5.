@@ -334,8 +334,12 @@
       ? requestedWorkspace : roleDefaultWorkspace;
 
     $('userName').textContent = data.profile.name;
-    const roleNames = { employee: 'مهندس', supervisor: 'مشرف', admin: 'مدير', finance: 'مالية', super_admin: 'مدير النظام' };
-    $('userRole').textContent = roleNames[currentRole] || currentRole;
+    // Show the real job title from the employees sheet (e.g. «مهندس هارد وير»,
+    // «مسئول استلام», «محاسب») instead of a generic role word.
+    const roleNames = { employee: 'فني', supervisor: 'مشرف', admin: 'مدير', finance: 'مالية', super_admin: 'مدير النظام' };
+    const jobTitle = String(data.profile.job || '').trim();
+    $('userRole').textContent = jobTitle || roleNames[currentRole] || currentRole;
+    $('userRole').classList.toggle('is-job', !!jobTitle);
     $('workspaceSwitch').classList.toggle('hidden', !(availableWorkspaces.includes('employee') && availableWorkspaces.includes('manager')));
     $('workspaceSwitch').textContent = workspaceRole === 'manager' ? 'لوحة المهندس' : 'لوحة المدير';
     $('workspaceSwitch').setAttribute('aria-label', workspaceRole === 'manager' ? 'التحويل إلى لوحة المهندس' : 'التحويل إلى لوحة المدير');
@@ -353,7 +357,7 @@
 
   const managerModuleTitles = {
     daily:'المتابعة اليومية', staff:'شؤون المهندسين', shifts:'إدارة الورديات', requests:'طلبات المهندسين والتواصل',
-    tasks:'المهام والتسكات',
+    tasks:'المهام والتسكات', parts:'قطع الغيار',
     finance:'الإدارة المالية', overtime:'الأوفر تايم', devices:'الأجهزة والصيانة', system:'التقارير والنظام', notifications:'مركز الإشعارات', managers:'إدارة المديرين'
   };
   let managerDashboardCache = null;
@@ -401,6 +405,7 @@
     if(!permitted) { if(tg?.showAlert) tg.showAlert('هذه الخدمة غير متاحة حسب صلاحية حسابك.'); return; }
     const title=managerModuleTitles[module] || 'الإدارة';
     if(module==='tasks') { closeModal(); await openTaskAdminPanel(); return; }
+    if(module==='parts') { closeModal(); await openPartAdminPanel(); return; }
     if(module==='requests') {
       const panel=managerPanel(title,'<button type="button" class="manager-action-card" id="managerOpenPendingRequests"><b>مراجعة الطلبات والأذونات</b><small>مراجعة الطلبات المقدمة من المهندسين</small></button><button type="button" class="manager-action-card" id="managerOpenComplaints"><b>شكاوى المهندسين</b><small>فتح الشكاوى ومتابعة الردود والحالات</small></button>');
       panel.querySelector('#managerOpenPendingRequests').addEventListener('click',async()=>{closeModal();openModal('مراجعة الطلبات والأذونات',$('reviewCenter'));await loadReviews();});
@@ -817,6 +822,7 @@
     if(action==='rewards'){ $('financeCenter').classList.remove('hidden'); openModal('مكافآتي', $('financeCenter')); loadFinanceSummary(); return;}
     if(action==='monthly'){loadMonthlySummary();return;}
     if(action==='tasks'){await openTasksPanel();return;}
+    if(action==='part-request'){await openPartRequestPanel();return;}
     if(action==='devices'){await openEmployeeDevices();return;}
     if(action==='inspection'){await openStandaloneDeviceInspection();return;}
     if(action==='repair-prices'){await openRepairPriceBook();return;}
@@ -2023,11 +2029,25 @@
             ? '<button type="button" class="primary-btn" id="taskApprove">اعتماد المهمة</button><button type="button" class="secondary-btn" id="taskReturn">إعادة للفني</button>'
             : '<button type="button" class="secondary-btn" id="taskReturn">إعادة للفني</button>'}
           <button type="button" class="secondary-btn" id="taskEditOpen">تعديل المهمة</button>
-        </div>` : `<div class="task-actions-sticky"><button type="button" class="secondary-btn" id="taskEditOpen">تعديل المهمة</button></div>`}
+          <button type="button" class="danger-btn" id="taskDelete">حذف المهمة</button>
+        </div>` : `<div class="task-actions-sticky"><button type="button" class="secondary-btn" id="taskEditOpen">تعديل المهمة</button><button type="button" class="danger-btn" id="taskDelete">حذف المهمة</button></div>`}
       </div>`;
 
       content.querySelector('#taskReviewBack').addEventListener('click', () => renderTaskAdmin(content));
       content.querySelector('#taskEditOpen').addEventListener('click', () => openTaskEditForm(content, task));
+      content.querySelector('#taskDelete').addEventListener('click', async () => {
+        const ok = tg?.showConfirm
+          ? await new Promise(res => tg.showConfirm('حذف المهمة نهائيًا؟ لا يمكن التراجع.', res))
+          : window.confirm('حذف المهمة نهائيًا؟');
+        if (!ok) return;
+        try {
+          const res = await api('task_delete', { taskId: task.id });
+          if (tg?.showAlert) tg.showAlert(res.message || 'تم حذف المهمة.');
+          renderTaskAdmin(content);
+        } catch (e) {
+          if (tg?.showAlert) tg.showAlert(e.message);
+        }
+      });
 
       const noteValue = () => {
         const box = content.querySelector('#taskReviewNote');
@@ -2192,6 +2212,180 @@
           btn.disabled = false;
         }
       });
+    } catch (e) {
+      content.innerHTML = `<div class="manager-load-error">${escapeHtml(e.message)}</div>`;
+    }
+  }
+
+
+  /* ============================================================
+   * SPARE PART REQUESTS — «طلب قطعة غيار»
+   * The technician states the part, the purpose (repair or test),
+   * and why. The part is bound to that technician once approved.
+   * ============================================================ */
+
+  const PART_STATUS_CLASS = {
+    'بانتظار الموافقة': 'is-review',
+    'معتمد': 'is-progress',
+    'مرفوض': 'is-cancelled',
+    'تم الصرف': 'is-done'
+  };
+
+  function partStatusBadge(status) {
+    return `<span class="task-status ${PART_STATUS_CLASS[status] || 'is-new'}">${escapeHtml(status)}</span>`;
+  }
+
+  async function openPartRequestPanel() {
+    const panel = managerPanel('طلب قطعة غيار', '<div class="manager-loading">جاري تحميل طلباتك...</div>');
+    const content = panel.querySelector('.manager-module-content');
+    await renderPartRequestHome(content);
+  }
+
+  async function renderPartRequestHome(content) {
+    content.innerHTML = '<div class="manager-loading">جاري تحميل طلباتك...</div>';
+    try {
+      const data = await api('part_requests_mine');
+      const requests = data.requests || [];
+      const pending = requests.filter(r => r.status === 'بانتظار الموافقة').length;
+
+      content.innerHTML = `<div class="tasks-screen">
+        <div class="part-intro">
+          <b>اطلب القطعة قبل استخدامها</b>
+          <p>القطعة تُصرف باسمك، ويجب أن تكون مطابقة لما طلبته بالضبط. لا تستخدم قطعة لم تُعتمد.</p>
+        </div>
+
+        <div class="tasks-summary">
+          <div class="tasks-summary-item${pending ? ' is-urgent' : ''}"><b>${pending}</b><small>بانتظار الموافقة</small></div>
+          <div class="tasks-summary-item"><b>${requests.filter(r => r.status === 'معتمد').length}</b><small>معتمدة</small></div>
+          <div class="tasks-summary-item"><b>${requests.filter(r => r.status === 'تم الصرف').length}</b><small>تم صرفها</small></div>
+        </div>
+
+        <button type="button" class="primary-btn" id="partNewBtn">+ طلب قطعة جديدة</button>
+
+        <h5 class="price-group-title">طلباتي</h5>
+        <div class="tasks-list">
+          ${requests.length ? requests.map(r => `<article class="task-row">
+            <span class="task-row-main">
+              <b>${escapeHtml(r.partName)} <span class="part-qty">×${r.quantity}</span></b>
+              <small>${escapeHtml(r.purpose)}${r.deviceRef ? ' · ' + escapeHtml(r.deviceRef) : ''}</small>
+              <small class="part-id">${escapeHtml(r.id)} · ${escapeHtml(String(r.createdAt).slice(0, 10))}</small>
+            </span>
+            ${partStatusBadge(r.status)}
+          </article>`).join('') : '<p class="manager-empty-state"><b>لا توجد طلبات</b><p>اطلب أول قطعة غيار من الزر أعلاه.</p></p>'}
+        </div>
+      </div>`;
+
+      content.querySelector('#partNewBtn').addEventListener('click', () => renderPartRequestForm(content));
+    } catch (e) {
+      content.innerHTML = `<div class="manager-load-error">${escapeHtml(e.message)}</div>`;
+    }
+  }
+
+  async function renderPartRequestForm(content) {
+    content.innerHTML = `<div class="tasks-screen">
+      <div class="price-screen-head">
+        <button type="button" class="price-back" id="partFormBack">← رجوع</button>
+        <div><h4>طلب قطعة غيار</h4><small>يُرسل للإدارة للموافقة</small></div>
+      </div>
+
+      <label>القطعة المطلوبة<input id="partName" maxlength="120" placeholder="مثال: شاشة iPhone 13"></label>
+      <label>الغرض من الاستخدام<select id="partPurpose">
+        <option>إصلاح جهاز عميل</option>
+        <option>تجربة وفحص</option>
+      </select></label>
+      <label>رقم الطلب / الجهاز (اختياري)<input id="partDevice" maxlength="60" placeholder="مثال: ORD-1234"></label>
+      <label>الكمية<input id="partQty" type="number" min="1" max="20" step="1" value="1" inputmode="numeric"></label>
+      <label>سبب الاستخدام<textarea id="partReason" rows="3" maxlength="500" placeholder="اشرح لماذا تحتاج هذه القطعة تحديدًا..."></textarea></label>
+
+      <div class="task-actions-sticky">
+        <button type="button" class="primary-btn" id="partSubmit">إرسال الطلب للموافقة</button>
+      </div>
+      <p class="manager-note">لا تُصرف أي قطعة قبل الاعتماد. القطعة المعتمدة تُسجّل باسمك.</p>
+    </div>`;
+
+    content.querySelector('#partFormBack').addEventListener('click', () => renderPartRequestHome(content));
+
+    content.querySelector('#partSubmit').addEventListener('click', async ev => {
+      const btn = ev.currentTarget;
+      btn.disabled = true;
+      const original = btn.textContent;
+      btn.textContent = 'جارٍ الإرسال...';
+      try {
+        const res = await api('part_request_create', {
+          partName: content.querySelector('#partName').value.trim(),
+          purpose: content.querySelector('#partPurpose').value,
+          deviceRef: content.querySelector('#partDevice').value.trim(),
+          quantity: Number(content.querySelector('#partQty').value),
+          reason: content.querySelector('#partReason').value.trim()
+        });
+        if (tg?.showAlert) tg.showAlert(`تم إرسال الطلب ${res.requestId}\n${res.message}`);
+        renderPartRequestHome(content);
+      } catch (e) {
+        if (tg?.showAlert) tg.showAlert(e.message);
+        btn.disabled = false;
+        btn.textContent = original;
+      }
+    });
+  }
+
+  /* ---------- Manager: review part requests ---------- */
+
+  async function openPartAdminPanel() {
+    const panel = managerPanel('طلبات قطع الغيار', '<div class="manager-loading">جاري تحميل الطلبات...</div>');
+    const content = panel.querySelector('.manager-module-content');
+    await renderPartAdmin(content);
+  }
+
+  async function renderPartAdmin(content) {
+    content.innerHTML = '<div class="manager-loading">جاري تحميل الطلبات...</div>';
+    try {
+      const data = await api('part_requests_all');
+      const requests = data.requests || [];
+      const summary = data.summary || {};
+
+      content.innerHTML = `<div class="tasks-screen">
+        <div class="tasks-summary">
+          <div class="tasks-summary-item${summary.pending ? ' is-urgent' : ''}"><b>${summary.pending || 0}</b><small>بانتظار الموافقة</small></div>
+          <div class="tasks-summary-item"><b>${summary.approved || 0}</b><small>معتمدة</small></div>
+          <div class="tasks-summary-item"><b>${summary.rejected || 0}</b><small>مرفوضة</small></div>
+        </div>
+
+        <div class="tasks-list">
+          ${requests.length ? requests.map(r => `<article class="task-row part-admin-row">
+            <span class="task-row-main">
+              <b>${escapeHtml(r.partName)} <span class="part-qty">×${r.quantity}</span></b>
+              <small>${escapeHtml(r.employeeName)} · ${escapeHtml(r.purpose)}${r.deviceRef ? ' · ' + escapeHtml(r.deviceRef) : ''}</small>
+              <small class="part-reason">${escapeHtml(r.reason)}</small>
+              <small class="part-id">${escapeHtml(r.id)}</small>
+            </span>
+            <span class="task-row-actions">
+              ${partStatusBadge(r.status)}
+              ${r.status === 'بانتظار الموافقة'
+                ? `<button type="button" class="task-mini-btn is-approve" data-part-approve="${escapeHtml(r.id)}">اعتماد</button>
+                   <button type="button" class="task-mini-btn" data-part-reject="${escapeHtml(r.id)}">رفض</button>`
+                : r.status === 'معتمد'
+                  ? `<button type="button" class="task-mini-btn is-approve" data-part-issue="${escapeHtml(r.id)}">تم الصرف</button>`
+                  : ''}
+            </span>
+          </article>`).join('') : '<p class="manager-empty-state">لا توجد طلبات قطع غيار.</p>'}
+        </div>
+      </div>`;
+
+      const decide = async (id, decision) => {
+        try {
+          await api('part_request_decide', { requestId: id, decision });
+          if (tg?.showAlert) tg.showAlert('تم تحديث الطلب.');
+          renderPartAdmin(content);
+        } catch (e) {
+          if (tg?.showAlert) tg.showAlert(e.message);
+        }
+      };
+      content.querySelectorAll('[data-part-approve]').forEach(b =>
+        b.addEventListener('click', () => decide(b.dataset.partApprove, 'معتمد')));
+      content.querySelectorAll('[data-part-reject]').forEach(b =>
+        b.addEventListener('click', () => decide(b.dataset.partReject, 'مرفوض')));
+      content.querySelectorAll('[data-part-issue]').forEach(b =>
+        b.addEventListener('click', () => decide(b.dataset.partIssue, 'تم الصرف')));
     } catch (e) {
       content.innerHTML = `<div class="manager-load-error">${escapeHtml(e.message)}</div>`;
     }

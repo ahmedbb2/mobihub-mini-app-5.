@@ -1891,6 +1891,53 @@ footer{
 }
 .notification-tools button{min-height:40px;font-size:11.5px}
 
+/* ===================================================================
+   TASKS: delete + spare parts
+   =================================================================== */
+.danger-btn{
+  min-height:44px;
+  border-radius:var(--r-md);
+  border:1px solid var(--danger-line);
+  background:var(--danger-wash);
+  color:var(--danger);
+  font-family:inherit;font-size:12px;font-weight:800;
+  cursor:pointer;
+  transition:background .14s,border-color .14s;
+}
+.danger-btn:hover{background:rgba(255,80,70,.18)}
+.danger-btn:disabled{opacity:.5;cursor:not-allowed}
+
+.part-intro{
+  display:grid;gap:4px;
+  padding:12px 14px;
+  border-radius:var(--r-md);
+  border:1px solid var(--info-wash);
+  background:var(--info-wash);
+}
+.part-intro b{font-size:12.5px;color:var(--info)}
+.part-intro p{margin:0;font-size:11px;line-height:1.75;color:var(--text-2)}
+
+.part-qty{
+  display:inline-block;
+  margin-inline-start:3px;
+  padding:1px 6px;
+  border-radius:var(--r-pill);
+  background:rgba(255,255,255,.09);
+  font-size:10px;font-weight:800;
+  color:var(--text-2);
+}
+.part-id{font-family:var(--font-mono,ui-monospace),monospace;font-size:9.5px;color:var(--text-3)}
+.part-reason{
+  display:block;
+  padding:5px 0 0;
+  font-size:10.5px;line-height:1.7;
+  color:var(--text-3);
+}
+.part-admin-row{align-items:flex-start}
+.part-admin-row .task-row-actions{
+  display:grid;gap:5px;justify-items:end;
+}
+
 .task-proof-box{
   display:grid;gap:7px;
   padding:12px 13px;
@@ -2204,3 +2251,130 @@ footer{
 [data-theme="light"] .task-proof-box{background:rgba(15,35,55,.035)}
 [data-theme="light"] .task-proof-link{background:var(--brand-wash)}
 [data-theme="light"] .task-review-note{background:var(--warn-wash)}
+
+/* ===================================================================
+   V1.14 — SPACING & TYPOGRAPHY PASS
+   The page had no rule for <main>, so every section sat flush against
+   the sticky header and against each other. This section defines the
+   vertical rhythm and tightens the header card.
+   =================================================================== */
+main{display:grid;gap:14px;min-width:0}
+
+.app-shell{padding:14px 12px 96px;padding-bottom:calc(96px + env(safe-area-inset-bottom,0px))}
+
+/* --- Header card: name, job title, and breathing room --- */
+.welcome{
+  margin:0;
+  padding:18px 18px 17px;
+  gap:12px;
+  align-items:flex-start;
+}
+.welcome>div:first-child{
+  min-width:0;
+  display:grid;
+  gap:5px;
+}
+.welcome .eyebrow{margin:0;line-height:1.5}
+.welcome h1{
+  margin:0;
+  font-size:19px;
+  line-height:1.4;
+  letter-spacing:-.2px;
+  overflow-wrap:anywhere;
+}
+.welcome #userRole{
+  margin:1px 0 0;
+  display:inline-flex;
+  align-items:center;
+  gap:5px;
+  width:fit-content;
+  padding:3px 10px;
+  border-radius:var(--r-pill);
+  border:1px solid var(--line);
+  background:rgba(255,255,255,.04);
+  font-size:10.5px;
+  font-weight:700;
+  line-height:1.6;
+  color:var(--text-3);
+}
+.welcome #userRole.is-job{
+  border-color:var(--brand-line);
+  background:var(--brand-wash);
+  color:var(--brand-2);
+}
+.welcome-mark{font-size:34px;line-height:1}
+
+/* --- Section rhythm --- */
+.menu-section{
+  margin-top:0;
+  padding-top:14px;
+  display:grid;
+  gap:10px;
+}
+.menu-section:first-child{padding-top:0;border-top:0}
+.menu-section-title{
+  display:flex;
+  align-items:baseline;
+  justify-content:space-between;
+  gap:8px;
+  flex-wrap:wrap;
+  margin:0;
+  line-height:1.6;
+}
+.menu-section-title span{
+  font-size:10.5px;
+  color:var(--text-3);
+  font-weight:600;
+}
+.legacy-menu-grid{gap:9px}
+
+/* --- Cards inside the menu --- */
+.home-card{
+  padding:13px 14px;
+  gap:10px;
+  align-items:center;
+  min-height:78px;
+}
+.home-card-text{display:grid;gap:2px;min-width:0}
+.home-card-text b{font-size:12.5px;line-height:1.5}
+.home-card-text small{font-size:10.5px;line-height:1.6;color:var(--text-3)}
+
+/* --- Workspace spacing --- */
+.workspace-layout{gap:14px}
+.manager-dashboard{display:grid;gap:14px}
+
+/* --- Global type refinement --- */
+.welcome h1,
+.manager-hero h2,
+.section-head h2{letter-spacing:-.25px}
+
+[data-theme="light"] .welcome #userRole{
+  background:rgba(15,35,55,.045);
+  border-color:var(--line);
+}
+[data-theme="light"] .welcome #userRole.is-job{
+  background:var(--brand-wash);
+  border-color:var(--brand-line);
+  color:var(--brand-2);
+}
+[data-theme="light"] .part-qty{background:rgba(15,35,55,.07)}
+
+/* V1.14 — engineer panel card: the header used to leave a large empty gap
+   because the card had 14px padding and a 4px grid gap while the first menu
+   section added its own top padding. */
+.home-actions.legacy-home-actions{
+  padding:16px;
+  gap:12px;
+}
+.home-actions.legacy-home-actions > .section-head{
+  padding-bottom:10px;
+  margin-bottom:0;
+}
+.home-actions.legacy-home-actions .menu-section{
+  padding-top:12px;
+  margin-top:0;
+}
+.home-actions.legacy-home-actions .menu-section:first-of-type{
+  padding-top:0;
+  border-top:0;
+}
