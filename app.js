@@ -3161,6 +3161,119 @@
     }
   }
 
+  /* ============================================================
+   * BUTTON VISIBILITY CONTROL (Super Admin)
+   * Choose which home tiles each technician sees.
+   * ============================================================ */
+
+  async function openButtonsMatrix() {
+    const panel = managerPanel('التحكم في أزرار الفنيين', '<div class="manager-loading">جاري تحميل الأزرار...</div>');
+    const content = panel.querySelector('.manager-module-content');
+    await renderButtonsMatrix(content);
+  }
+
+  async function renderButtonsMatrix(content, selectedId) {
+    content.innerHTML = '<div class="manager-loading">جاري تحميل الأزرار...</div>';
+    try {
+      const data = await api('buttons_matrix_get');
+      const employees = data.employees || [];
+      const buttons = data.buttons || [];
+
+      const groups = {};
+      buttons.forEach(b => {
+        if (!groups[b.group]) groups[b.group] = [];
+        groups[b.group].push(b);
+      });
+
+      const current = employees.find(e => e.employeeId === selectedId) || employees[0];
+      const visibleCount = current ? buttons.filter(b => current.visible[b.key] !== false).length : 0;
+
+      content.innerHTML = `<div class="notify-matrix">
+        <div class="notify-intro">
+          <b>تحكم في أزرار كل فني</b>
+          <p>أخفِ أي زر عن أي فني. الإخفاء يمنع الزر من الظهور في تطبيقه فقط، ولا يغيّر صلاحيات الخادم.</p>
+        </div>
+
+        <label class="notify-picker">الفني
+          <select id="btnPickEmployee">
+            ${employees.map(e => `<option value="${escapeHtml(e.employeeId)}"${current && e.employeeId === current.employeeId ? ' selected' : ''}>${escapeHtml(e.name)}${e.job ? ' — ' + escapeHtml(e.job) : ''}</option>`).join('')}
+          </select>
+        </label>
+
+        ${current ? `
+          <div class="btn-matrix-summary">
+            <span>${visibleCount} من ${buttons.length} زر ظاهر</span>
+          </div>
+
+          <div class="notify-bulk">
+            <button type="button" class="secondary-btn" id="btnShowAll">إظهار الكل</button>
+            <button type="button" class="danger-btn" id="btnHideAll">إخفاء الكل</button>
+          </div>
+
+          ${Object.keys(groups).map(group => `<div class="notify-group">
+            <h5 class="price-group-title">${escapeHtml(group)}</h5>
+            <div class="btn-matrix-list">
+              ${groups[group].map(b => {
+                const isVisible = current.visible[b.key] !== false;
+                return `<label class="btn-matrix-row${isVisible ? '' : ' is-hidden'}">
+                  <span>${escapeHtml(b.label)}</span>
+                  <span class="notify-switch">
+                    <input type="checkbox" data-btn-toggle data-emp="${escapeHtml(current.employeeId)}" data-button="${escapeHtml(b.key)}"${isVisible ? ' checked' : ''}>
+                    <i></i>
+                  </span>
+                </label>`;
+              }).join('')}
+            </div>
+          </div>`).join('')}
+        ` : '<p class="manager-empty-state">لا يوجد فنيون نشطون.</p>'}
+      </div>`;
+
+      content.querySelector('#btnPickEmployee')?.addEventListener('change', ev => {
+        renderButtonsMatrix(content, ev.target.value);
+      });
+      content.querySelector('#btnShowAll')?.addEventListener('click', () => bulkButtons(content, current.employeeId, true));
+      content.querySelector('#btnHideAll')?.addEventListener('click', () => bulkButtons(content, current.employeeId, false));
+
+      content.querySelectorAll('[data-btn-toggle]').forEach(box => {
+        box.addEventListener('change', async () => {
+          const d = box.dataset;
+          box.disabled = true;
+          try {
+            await api('buttons_matrix_set', {
+              employeeId: d.emp, button: d.button, visible: box.checked
+            });
+            const row = box.closest('.btn-matrix-row');
+            if (row) row.classList.toggle('is-hidden', !box.checked);
+            updateBtnSummary(content, buttons.length);
+          } catch (e) {
+            box.checked = !box.checked;
+            if (tg?.showAlert) tg.showAlert(e.message);
+          } finally { box.disabled = false; }
+        });
+      });
+    } catch (e) {
+      content.innerHTML = `<div class="manager-load-error">${escapeHtml(e.message)}</div>`;
+    }
+  }
+
+  function updateBtnSummary(content, total) {
+    const el = content.querySelector('.btn-matrix-summary span');
+    if (!el) return;
+    const on = content.querySelectorAll('[data-btn-toggle]:checked').length;
+    el.textContent = `${on} من ${total} زر ظاهر`;
+  }
+
+  async function bulkButtons(content, employeeId, visible) {
+    try {
+      await api('buttons_matrix_bulk', { employeeId, visible });
+      if (tg?.showAlert) tg.showAlert(visible ? 'تم إظهار كل الأزرار.' : 'تم إخفاء كل الأزرار.');
+      renderButtonsMatrix(content, employeeId);
+    } catch (e) {
+      if (tg?.showAlert) tg.showAlert(e.message);
+    }
+  }
+
+
   $('workspaceSwitch').addEventListener('click', switchWorkspace);
   $('refreshManagerDashboard').addEventListener('click',loadManagerDashboard);
   document.querySelectorAll('[data-manager-module]').forEach(btn=>btn.addEventListener('click',()=>openManagerModule(btn.dataset.managerModule)));
