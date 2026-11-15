@@ -318,8 +318,23 @@ function doPost(e) {
       case 'task_assignees':
         data = tasksAssigneesMini_(profile);
         break;
+      case 'console_overview':
+        data = consoleOverviewMini_(profile);
+        break;
+      case 'console_report':
+        data = consoleReportMini_(profile, body);
+        break;
       case 'customers_search':
         data = customersSearchMini_(profile, body);
+        break;
+      case 'device_families':
+        data = deviceFamiliesMini_(profile);
+        break;
+      case 'device_family_models':
+        data = deviceFamilyModelsMini_(profile, body);
+        break;
+      case 'device_model_detail':
+        data = deviceModelDetailMini_(profile, body);
         break;
       case 'device_intake_options':
         data = deviceIntakeOptionsMini_(profile);
@@ -1462,6 +1477,29 @@ function attendanceConfirmUniform_(profile, uniformStatus) {
     }
     sheet.appendRow([pending.date, pending.time, profile.chatId, profile.name, 'حضور', Math.round(pending.distance), pending.accuracy, pending.lat, pending.lon, lateMinutes > 0 ? 'متأخر' : 'في الموعد', lateMinutes, pending.shiftId, uniformStatus]);
     cache.remove(key);
+
+    // The technician must get a Telegram confirmation, and management must know
+    // the arrival immediately — the app alone was silent.
+    const statusText = lateMinutes > 0 ? 'متأخر ' + lateMinutes + ' دقيقة' : 'في الموعد';
+    mhNotifyEmployee_(profile.chatId,
+      '✅ تم تسجيل حضورك بنجاح\n━━━━━━━━━━━━━━━━━━\n' +
+      '🕒 الوقت: ' + pending.time + '\n' +
+      '📅 التاريخ: ' + pending.date + '\n' +
+      '👕 اليونيفورم: ' + uniformStatus + '\n' +
+      '📍 المسافة من المركز: ' + Math.round(pending.distance) + ' متر\n' +
+      '⏱ الحالة: ' + statusText + '\n' +
+      '━━━━━━━━━━━━━━━━━━\nنتمنى لك يوم عمل موفق.',
+      'تسجيل حضور', 'attendance.reminder');
+
+    mhNotifyManagement_(
+      '🟢 تسجيل حضور جديد\n━━━━━━━━━━━━━━━━━━\n' +
+      '👤 ' + String(profile.name || '') + '\n' +
+      '🕒 ' + pending.time + '\n' +
+      '⏱ ' + statusText + '\n' +
+      '👕 اليونيفورم: ' + uniformStatus + '\n' +
+      '📍 ' + Math.round(pending.distance) + ' متر من المركز',
+      'حضور جديد');
+
     return { recorded: true, type: 'حضور', date: pending.date, time: pending.time, distanceMeters: Math.round(pending.distance), accuracyMeters: pending.accuracy, uniformStatus: uniformStatus, lateMinutes: lateMinutes, attendanceStatus: lateMinutes > 0 ? 'متأخر' : 'في الموعد' };
   } finally { lock.releaseLock(); }
 }
@@ -1489,6 +1527,26 @@ function attendanceCheckout_(profile, location) {
     let overtime = null;
     try { overtime = finalizeOvertimeAtCheckoutMini_(profile, open, checkoutAt); }
     catch(overtimeError) { console.error('Overtime finalization failed after successful checkout: '+overtimeError); overtime = {status:'تعذر إغلاق سجل الأوفر تايم تلقائيًا',warning:true}; }
+
+    const overtimeLine = (overtime && overtime.minutes > 0)
+      ? '\n⏱ أوفر تايم: ' + overtime.minutes + ' دقيقة (' + overtime.amount + ' جنيه)'
+      : '';
+
+    mhNotifyEmployee_(profile.chatId,
+      '🚪 تم تسجيل انصرافك بنجاح\n━━━━━━━━━━━━━━━━━━\n' +
+      '🕒 الوقت: ' + time + '\n' +
+      '📅 التاريخ: ' + date + '\n' +
+      '📍 ' + Math.round(gps.distance) + ' متر من المركز' +
+      overtimeLine +
+      '\n━━━━━━━━━━━━━━━━━━\nشكرًا لمجهودك اليوم.',
+      'تسجيل انصراف', 'attendance.reminder');
+
+    mhNotifyManagement_(
+      '🔴 تسجيل انصراف\n━━━━━━━━━━━━━━━━━━\n' +
+      '👤 ' + String(profile.name || '') + '\n' +
+      '🕒 ' + time + overtimeLine,
+      'انصراف جديد');
+
     return { recorded: true, type: 'انصراف', date: date, time: time, distanceMeters: Math.round(gps.distance), accuracyMeters: gps.accuracy, checkinDate: open.date, checkinTime: open.time, overtime: overtime };
   } finally { lock.releaseLock(); }
 }
@@ -1610,7 +1668,7 @@ const MH_READ_ONLY_ACTIONS_ = [
   'device_registration_options', 'device_list', 'device_detail',
   'device_staff', 'device_inspection_catalog', 'device_inspection_get',
   'my_shifts', 'complaint_thread', 'reward_summary',
-  'tasks_list',
+  'tasks_list', 'console_overview', 'console_report',
   'repair_price_categories', 'repair_price_models', 'repair_price_catalog', 'repair_price_parts',
   'repair_price_search', 'repair_price_search_all', 'repair_price_issues'
 ];
@@ -1969,6 +2027,18 @@ function submitCashSettlement_(profile, body) {
     sh.getRange(rowNum,map['ملاحظات التسوية']).setValue(notes);
     sh.getRange(rowNum,map['حالة العهدة']).setValue('بانتظار مراجعة التسوية');
     sh.getRange(rowNum,map['تاريخ آخر تحديث']).setValue(mhNow_());
+
+    // Finance must be told a settlement is waiting; the row alone was invisible.
+    mhNotifyManagement_(
+      '📋 تسوية عهدة جديدة بانتظار المراجعة\n━━━━━━━━━━━━━━━━━━\n' +
+      '👤 ' + String(profile.name || '') + '\n' +
+      '💰 المعتمد: ' + approved + ' جنيه\n' +
+      '🧾 المصروف الفعلي: ' + spent + ' جنيه\n' +
+      '↩️ المطلوب إرجاعه: ' + returned + ' جنيه\n' +
+      (extra > 0 ? '💸 مستحق للموظف: ' + extra + ' جنيه\n' : '') +
+      '━━━━━━━━━━━━━━━━━━\nافتح لوحة الإدارة ← السلف والعهد.',
+      'تسوية عهدة');
+
     return {submitted:true, approvedAmount:approved, actualSpent:spent, amountToReturn:returned, extraDue:extra, status:'بانتظار مراجعة التسوية'};
   } finally { lock.releaseLock(); }
 }
@@ -2826,6 +2896,21 @@ function deviceStatusUpdateMiniV105_(profile, body) {
     sh.getRange(row, map['آخر تحديث']).setValue(now);
     movement.appendRow([now, orderId, 'تحديث حالة الجهاز', profile.chatId, profile.name, String(found['الموظف المسؤول Chat ID'] || ''), String(found['الموظف المسؤول'] || ''), status, location || oldLocation, note, profile.chatId, profile.name]);
   } finally { lock.releaseLock(); }
+
+  // Whoever owns the device must know its status changed — previously the
+  // update was silent unless it also reassigned the device.
+  const ownerId = String(found['الموظف المسؤول Chat ID'] || '').trim();
+  if (ownerId && ownerId !== String(profile.chatId)) {
+    mhNotifyEmployee_(ownerId,
+      '📱 تحديث حالة جهاز\n━━━━━━━━━━━━━━━━━━\n' +
+      '🆔 ' + orderId + '\n' +
+      '📌 الحالة: ' + oldStatus + ' ← ' + status + '\n' +
+      '📍 المكان: ' + (location || oldLocation) + '\n' +
+      (note ? '📝 ' + note + '\n' : '') +
+      '━━━━━━━━━━━━━━━━━━\nافتح التطبيق ← حالة الجهاز.',
+      'تحديث جهاز', 'device.assigned');
+  }
+
   return {orderId:orderId,status:status,location:location || oldLocation,previousStatus:oldStatus,updatedAt:now};
 }
 
@@ -4543,7 +4628,7 @@ const MH_CUSTOMER_HEADERS = ['رقم العميل','اسم العميل','رقم
 const MH_CUSTOMER_SHEET_ = 'العملاء';
 
 const MH_DEVICE_EXTRA_HEADERS = [
-  'رقم العميل','اسم العميل','رقم الهاتف','الماركة','رقم IMEI','الرقم السري',
+  'رقم العميل','اسم العميل','رقم الهاتف','الماركة','عائلة الجهاز','رقم IMEI','الرقم السري',
   'الإكسسوارات','يفتح ويعمل','التكلفة التقديرية','العربون المدفوع','موعد التسليم','اسم المستلم'
 ];
 
@@ -4576,6 +4661,15 @@ function mhEnsureDeviceExtraColumns_() {
   const missing = MH_DEVICE_EXTRA_HEADERS.filter(function(h) { return existing.indexOf(h) < 0; });
   if (missing.length) sh.getRange(1, width + 1, 1, missing.length).setValues([missing]);
   return sh;
+}
+
+/** First number in a value, tolerating "700/1300" and Arabic digits. */
+function mhFirstNumber_(value) {
+  const text = String(value === null || value === undefined ? '' : value)
+    .replace(/[٠-٩]/g, function(d) { return String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)); })
+    .replace(/[٬,]/g, '');
+  const match = text.match(/\d+(?:\.\d+)?/);
+  return match ? Number(match[0]) : 0;
 }
 
 function mhNormalizePhone_(value) {
@@ -4654,14 +4748,17 @@ function deviceIntakeCreateMini_(profile, body) {
   };
   const device = {
     brand: String(body.brand || '').trim(),
+    family: String(body.family || '').trim().toLowerCase(),
     model: String(body.model || '').trim(),
     imei: String(body.imei || '').trim(),
     pin: String(body.pin || '').trim(),
     problem: String(body.problem || '').trim(),
     accessories: Array.isArray(body.accessories) ? body.accessories.map(String) : [],
     powersOn: String(body.powersOn || '').trim(),
-    estimate: Number(body.estimate || 0),
-    deposit: Number(body.deposit || 0),
+    // Prices may arrive as "700/1300" or "٤٢٠٠". Take the first number and
+    // clamp so a range can never trip the amount limits.
+    estimate: mhFirstNumber_(body.estimate),
+    deposit: mhFirstNumber_(body.deposit),
     dueDate: mhIsoDate_(body.dueDate) || '',
     technicianId: String(body.technicianId || '').trim()
   };
@@ -4669,7 +4766,13 @@ function deviceIntakeCreateMini_(profile, body) {
   if (customer.name.length < 2 || customer.name.length > 80) throw new Error('INVALID_CUSTOMER_NAME');
   if (mhNormalizePhone_(customer.phone).length < 7) throw new Error('INVALID_CUSTOMER_PHONE');
   if (!device.brand) throw new Error('INVALID_DEVICE_BRAND');
-  if (device.problem.length < 3 || device.problem.length > 1000) throw new Error('INVALID_DEVICE_PROBLEM');
+  if (device.family && !MH_DEVICE_FAMILIES_.some(function(f) { return f.key === device.family; })) {
+    throw new Error('INVALID_DEVICE_FAMILY');
+  }
+  // The intake form appends inspection results and notes to the description,
+  // so allow a longer field while still rejecting an empty one.
+  if (device.problem.length < 3) throw new Error('INVALID_DEVICE_PROBLEM');
+  if (device.problem.length > 4000) device.problem = device.problem.slice(0, 4000);
   if (device.pin.length > 40 || device.imei.length > 40) throw new Error('INVALID_DEVICE_IDENTITY');
   if (!Number.isFinite(device.estimate) || device.estimate < 0 || device.estimate > 1000000) throw new Error('INVALID_ESTIMATE');
   if (!Number.isFinite(device.deposit) || device.deposit < 0 || device.deposit > 1000000) throw new Error('INVALID_DEPOSIT');
@@ -4733,6 +4836,7 @@ function deviceIntakeCreateMini_(profile, body) {
     set('اسم العميل', customer.name);
     set('رقم الهاتف', mhNormalizePhone_(customer.phone));
     set('الماركة', device.brand);
+    set('عائلة الجهاز', device.family);
     set('رقم IMEI', device.imei);
     set('الرقم السري', device.pin);
     set('الإكسسوارات', device.accessories.join('، '));
@@ -4992,3 +5096,613 @@ function buttonsMatrixBulkMini_(profile, body) {
 
   return { updated: true, employeeId: chatId, buttons: MH_HOME_BUTTONS_.length, visible: visible };
 }
+
+/* =========================================================
+   V1.17 — DEVICE FAMILY ↔ PRICE CATEGORY ↔ INSPECTION
+   One source of truth for "what kind of device is this sheet row",
+   so the intake form can reuse the price book models and the
+   inspection checklist for the exact model the user picked.
+========================================================= */
+
+/** Maps a price category key to the inspection/device family. */
+const MH_CATEGORY_FAMILY_ = {
+  iphone: 'iphone',
+  board: 'iphone',
+  watch: 'watch',
+  airpods: 'airpods',
+  airpods_commercial: 'airpods'
+};
+
+/** Human labels for the intake family picker. */
+const MH_DEVICE_FAMILIES_ = [
+  { key: 'iphone', label: 'iPhone', icon: '📱', categories: ['iphone'] },
+  { key: 'ipad', label: 'iPad', icon: '📲', categories: [] },
+  { key: 'macbook', label: 'MacBook', icon: '💻', categories: [] },
+  { key: 'watch', label: 'Apple Watch', icon: '⌚', categories: ['watch'] },
+  { key: 'airpods', label: 'AirPods', icon: '🎧', categories: ['airpods', 'airpods_commercial'] }
+];
+
+/**
+ * Model list for one device family, grouped by generation the same way the
+ * price book groups them. Falls back to an empty list for families that are
+ * not in the price sheet yet (iPad / MacBook).
+ */
+function deviceFamilyModelsMini_(profile, body) {
+  const family = String(body.family || '').trim().toLowerCase();
+  const known = MH_DEVICE_FAMILIES_.some(function(f) { return f.key === family; });
+  if (!known) throw new Error('INVALID_DEVICE_FAMILY');
+
+  const models = [];
+  const seen = {};
+  try {
+    const book = repairPriceBookMini_();
+    MH_REPAIR_PRICE_CATEGORIES_.forEach(function(cfg) {
+      if (MH_CATEGORY_FAMILY_[cfg.key] !== family) return;
+      repairPriceCategoryDataMini_(book, cfg).models.forEach(function(m) {
+        const key = String(m.name).toLowerCase();
+        if (seen[key]) return;
+        seen[key] = true;
+        models.push({ name: m.name, category: cfg.key });
+      });
+    });
+  } catch (e) { /* price book optional: the family picker still works */ }
+
+  return {
+    family: family,
+    models: models,
+    hasPriceData: models.length > 0
+  };
+}
+
+/**
+ * Everything the intake form needs after a model is chosen:
+ * the inspection checklist for that family and the part prices.
+ */
+function deviceModelDetailMini_(profile, body) {
+  const family = String(body.family || '').trim().toLowerCase();
+  const model = String(body.model || '').trim();
+  if (!MH_DEVICE_FAMILIES_.some(function(f) { return f.key === family; })) throw new Error('INVALID_DEVICE_FAMILY');
+
+  const inspection = MH_DEVICE_INSPECTION_CATALOG_[family] || null;
+  const checklist = inspection
+    ? inspection.items.map(function(item, index) {
+        return { index: index, name: item, instruction: getInspectionInstruction_(family, index) };
+      })
+    : [];
+
+  // Find the model's part prices by scanning the linked categories.
+  const parts = [];
+  if (model) {
+    try {
+      const book = repairPriceBookMini_();
+      MH_REPAIR_PRICE_CATEGORIES_.forEach(function(cfg) {
+        if (MH_CATEGORY_FAMILY_[cfg.key] !== family) return;
+        const hit = repairPriceCategoryDataMini_(book, cfg).models.find(function(m) {
+          return String(m.name).trim().toLowerCase() === model.toLowerCase();
+        });
+        if (!hit) return;
+        hit.issues.forEach(function(item) { parts.push({ issue: item.issue, price: item.price }); });
+      });
+    } catch (e) { /* price book optional */ }
+  }
+
+  return {
+    family: family,
+    model: model,
+    inspectionFamily: family,
+    checklist: checklist,
+    parts: parts,
+    hasChecklist: checklist.length > 0
+  };
+}
+
+/** Families + models for the intake picker, in one round trip. */
+function deviceFamiliesMini_(profile) {
+  return {
+    families: MH_DEVICE_FAMILIES_.map(function(f) {
+      return { key: f.key, label: f.label, icon: f.icon };
+    })
+  };
+}
+
+/* =========================================================
+   V1.18 — MANAGEMENT CONSOLE (لوحة الإدارة الجديدة)
+   One endpoint feeds the whole dashboard so the UI never
+   fires a dozen sequential requests. Every figure is computed
+   from a single read of each sheet (per-execution cache).
+========================================================= */
+
+/** Money helper: always returns a number rounded to 2 decimals. */
+function mhMoney_(value) {
+  const n = Number(value);
+  return isFinite(n) ? Math.round(n * 100) / 100 : 0;
+}
+
+function mhSum_(rows, header) {
+  return rows.reduce(function(sum, r) { return sum + mhMoney_(r[header]); }, 0);
+}
+
+function mhDateInMonth_(value, month) {
+  return String(mhDate_(value) || '').indexOf(month) === 0;
+}
+
+/**
+ * Everything the console needs, in one round trip.
+ * Sections are gated by the same module map the old dashboard used.
+ */
+function consoleOverviewMini_(profile) {
+  const role = String(profile.role || '');
+  mhRequireRole_(profile, ['super_admin','admin','finance','supervisor']);
+
+  const ss = spreadsheet_();
+  const today = mhToday_();
+  const month = today.slice(0, 7);
+
+  const modules = {
+    staff: ['super_admin','admin'].includes(role),
+    daily: ['super_admin','admin','supervisor'].includes(role),
+    requests: ['super_admin','admin','supervisor'].includes(role),
+    finance: ['super_admin','finance','admin'].includes(role),
+    devices: ['super_admin','admin'].includes(role),
+    tasks: ['super_admin','admin','supervisor'].includes(role),
+    management: ['super_admin','admin'].includes(role)
+  };
+
+  const read = function(name, enabled) {
+    if (!enabled) return [];
+    try { return rowsAsObjects_(ss, name); } catch (e) { return []; }
+  };
+
+  /* ---------------- Staff ---------------- */
+  const employees = read(MH.SHEETS.employees, modules.staff);
+  const activeEmployees = employees.filter(function(r) {
+    return String(r['Chat ID'] || '').trim() &&
+      String(r['الحالة'] || 'نشط').trim() === 'نشط' &&
+      String(r['حالة الحساب'] || 'نشط').trim() === 'نشط';
+  });
+
+  /* ---------------- Attendance ---------------- */
+  const attendanceRows = read(MH.SHEETS.attendance, modules.daily);
+  const todayAttendance = attendanceRows.filter(function(r) { return mhDate_(r['التاريخ']) === today; });
+  const monthAttendance = attendanceRows.filter(function(r) { return mhDateInMonth_(r['التاريخ'], month); });
+
+  const latestByEmployee = {};
+  todayAttendance.forEach(function(r) {
+    const id = String(r['Chat ID'] || '').trim();
+    if (!id) return;
+    const stamp = String(r['الوقت'] || '');
+    if (!latestByEmployee[id] || stamp > String(latestByEmployee[id]['الوقت'] || '')) {
+      latestByEmployee[id] = r;
+    }
+  });
+  const presentNow = Object.keys(latestByEmployee).filter(function(id) {
+    return String(latestByEmployee[id]['النوع'] || '').trim() === 'حضور';
+  }).length;
+
+  const monthIn = monthAttendance.filter(function(r) { return String(r['النوع'] || '').trim() === 'حضور'; });
+  const monthOut = monthAttendance.filter(function(r) { return String(r['النوع'] || '').trim() === 'انصراف'; });
+  const lateRows = monthIn.filter(function(r) { return Number(r['دقائق التأخير'] || 0) > 0; });
+
+  /* ---------------- Requests ---------------- */
+  const requests = read(MH.SHEETS.requests, modules.requests);
+  const leaves = read(MH.SHEETS.leaves, modules.requests || modules.daily);
+  const complaints = read(MH.SHEETS.complaints, modules.requests);
+  const absences = read(MH.SHEETS.absences, modules.daily);
+
+  const pendingRequests = requests.filter(function(r) {
+    return String(r['القرار'] || '').trim() === 'قيد الانتظار';
+  });
+  const pendingLeaves = leaves.filter(function(r) {
+    return String(r['الحالة'] || '').trim() === 'بانتظار مراجعة المدير';
+  });
+  const openComplaints = complaints.filter(function(r) {
+    const s = String(r['الحالة'] || '').trim();
+    return ['مغلقة','تم الحل'].indexOf(s) < 0;
+  });
+  const pendingAbsences = absences.filter(function(r) {
+    return /انتظار|مراجعة|معلق/.test(String(r['الحالة'] || ''));
+  });
+
+  /* ---------------- Money ---------------- */
+  const cash = read(MH.SHEETS.cash, modules.finance);
+  const deductions = read(MH.SHEETS.deductions, modules.finance);
+  const overtime = read(MH.SHEETS.overtime, modules.finance);
+
+  const cashPendingReview = cash.filter(function(r) {
+    return String(r['الحالة'] || '').trim() === 'قيد المراجعة';
+  });
+  const cashAwaitingPayout = cash.filter(function(r) {
+    return String(r['حالة الصرف'] || '').trim() === 'بانتظار الصرف';
+  });
+  const openCustody = cash.filter(function(r) {
+    const c = String(r['حالة العهدة'] || '').trim();
+    return ['عهدة مفتوحة','بانتظار مراجعة التسوية','بانتظار تأكيد استلام المتبقي','بانتظار صرف التعويض'].indexOf(c) >= 0;
+  });
+  const settlementsPending = cash.filter(function(r) {
+    return String(r['حالة التسوية'] || '').trim() === 'بانتظار مراجعة التسوية';
+  });
+
+  const monthDeductions = deductions.filter(function(r) { return mhDateInMonth_(r['تاريخ الواقعة'], month); });
+  const approvedDeductions = monthDeductions.filter(function(r) { return String(r['الحالة'] || '').trim() === 'معتمد'; });
+  const pendingDeductions = monthDeductions.filter(function(r) { return String(r['الحالة'] || '').trim() === 'بانتظار اعتماد المدير'; });
+
+  const monthOvertime = overtime.filter(function(r) { return mhDateInMonth_(r['تاريخ الوردية'], month); });
+  const pendingOvertime = overtime.filter(function(r) {
+    return String(r['الحالة'] || '').trim() === 'بانتظار موافقة المدير';
+  });
+
+  /* ---------------- Devices ---------------- */
+  const devices = read(MH.SHEETS.devices, modules.devices);
+  const activeDevices = devices.filter(function(r) {
+    return String(r['حالة الجهاز'] || '').trim() !== 'تم التسليم';
+  });
+  const readyDevices = devices.filter(function(r) {
+    return String(r['حالة الجهاز'] || '').trim() === 'جاهز للتسليم';
+  });
+
+  /* ---------------- Tasks ---------------- */
+  let tasks = [];
+  if (modules.tasks) {
+    try { tasks = mhRowsObjects_(mhTaskSheet_()); } catch (e) { tasks = []; }
+  }
+  const openTasks = tasks.filter(function(r) {
+    return ['جديدة','قيد التنفيذ','بانتظار المراجعة'].indexOf(String(r['الحالة'] || '').trim()) >= 0;
+  });
+  const reviewTasks = tasks.filter(function(r) {
+    return String(r['الحالة'] || '').trim() === 'بانتظار المراجعة';
+  });
+  const overdueTasks = tasks.filter(function(r) {
+    const due = mhDate_(r['تاريخ الاستحقاق']);
+    return !!due && due < today && ['مكتملة','ملغاة'].indexOf(String(r['الحالة'] || '').trim()) < 0;
+  });
+
+  /* ---------------- Parts ---------------- */
+  let partsPending = 0;
+  if (modules.devices) {
+    try {
+      partsPending = mhRowsObjects_(mhPartSheet_()).filter(function(r) {
+        return String(r['الحالة'] || '').trim() === 'بانتظار الموافقة';
+      }).length;
+    } catch (e) { partsPending = 0; }
+  }
+
+  /* ---------------- Alerts: what actually needs a decision today ---------------- */
+  const alerts = [];
+  const pushAlert = function(kind, label, count, screen, urgency) {
+    if (!count) return;
+    alerts.push({ kind: kind, label: label, count: count, screen: screen, urgency: urgency || 'normal' });
+  };
+  if (modules.requests) {
+    pushAlert('requests', 'طلبات عامة بانتظار القرار', pendingRequests.length, 'requests', 'normal');
+    pushAlert('leaves', 'أذونات بانتظار المراجعة', pendingLeaves.length, 'requests', 'normal');
+    pushAlert('complaints', 'شكاوى مفتوحة', openComplaints.length, 'requests', openComplaints.length > 3 ? 'high' : 'normal');
+  }
+  if (modules.daily) {
+    pushAlert('absences', 'حالات غياب بانتظار المراجعة', pendingAbsences.length, 'daily', 'high');
+  }
+  if (modules.finance) {
+    pushAlert('cash', 'طلبات سلف بانتظار القرار', cashPendingReview.length, 'finance', 'normal');
+    pushAlert('payout', 'سلف معتمدة بانتظار الصرف', cashAwaitingPayout.length, 'finance', 'normal');
+    pushAlert('settlements', 'تسويات عهد بانتظار المراجعة', settlementsPending.length, 'finance', 'high');
+    pushAlert('deductions', 'خصومات بانتظار الاعتماد', pendingDeductions.length, 'finance', 'normal');
+    pushAlert('overtime', 'أوفر تايم بانتظار الموافقة', pendingOvertime.length, 'overtime', 'normal');
+  }
+  if (modules.tasks) {
+    pushAlert('tasks', 'مهام بانتظار مراجعتك', reviewTasks.length, 'tasks', 'normal');
+    pushAlert('overdue', 'مهام متأخرة', overdueTasks.length, 'tasks', 'high');
+  }
+  if (modules.devices) {
+    pushAlert('parts', 'قطع غيار بانتظار الموافقة', partsPending, 'parts', 'normal');
+    pushAlert('ready', 'أجهزة جاهزة للتسليم', readyDevices.length, 'devices', 'normal');
+  }
+
+  /* ---------------- Recent activity (one merged feed) ---------------- */
+  const feed = [];
+  if (modules.daily) {
+    todayAttendance.slice(-40).forEach(function(r) {
+      feed.push({
+        at: today + ' ' + String(r['الوقت'] || ''),
+        kind: 'attendance',
+        title: String(r['اسم الموظف'] || '') + ' — ' + String(r['النوع'] || ''),
+        detail: String(r['حالة الحضور'] || '') + (Number(r['دقائق التأخير'] || 0) > 0 ? ' · ' + r['دقائق التأخير'] + ' دقيقة' : '')
+      });
+    });
+  }
+  if (modules.finance) {
+    monthDeductions.slice(-15).forEach(function(r) {
+      feed.push({
+        at: String(r['تاريخ التسجيل'] || '').slice(0, 16),
+        kind: 'deduction',
+        title: 'خصم — ' + String(r['اسم الموظف'] || ''),
+        detail: mhMoney_(r['المبلغ بالجنيه']) + ' جنيه · ' + String(r['الحالة'] || '')
+      });
+    });
+  }
+  if (modules.tasks) {
+    tasks.slice(-15).forEach(function(r) {
+      feed.push({
+        at: String(r['تاريخ آخر تحديث'] || '').slice(0, 16),
+        kind: 'task',
+        title: 'مهمة — ' + String(r['اسم الفني'] || ''),
+        detail: String(r['العنوان'] || '') + ' · ' + String(r['الحالة'] || '')
+      });
+    });
+  }
+  feed.sort(function(a, b) { return String(b.at).localeCompare(String(a.at)); });
+
+  return {
+    date: today,
+    month: month,
+    role: role,
+    modules: modules,
+    staff: {
+      active: modules.staff ? activeEmployees.length : null,
+      total: modules.staff ? employees.length : null
+    },
+    attendance: {
+      presentNow: modules.daily ? presentNow : null,
+      checkedInToday: modules.daily ? Object.keys(latestByEmployee).length : null,
+      monthCheckins: modules.daily ? monthIn.length : null,
+      monthCheckouts: modules.daily ? monthOut.length : null,
+      lateDays: modules.daily ? lateRows.length : null,
+      lateMinutes: modules.daily ? lateRows.reduce(function(s, r) { return s + Number(r['دقائق التأخير'] || 0); }, 0) : null
+    },
+    money: {
+      pendingAdvances: modules.finance ? cashPendingReview.length : null,
+      awaitingPayout: modules.finance ? cashAwaitingPayout.length : null,
+      openCustody: modules.finance ? openCustody.length : null,
+      custodyAmount: modules.finance ? mhMoney_(openCustody.reduce(function(s, r) {
+        return s + (Number(r['المبلغ المعتمد بالجنيه'] || r['المبلغ المطلوب بالجنيه'] || 0) - Number(r['المصروف الفعلي بالجنيه'] || 0));
+      }, 0)) : null,
+      settlementsPending: modules.finance ? settlementsPending.length : null,
+      monthDeductionsApproved: modules.finance ? mhMoney_(mhSum_(approvedDeductions, 'المبلغ بالجنيه')) : null,
+      monthDeductionsPending: modules.finance ? mhMoney_(mhSum_(pendingDeductions, 'المبلغ بالجنيه')) : null,
+      monthOvertimeMinutes: modules.finance ? monthOvertime.reduce(function(s, r) { return s + Number(r['دقائق الأوفر تايم'] || 0); }, 0) : null,
+      monthOvertimeAmount: modules.finance ? mhMoney_(mhSum_(monthOvertime.filter(function(r) {
+        return String(r['الحالة'] || '').indexOf('معتمد') === 0;
+      }), 'المبلغ بالجنيه')) : null
+    },
+    operations: {
+      activeDevices: modules.devices ? activeDevices.length : null,
+      readyDevices: modules.devices ? readyDevices.length : null,
+      partsPending: modules.devices ? partsPending : null,
+      openTasks: modules.tasks ? openTasks.length : null,
+      tasksInReview: modules.tasks ? reviewTasks.length : null,
+      tasksOverdue: modules.tasks ? overdueTasks.length : null
+    },
+    requests: {
+      pendingRequests: modules.requests ? pendingRequests.length : null,
+      pendingLeaves: modules.requests ? pendingLeaves.length : null,
+      openComplaints: modules.requests ? openComplaints.length : null,
+      pendingAbsences: modules.daily ? pendingAbsences.length : null,
+      pendingOvertime: modules.finance ? pendingOvertime.length : null
+    },
+    alerts: alerts,
+    feed: feed.slice(0, 25)
+  };
+}
+
+/* =========================================================
+   V1.18 — REPORTS ENGINE
+   Every report reads each sheet once and returns totals plus
+   per-employee breakdown, so the console can print real
+   numbers instead of raw rows.
+========================================================= */
+
+function consoleReportMini_(profile, body) {
+  const role = String(profile.role || '');
+  mhRequireRole_(profile, ['super_admin','admin','finance','supervisor']);
+
+  const type = String(body.type || 'finance').trim();
+  const month = /^\d{4}-\d{2}$/.test(String(body.month || '')) ? String(body.month) : mhToday_().slice(0, 7);
+
+  const ss = spreadsheet_();
+  const read = function(name) {
+    try { return rowsAsObjects_(ss, name); } catch (e) { return []; }
+  };
+  const employees = read(MH.SHEETS.employees);
+  const nameOf = {};
+  employees.forEach(function(r) {
+    const id = String(r['Chat ID'] || '').trim();
+    if (id) nameOf[id] = String(r['اسم الموظف'] || '');
+  });
+
+  if (type === 'finance') {
+    mhRequireRole_(profile, ['super_admin','admin','finance']);
+    const cash = read(MH.SHEETS.cash).filter(function(r) { return mhDateInMonth_(r['التاريخ والوقت'] || r['تاريخ آخر تحديث'], month); });
+    const deductions = read(MH.SHEETS.deductions).filter(function(r) { return mhDateInMonth_(r['تاريخ الواقعة'], month); });
+    const overtime = read(MH.SHEETS.overtime).filter(function(r) { return mhDateInMonth_(r['تاريخ الوردية'], month); });
+
+    const approvedDed = deductions.filter(function(r) { return String(r['الحالة'] || '').trim() === 'معتمد'; });
+    const paidCash = cash.filter(function(r) { return String(r['حالة الصرف'] || '').trim() === 'تم الصرف'; });
+    const paidOvertime = overtime.filter(function(r) { return String(r['الحالة'] || '').indexOf('معتمد') === 0; });
+
+    const perEmployee = {};
+    const add = function(id, key, amount) {
+      if (!id) return;
+      if (!perEmployee[id]) perEmployee[id] = { id: id, name: nameOf[id] || id, advances: 0, deductions: 0, overtime: 0, total: 0 };
+      perEmployee[id][key] += mhMoney_(amount);
+      if (key !== 'total') perEmployee[id].total += mhMoney_(amount);
+    };
+    paidCash.forEach(function(r) { add(String(r['Chat ID'] || '').trim(), 'advances', r['المبلغ المعتمد بالجنيه'] || r['المبلغ المطلوب بالجنيه']); });
+    approvedDed.forEach(function(r) { add(String(r['Chat ID'] || '').trim(), 'deductions', r['المبلغ بالجنيه']); });
+    paidOvertime.forEach(function(r) { add(String(r['Chat ID'] || '').trim(), 'overtime', r['المبلغ بالجنيه']); });
+
+    const rows = Object.keys(perEmployee).map(function(k) { return perEmployee[k]; })
+      .sort(function(a, b) { return b.total - a.total; });
+
+    return {
+      type: 'finance',
+      month: month,
+      totals: {
+        advances: mhMoney_(mhSum_(paidCash, 'المبلغ المعتمد بالجنيه') || paidCash.reduce(function(s, r) { return s + Number(r['المبلغ المعتمد بالجنيه'] || r['المبلغ المطلوب بالجنيه'] || 0); }, 0)),
+        deductions: mhMoney_(mhSum_(approvedDed, 'المبلغ بالجنيه')),
+        overtime: mhMoney_(mhSum_(paidOvertime, 'المبلغ بالجنيه')),
+        transfers: paidCash.length = paidCash.length
+      },
+      counts: {
+        advancesPaid: paidCash.length,
+        deductionsApproved: approvedDed.length,
+        overtimeEntries: paidOvertime.length
+      },
+      rows: rows,
+      grandTotal: mhMoney_(rows.reduce(function(s, r) { return s + r.total; }, 0))
+    };
+  }
+
+  if (type === 'attendance') {
+    const att = read(MH.SHEETS.attendance).filter(function(r) { return mhDateInMonth_(r['التاريخ'], month); });
+    const perEmployee = {};
+    att.forEach(function(r) {
+      const id = String(r['Chat ID'] || '').trim();
+      if (!id) return;
+      if (!perEmployee[id]) perEmployee[id] = { id: id, name: nameOf[id] || String(r['اسم الموظف'] || ''), checkins: 0, checkouts: 0, lateDays: 0, lateMinutes: 0 };
+      const e = perEmployee[id];
+      if (String(r['النوع'] || '').trim() === 'حضور') {
+        e.checkins++;
+        const late = Number(r['دقائق التأخير'] || 0);
+        if (late > 0) { e.lateDays++; e.lateMinutes += late; }
+      } else if (String(r['النوع'] || '').trim() === 'انصراف') {
+        e.checkouts++;
+      }
+    });
+    const rows = Object.keys(perEmployee).map(function(k) { return perEmployee[k]; })
+      .sort(function(a, b) { return b.lateMinutes - a.lateMinutes; });
+
+    return {
+      type: 'attendance',
+      month: month,
+      totals: {
+        checkins: att.filter(function(r) { return String(r['النوع'] || '').trim() === 'حضور'; }).length,
+        checkouts: att.filter(function(r) { return String(r['النوع'] || '').trim() === 'انصراف'; }).length,
+        lateDays: att.filter(function(r) { return Number(r['دقائق التأخير'] || 0) > 0; }).length,
+        lateMinutes: att.reduce(function(s, r) { return s + Number(r['دقائق التأخير'] || 0); }, 0)
+      },
+      rows: rows
+    };
+  }
+
+  if (type === 'tasks') {
+    const tasks = (function() { try { return mhRowsObjects_(mhTaskSheet_()); } catch (e) { return []; } })();
+    const perEmployee = {};
+    tasks.forEach(function(r) {
+      const id = String(r['Chat ID'] || '').trim();
+      if (!id) return;
+      if (!perEmployee[id]) perEmployee[id] = { id: id, name: String(r['اسم الفني'] || nameOf[id] || id), total: 0, done: 0, open: 0, review: 0, overdue: 0 };
+      const e = perEmployee[id];
+      const st = String(r['الحالة'] || '').trim();
+      e.total++;
+      if (st === 'مكتملة') e.done++;
+      else if (st === 'بانتظار المراجعة') e.review++;
+      else if (st !== 'ملغاة') e.open++;
+      const due = mhDate_(r['تاريخ الاستحقاق']);
+      if (due && due < mhToday_() && ['مكتملة','ملغاة'].indexOf(st) < 0) e.overdue++;
+    });
+    const rows = Object.keys(perEmployee).map(function(k) { return perEmployee[k]; })
+      .sort(function(a, b) { return b.open - a.open; });
+
+    return {
+      type: 'tasks',
+      month: month,
+      totals: {
+        total: tasks.length,
+        done: tasks.filter(function(r) { return String(r['الحالة'] || '').trim() === 'مكتملة'; }).length,
+        open: tasks.filter(function(r) { return ['جديدة','قيد التنفيذ'].indexOf(String(r['الحالة'] || '').trim()) >= 0; }).length,
+        review: tasks.filter(function(r) { return String(r['الحالة'] || '').trim() === 'بانتظار المراجعة'; }).length
+      },
+      rows: rows
+    };
+  }
+
+  if (type === 'devices') {
+    mhRequireRole_(profile, ['super_admin','admin']);
+    const devices = read(MH.SHEETS.devices);
+    const byStatus = {};
+    devices.forEach(function(r) {
+      const s = String(r['حالة الجهاز'] || 'غير محدد').trim();
+      byStatus[s] = (byStatus[s] || 0) + 1;
+    });
+    const perTech = {};
+    devices.forEach(function(r) {
+      const id = String(r['الموظف المسؤول Chat ID'] || '').trim();
+      if (!id) return;
+      if (!perTech[id]) perTech[id] = { id: id, name: String(r['الموظف المسؤول'] || nameOf[id] || id), total: 0, open: 0, delivered: 0 };
+      perTech[id].total++;
+      if (String(r['حالة الجهاز'] || '').trim() === 'تم التسليم') perTech[id].delivered++;
+      else perTech[id].open++;
+    });
+    return {
+      type: 'devices',
+      month: month,
+      totals: {
+        total: devices.length,
+        open: devices.filter(function(r) { return String(r['حالة الجهاز'] || '').trim() !== 'تم التسليم'; }).length,
+        delivered: devices.filter(function(r) { return String(r['حالة الجهاز'] || '').trim() === 'تم التسليم'; }).length
+      },
+      byStatus: byStatus,
+      rows: Object.keys(perTech).map(function(k) { return perTech[k]; }).sort(function(a, b) { return b.open - a.open; })
+    };
+  }
+
+  if (type === 'custody') {
+    mhRequireRole_(profile, ['super_admin','admin','finance']);
+    const cash = read(MH.SHEETS.cash);
+    const open = cash.filter(function(r) {
+      const c = String(r['حالة العهدة'] || '').trim();
+      return ['عهدة مفتوحة','بانتظار مراجعة التسوية','بانتظار تأكيد استلام المتبقي','بانتظار صرف التعويض'].indexOf(c) >= 0;
+    });
+    const perEmployee = {};
+    open.forEach(function(r) {
+      const id = String(r['Chat ID'] || '').trim();
+      if (!id) return;
+      if (!perEmployee[id]) perEmployee[id] = { id: id, name: nameOf[id] || String(r['اسم الموظف'] || ''), count: 0, approved: 0, spent: 0, outstanding: 0 };
+      const e = perEmployee[id];
+      const approved = mhMoney_(r['المبلغ المعتمد بالجنيه'] || r['المبلغ المطلوب بالجنيه']);
+      const spent = mhMoney_(r['المصروف الفعلي بالجنيه']);
+      e.count++;
+      e.approved += approved;
+      e.spent += spent;
+      e.outstanding += Math.max(0, approved - spent);
+    });
+    const rows = Object.keys(perEmployee).map(function(k) { return perEmployee[k]; })
+      .sort(function(a, b) { return b.outstanding - a.outstanding; });
+    return {
+      type: 'custody',
+      month: month,
+      totals: {
+        openCount: open.length,
+        approved: mhMoney_(rows.reduce(function(s, r) { return s + r.approved; }, 0)),
+        spent: mhMoney_(rows.reduce(function(s, r) { return s + r.spent; }, 0)),
+        outstanding: mhMoney_(rows.reduce(function(s, r) { return s + r.outstanding; }, 0))
+      },
+      rows: rows
+    };
+  }
+
+  if (type === 'summary') {
+    // Cross-area executive summary for the opening tab of the reports screen.
+    const att = read(MH.SHEETS.attendance).filter(function(r) { return mhDateInMonth_(r['التاريخ'], month); });
+    const ded = read(MH.SHEETS.deductions).filter(function(r) {
+      return mhDateInMonth_(r['تاريخ الواقعة'], month) && String(r['الحالة'] || '').trim() === 'معتمد';
+    });
+    const ot = read(MH.SHEETS.overtime).filter(function(r) {
+      return mhDateInMonth_(r['تاريخ الوردية'], month) && String(r['الحالة'] || '').indexOf('معتمد') === 0;
+    });
+    const cash = read(MH.SHEETS.cash).filter(function(r) { return String(r['حالة الصرف'] || '').trim() === 'تم الصرف'; });
+    return {
+      type: 'summary',
+      month: month,
+      totals: {
+        checkins: att.filter(function(r) { return String(r['النوع'] || '').trim() === 'حضور'; }).length,
+        lateMinutes: att.reduce(function(s, r) { return s + Number(r['دقائق التأخير'] || 0); }, 0),
+        deductions: mhMoney_(mhSum_(ded, 'المبلغ بالجنيه')),
+        overtime: mhMoney_(mhSum_(ot, 'المبلغ بالجنيه')),
+        custodyPaid: mhMoney_(cash.reduce(function(s, r) { return s + Number(r['المبلغ المعتمد بالجنيه'] || 0); }, 0))
+      },
+      rows: []
+    };
+  }
+
+  throw new Error('INVALID_REPORT_TYPE');
+}
+

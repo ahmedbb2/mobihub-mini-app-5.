@@ -408,6 +408,25 @@
   }
   async function loadManagerDashboard() {
     if (workspaceRole !== 'manager') return;
+    // The console replaces the legacy metric tiles entirely.
+    const host = $('managerDashboard');
+    if (!host) return;
+    await renderConsoleInto(host);
+  }
+
+  async function renderConsoleInto(host) {
+    host.innerHTML = '<div class="manager-loading">جاري تحميل اللوحة...</div>';
+    try {
+      const data = await api('console_overview');
+      consoleState.data = data;
+      drawConsoleInto(host);
+    } catch (e) {
+      host.innerHTML = '<div class="manager-load-error">' + escapeHtml(e.message) + '</div>';
+    }
+  }
+
+  async function loadManagerDashboardLegacy() {
+    if (workspaceRole !== 'manager') return;
     const box=$('managerMetrics'); if(box) box.innerHTML='<div class="manager-loading">جاري تحديث مؤشرات الإدارة...</div>';
     try { const data=await api('manager_dashboard'); renderManagerDashboard(data); }
     catch(e) { if(box) box.innerHTML=`<div class="manager-load-error">${escapeHtml(e.message)}</div>`; }
@@ -3274,6 +3293,496 @@
   }
 
 
+  /* ============================================================
+   * MANAGEMENT CONSOLE — the new dashboard
+   * Five tabs: overview, team, money, operations, reports.
+   * One request loads the whole console.
+   * ============================================================ */
+
+  let consoleState = { tab: 'overview', data: null, report: null, reportType: 'summary' };
+
+  const CONSOLE_TABS = [
+    { key: 'overview', label: 'نظرة عامة' },
+    { key: 'team', label: 'الفريق' },
+    { key: 'money', label: 'المالية' },
+    { key: 'operations', label: 'التشغيل' },
+    { key: 'reports', label: 'التقارير' }
+  ];
+
+  async function openManagementConsole() {
+    const panel = managerPanel('لوحة الإدارة', '<div class="manager-loading">جاري تحميل اللوحة...</div>');
+    const content = panel.querySelector('.manager-module-content');
+    await renderConsole(content);
+  }
+
+  async function renderConsole(content) {
+    content.innerHTML = '<div class="manager-loading">جاري تحميل بيانات اللوحة...</div>';
+    try {
+      const data = await api('console_overview');
+      consoleState.data = data;
+      drawConsole(content);
+    } catch (e) {
+      content.innerHTML = `<div class="manager-load-error">${escapeHtml(e.message)}</div>`;
+    }
+  }
+
+  /* Renders the console directly into the dashboard section (no modal). */
+  function drawConsoleInto(host) {
+    drawConsoleShell(host);
+  }
+
+  function drawConsole(content) {
+    drawConsoleShell(content);
+  }
+
+  function drawConsoleShell(content) {
+    const d = consoleState.data || {};
+    const tabs = CONSOLE_TABS.filter(function(t) {
+      if (t.key === 'team') return d.modules && (d.modules.staff || d.modules.daily);
+      if (t.key === 'money') return d.modules && d.modules.finance;
+      if (t.key === 'operations') return d.modules && (d.modules.devices || d.modules.tasks);
+      return true;
+    });
+
+    content.innerHTML = `<div class="console">
+      <header class="console-head">
+        <div>
+          <span class="console-kicker">MobiHub Console</span>
+          <h3>لوحة الإدارة</h3>
+          <small>${escapeHtml(d.date || '')} · ${escapeHtml(d.role || '')}</small>
+        </div>
+        <button type="button" class="console-refresh" id="consoleRefresh">تحديث</button>
+      </header>
+
+      <nav class="console-tabs">
+        ${tabs.map(t => `<button type="button" class="console-tab${consoleState.tab === t.key ? ' is-active' : ''}" data-console-tab="${t.key}">${escapeHtml(t.label)}</button>`).join('')}
+      </nav>
+
+      <div id="consoleBody"></div>
+    </div>`;
+
+    content.querySelector('#consoleRefresh').addEventListener('click', async function() {
+      this.disabled = true;
+      await renderConsole(content);
+    });
+    content.querySelectorAll('[data-console-tab]').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        consoleState.tab = btn.dataset.consoleTab;
+        drawConsole(content);
+      });
+    });
+
+    const body = content.querySelector('#consoleBody');
+    if (consoleState.tab === 'overview') drawOverview(body, d);
+    else if (consoleState.tab === 'team') drawTeam(body, d);
+    else if (consoleState.tab === 'money') drawMoney(body, d);
+    else if (consoleState.tab === 'operations') drawOperations(body, d);
+    else drawReports(body, d);
+  }
+
+  /* ---------------- Tab: overview ---------------- */
+  function drawOverview(body, d) {
+    const alerts = d.alerts || [];
+    const critical = alerts.filter(a => a.urgency === 'high');
+    const m = d.money || {};
+    const at = d.attendance || {};
+    const req = d.requests || {};
+
+    body.innerHTML = `
+      ${critical.length ? `<div class="console-critical">
+        <b>⚠️ يحتاج تدخلك الآن</b>
+        ${critical.map(a => `<button type="button" class="console-critical-row" data-goto="${escapeHtml(a.screen)}">
+          <span>${escapeHtml(a.label)}</span><b>${a.count}</b></button>`).join('')}
+      </div>` : ''}
+
+      <div class="console-kpis">
+        ${d.modules.staff ? kpi('الموظفون النشطون', d.staff.active, 'من ' + d.staff.total) : ''}
+        ${d.modules.daily ? kpi('الموجودون الآن', at.presentNow, 'حضور ' + at.checkedInToday + ' اليوم') : ''}
+        ${d.modules.requests ? kpi('طلبات معلقة', (req.pendingRequests || 0) + (req.pendingLeaves || 0), 'أذونات: ' + (req.pendingLeaves || 0)) : ''}
+        ${d.modules.finance ? kpi('عهد مفتوحة', m.openCustody, formatMoney(m.custodyAmount) + ' جنيه') : ''}
+        ${d.modules.finance ? kpi('تسويات معلقة', m.settlementsPending, 'بانتظار المراجعة') : ''}
+        ${d.modules.tasks ? kpi('مهام مفتوحة', d.operations.openTasks, 'مراجعة: ' + d.operations.tasksInReview) : ''}
+        ${d.modules.devices ? kpi('أجهزة تحت المتابعة', d.operations.activeDevices, 'جاهزة: ' + d.operations.readyDevices) : ''}
+      </div>
+
+      ${(function(){
+              const rest = alerts.filter(function(a){ return a.urgency !== 'high'; });
+              if (!alerts.length) return '<section class="console-card"><p class="console-empty">✅ لا توجد عناصر معلقة — كل شيء تحت السيطرة.</p></section>';
+              if (!rest.length) return '';
+              return '<section class="console-card"><h4>بقية البنود المعلقة</h4><div class="console-alerts">' +
+                rest.map(function(a){ return '<button type="button" class="console-alert" data-goto="' + escapeHtml(a.screen) + '"><span>' + escapeHtml(a.label) + '</span><b>' + a.count + '</b></button>'; }).join('') +
+                '</div></section>';
+            })()}
+
+      ${(d.feed || []).length ? `<section class="console-card">
+        <h4>آخر النشاط</h4>
+        <div class="console-feed">
+          ${d.feed.map(f => `<div class="console-feed-row">
+            <span class="console-feed-kind is-${escapeHtml(f.kind)}">${feedIcon(f.kind)}</span>
+            <div><b>${escapeHtml(f.title)}</b><small>${escapeHtml(f.detail || '')}</small></div>
+            <time>${escapeHtml(String(f.at || '').slice(5, 16))}</time>
+          </div>`).join('')}
+        </div>
+      </section>` : ''}
+    `;
+    wireGoto(body);
+  }
+
+  function kpi(label, value, sub) {
+    const v = (value === null || value === undefined) ? '—' : value;
+    return `<article class="console-kpi">
+      <small>${escapeHtml(label)}</small>
+      <b>${escapeHtml(String(v))}</b>
+      ${sub ? `<span>${escapeHtml(String(sub))}</span>` : ''}
+    </article>`;
+  }
+
+  function feedIcon(kind) {
+    return ({ attendance: '✓', deduction: '−', task: '◆', cash: 'ج.م', device: '▣' })[kind] || '•';
+  }
+
+  function formatMoney(value) {
+    if (value === null || value === undefined || value === '') return '—';
+    const n = Number(value);
+    if (!isFinite(n)) return '—';
+    return n.toLocaleString('en-US', { maximumFractionDigits: 2 });
+  }
+
+  /* Finds the element the console is currently rendered inside. */
+  function consoleHost(el) {
+    if (!el) return $('managerDashboard');
+    return el.closest('.manager-module-content') || el.closest('#managerDashboard') || $('managerDashboard');
+  }
+
+  function wireGoto(root) {
+    root.querySelectorAll('[data-goto]').forEach(function(btn) {
+      btn.addEventListener('click', function() { openConsoleScreen(btn.dataset.goto); });
+    });
+  }
+
+  /* ---------------- Tab: team ---------------- */
+  function drawTeam(body, d) {
+    const at = d.attendance || {};
+    body.innerHTML = `
+      <div class="console-kpis">
+        ${d.modules.staff ? kpi('الموظفون النشطون', d.staff.active, 'الإجمالي ' + d.staff.total) : ''}
+        ${d.modules.daily ? kpi('حضور اليوم', at.checkedInToday, 'حاضرون الآن ' + at.presentNow) : ''}
+        ${d.modules.daily ? kpi('أيام التأخير بالشهر', at.lateDays, at.lateMinutes + ' دقيقة') : ''}
+        ${d.modules.daily ? kpi('غياب بانتظار المراجعة', d.requests.pendingAbsences, 'يحتاج قرارك') : ''}
+      </div>
+
+      <section class="console-card">
+        <h4>إدارة الفريق</h4>
+        <div class="console-actions">
+          ${d.modules.staff ? action('الموظفون', 'staff') : ''}
+          ${d.modules.daily ? action('المتابعة اليومية', 'daily') : ''}
+          ${d.modules.staff ? action('الورديات', 'shifts') : ''}
+          ${d.modules.tasks ? action('المهام والتسكات', 'tasks') : ''}
+          ${d.modules.staff ? action('التحكم في الأزرار', 'buttonsMatrix') : ''}
+          ${d.modules.staff ? action('إدارة المديرين', 'managers') : ''}
+        </div>
+      </section>
+
+      <section class="console-card">
+        <h4>تقارير الفريق</h4>
+        <div class="console-actions">
+          <button type="button" class="console-action" data-report="attendance">تقرير الحضور</button>
+          <button type="button" class="console-action" data-report="tasks">تقرير المهام</button>
+        </div>
+      </section>
+    `;
+    wireActions(body);
+  }
+
+  /* ---------------- Tab: money ---------------- */
+  function drawMoney(body, d) {
+    const m = d.money || {};
+    body.innerHTML = `
+      <div class="console-kpis">
+        ${kpi('خصومات الشهر', formatMoney(m.monthDeductionsApproved) + ' ج', 'معلقة ' + formatMoney(m.monthDeductionsPending))}
+        ${kpi('أوفر تايم الشهر', formatMoney(m.monthOvertimeAmount) + ' ج', m.monthOvertimeMinutes + ' دقيقة')}
+        ${kpi('عهد مفتوحة', m.openCustody, formatMoney(m.custodyAmount) + ' ج مستحقة')}
+        ${kpi('بإنتظار الصرف', m.awaitingPayout, 'سلف معتمدة')}
+      </div>
+
+      <section class="console-card">
+        <h4>الإدارة المالية</h4>
+        <div class="console-actions">
+          ${action('السلف والعهد', 'finance')}
+          ${action('الأوفر تايم', 'overtime')}
+        </div>
+      </section>
+
+      <section class="console-card">
+        <h4>التقارير المالية</h4>
+        <div class="console-actions">
+          <button type="button" class="console-action" data-report="finance">التقرير المالي</button>
+          <button type="button" class="console-action" data-report="custody">تقرير العهد</button>
+        </div>
+      </section>
+    `;
+    wireActions(body);
+  }
+
+  /* ---------------- Tab: operations ---------------- */
+  function drawOperations(body, d) {
+    const o = d.operations || {};
+    body.innerHTML = `
+      <div class="console-kpis">
+        ${d.modules.devices ? kpi('أجهزة تحت المتابعة', o.activeDevices, 'جاهزة ' + o.readyDevices) : ''}
+        ${d.modules.devices ? kpi('قطع غيار معلقة', o.partsPending, 'بانتظار الموافقة') : ''}
+        ${d.modules.tasks ? kpi('مهام مفتوحة', o.openTasks, 'مراجعة ' + o.tasksInReview) : ''}
+        ${d.modules.tasks ? kpi('مهام متأخرة', o.tasksOverdue, 'تجاوزت الاستحقاق') : ''}
+      </div>
+
+      <section class="console-card">
+        <h4>التشغيل</h4>
+        <div class="console-actions">
+          ${d.modules.devices ? action('الأجهزة والصيانة', 'devices') : ''}
+          ${d.modules.devices ? action('قطع الغيار', 'parts') : ''}
+          ${d.modules.tasks ? action('المهام والتسكات', 'tasks') : ''}
+        </div>
+      </section>
+
+      <section class="console-card">
+        <h4>تقارير التشغيل</h4>
+        <div class="console-actions">
+          ${d.modules.devices ? '<button type="button" class="console-action" data-report="devices">تقرير الأجهزة</button>' : ''}
+        </div>
+      </section>
+    `;
+    wireActions(body);
+  }
+
+  function action(label, module) {
+    return `<button type="button" class="console-action" data-module="${escapeHtml(module)}">${escapeHtml(label)}</button>`;
+  }
+
+  function wireActions(root) {
+    root.querySelectorAll('[data-module]').forEach(function(btn) {
+      btn.addEventListener('click', function() { openConsoleScreen(btn.dataset.module); });
+    });
+    root.querySelectorAll('[data-report]').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        consoleState.tab = 'reports';
+        consoleState.reportType = btn.dataset.report;
+        consoleState.report = null;
+        drawConsole(consoleHost(btn));
+      });
+    });
+  }
+
+  /* Panels that the console can open, mapped to their existing openers. */
+  function openConsoleScreen(key) {
+    const map = {
+      staff: function() { openManagerModule('staff'); },
+      daily: function() { openManagerModule('daily'); },
+      shifts: function() { openManagerModule('shifts'); },
+      tasks: function() { openTaskAdminPanel(); },
+      finance: function() { openManagerModule('finance'); },
+      overtime: function() { openManagerModule('overtime'); },
+      devices: function() { openManagerModule('devices'); },
+      parts: function() { openPartAdminPanel(); },
+      managers: function() { openManagerModule('managers'); },
+      buttonsMatrix: function() { openButtonsMatrix(); },
+      requests: function() { openManagerModule('requests'); },
+      notifications: function() { openManagerModule('notifications'); }
+    };
+    const fn = map[key];
+    if (fn) fn();
+  }
+
+  /* ---------------- Tab: reports ---------------- */
+  const REPORT_DEFS = [
+    { key: 'summary', label: 'ملخص عام' },
+    { key: 'finance', label: 'مالي' },
+    { key: 'attendance', label: 'الحضور' },
+    { key: 'tasks', label: 'المهام' },
+    { key: 'custody', label: 'العهد' },
+    { key: 'devices', label: 'الأجهزة' }
+  ];
+
+  function drawReports(body, d) {
+    const types = REPORT_DEFS.filter(function(r) {
+      if (r.key === 'finance' || r.key === 'custody') return d.modules && d.modules.finance;
+      if (r.key === 'devices') return d.modules && d.modules.devices;
+      if (r.key === 'tasks') return d.modules && d.modules.tasks;
+      return true;
+    });
+    if (!types.some(t => t.key === consoleState.reportType)) consoleState.reportType = types[0].key;
+
+    body.innerHTML = `<div class="console-report">
+      <div class="console-report-head">
+        <label>الشهر
+          <input id="reportMonth" type="month" value="${escapeHtml(d.month || '')}">
+        </label>
+        <div class="console-report-types">
+          ${types.map(t => `<button type="button" class="console-chip${consoleState.reportType === t.key ? ' is-active' : ''}" data-report-type="${t.key}">${escapeHtml(t.label)}</button>`).join('')}
+        </div>
+      </div>
+      <div id="reportBody"><div class="manager-loading">جاري تجهيز التقرير...</div></div>
+    </div>`;
+
+    body.querySelectorAll('[data-report-type]').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        consoleState.reportType = btn.dataset.reportType;
+        consoleState.report = null;
+        drawConsole(consoleHost(btn));
+      });
+    });
+    body.querySelector('#reportMonth').addEventListener('change', function(ev) {
+      loadReport(consoleHost(ev.target), ev.target.value);
+    });
+
+    loadReport(consoleHost(body), (d.month || ''));
+  }
+
+  async function loadReport(content, month) {
+    const holder = content.querySelector('#reportBody');
+    if (!holder) return;
+    holder.innerHTML = '<div class="manager-loading">جاري تجهيز التقرير...</div>';
+    try {
+      const data = await api('console_report', { type: consoleState.reportType, month: month });
+      consoleState.report = data;
+      holder.innerHTML = renderReport(data);
+    } catch (e) {
+      holder.innerHTML = `<div class="manager-load-error">${escapeHtml(e.message)}</div>`;
+    }
+  }
+
+  function renderReport(data) {
+    const t = data.totals || {};
+    const rows = data.rows || [];
+
+    if (data.type === 'summary') {
+      return `<div class="report-totals">
+        ${reportTotal('مرات الحضور', t.checkins, '')}
+        ${reportTotal('دقائق التأخير', t.lateMinutes, 'دقيقة')}
+        ${reportTotal('خصومات معتمدة', formatMoney(t.deductions), 'جنيه')}
+        ${reportTotal('أوفر تايم', formatMoney(t.overtime), 'جنيه')}
+        ${reportTotal('عهد مصروفة', formatMoney(t.custodyPaid), 'جنيه')}
+      </div>
+      <p class="console-empty">اختر تقريرًا محددًا من الأعلى لعرض التفاصيل لكل موظف.</p>`;
+    }
+
+    if (data.type === 'finance') {
+      return `<div class="report-totals">
+        ${reportTotal('سلف مصروفة', formatMoney(t.advances), 'جنيه')}
+        ${reportTotal('خصومات معتمدة', formatMoney(t.deductions), 'جنيه')}
+        ${reportTotal('أوفر تايم', formatMoney(t.overtime), 'جنيه')}
+        ${reportTotal('الإجمالي', formatMoney(data.grandTotal), 'جنيه')}
+      </div>
+      ${reportTable(rows, [
+        { key: 'name', label: 'الموظف' },
+        { key: 'advances', label: 'سلف', money: true },
+        { key: 'deductions', label: 'خصومات', money: true },
+        { key: 'overtime', label: 'أوفر تايم', money: true },
+        { key: 'total', label: 'الإجمالي', money: true, strong: true }
+      ])}`;
+    }
+
+    if (data.type === 'attendance') {
+      return `<div class="report-totals">
+        ${reportTotal('مرات الحضور', t.checkins, '')}
+        ${reportTotal('مرات الانصراف', t.checkouts, '')}
+        ${reportTotal('أيام تأخير', t.lateDays, '')}
+        ${reportTotal('دقائق التأخير', t.lateMinutes, 'دقيقة')}
+      </div>
+      ${reportTable(rows, [
+        { key: 'name', label: 'الموظف' },
+        { key: 'checkins', label: 'حضور' },
+        { key: 'checkouts', label: 'انصراف' },
+        { key: 'lateDays', label: 'أيام تأخير' },
+        { key: 'lateMinutes', label: 'دقائق', strong: true }
+      ])}`;
+    }
+
+    if (data.type === 'tasks') {
+      return `<div class="report-totals">
+        ${reportTotal('إجمالي المهام', t.total, '')}
+        ${reportTotal('مكتملة', t.done, '')}
+        ${reportTotal('مفتوحة', t.open, '')}
+        ${reportTotal('بانتظار مراجعة', t.review, '')}
+      </div>
+      ${reportTable(rows, [
+        { key: 'name', label: 'الفني' },
+        { key: 'total', label: 'الكل' },
+        { key: 'done', label: 'مكتملة' },
+        { key: 'open', label: 'مفتوحة' },
+        { key: 'overdue', label: 'متأخرة', strong: true }
+      ])}`;
+    }
+
+    if (data.type === 'custody') {
+      return `<div class="report-totals">
+        ${reportTotal('عهد مفتوحة', t.openCount, '')}
+        ${reportTotal('المعتمد', formatMoney(t.approved), 'جنيه')}
+        ${reportTotal('المصروف', formatMoney(t.spent), 'جنيه')}
+        ${reportTotal('المتبقي', formatMoney(t.outstanding), 'جنيه')}
+      </div>
+      ${reportTable(rows, [
+        { key: 'name', label: 'الموظف' },
+        { key: 'count', label: 'عدد' },
+        { key: 'approved', label: 'معتمد', money: true },
+        { key: 'spent', label: 'مصروف', money: true },
+        { key: 'outstanding', label: 'متبقي', money: true, strong: true }
+      ])}`;
+    }
+
+    if (data.type === 'devices') {
+      const statusRows = Object.keys(data.byStatus || {}).map(function(k) {
+        return { name: k, count: data.byStatus[k] };
+      }).sort(function(a, b) { return b.count - a.count; });
+      return `<div class="report-totals">
+        ${reportTotal('إجمالي الأجهزة', t.total, '')}
+        ${reportTotal('تحت المتابعة', t.open, '')}
+        ${reportTotal('تم التسليم', t.delivered, '')}
+      </div>
+      <h5 class="price-group-title">حسب الحالة</h5>
+      ${reportTable(statusRows, [
+        { key: 'name', label: 'الحالة' },
+        { key: 'count', label: 'العدد', strong: true }
+      ])}
+      <h5 class="price-group-title">حسب الفني</h5>
+      ${reportTable(rows, [
+        { key: 'name', label: 'الفني' },
+        { key: 'total', label: 'الكل' },
+        { key: 'open', label: 'مفتوح', strong: true },
+        { key: 'delivered', label: 'مسلّم' }
+      ])}`;
+    }
+
+    return '<p class="console-empty">لا توجد بيانات.</p>';
+  }
+
+  function reportTotal(label, value, unit) {
+    // Values arrive either raw (numbers) or pre-formatted strings; only
+    // format numbers, never a string that is already display-ready.
+    let v;
+    if (value === null || value === undefined || value === '') v = '—';
+    else if (typeof value === 'number') v = formatMoney(value);
+    else v = String(value);
+    return `<div class="report-total"><small>${escapeHtml(label)}</small><b>${escapeHtml(String(v))}</b>${unit ? `<span>${escapeHtml(unit)}</span>` : ''}</div>`;
+  }
+
+  function reportTable(rows, cols) {
+    if (!rows || !rows.length) return '<p class="console-empty">لا توجد بيانات لهذا الشهر.</p>';
+    return `<div class="report-table">
+      <div class="report-table-head">
+        ${cols.map(c => `<span>${escapeHtml(c.label)}</span>`).join('')}
+      </div>
+      ${rows.map(r => `<div class="report-table-row">
+        ${cols.map(c => {
+          let v = r[c.key];
+          if (v === null || v === undefined) v = '—';
+          else if (c.money) v = formatMoney(v);
+          return `<span${c.strong ? ' class="is-strong"' : ''}>${escapeHtml(String(v))}</span>`;
+        }).join('')}
+      </div>`).join('')}
+    </div>`;
+  }
+
+
   $('workspaceSwitch').addEventListener('click', switchWorkspace);
   $('refreshManagerDashboard').addEventListener('click',loadManagerDashboard);
   document.querySelectorAll('[data-manager-module]').forEach(btn=>btn.addEventListener('click',()=>openManagerModule(btn.dataset.managerModule)));
@@ -3321,6 +3830,8 @@
   document.querySelectorAll('[data-uniform]').forEach(btn => btn.addEventListener('click', () => confirmUniform(btn.dataset.uniform)));
   document.querySelectorAll('[data-entity]').forEach(btn => btn.addEventListener('click', () => showList(btn.dataset.entity)));
   $('backBtn').addEventListener('click', () => { const title=$('resultTitle').textContent; $('results').classList.add('hidden'); if(['الطلبات العامة','طلبات الأذونات','السلف والعهد'].includes(title)) showRequestPicker(); else closeModal(); });
+  // Exposed for automated UI previews; never used by app logic.
+  window.__mhConsole = { render: renderConsoleInto, setTab: function(t){ consoleState.tab = t; } };
   initTheme();
   start();
 })();

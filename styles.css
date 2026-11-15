@@ -2829,3 +2829,248 @@ main{display:grid;gap:14px;min-width:0}
   background:linear-gradient(150deg,rgba(15,35,55,.035),rgba(15,35,55,.012));
 }
 [data-theme="light"] .intake-gen-card:hover{background:var(--brand-wash)}
+
+/* ===================================================================
+   V1.18 — MANAGEMENT CONSOLE
+   =================================================================== */
+.console{display:grid;gap:14px}
+.console-head{
+  display:flex;align-items:flex-start;justify-content:space-between;gap:12px;
+  padding:16px;
+  border-radius:var(--r-lg);
+  border:1px solid var(--line-2);
+  background:linear-gradient(140deg,var(--brand-wash),rgba(255,255,255,.02));
+}
+.console-head>div{display:grid;gap:2px;min-width:0}
+.console-kicker{
+  font-size:9px;font-weight:800;letter-spacing:1.4px;
+  color:var(--brand);text-transform:uppercase;
+}
+.console-head h3{margin:0;font-size:18px;letter-spacing:-.3px;line-height:1.35}
+.console-head small{font-size:11px;color:var(--text-3)}
+.console-refresh{
+  flex:0 0 auto;
+  min-height:34px;padding:6px 14px;
+  border-radius:var(--r-pill);
+  border:1px solid var(--line-2);
+  background:rgba(255,255,255,.05);
+  color:var(--text-2);
+  font-family:inherit;font-size:11px;font-weight:800;
+  cursor:pointer;
+}
+.console-refresh:hover{border-color:var(--brand-line);color:var(--brand-2)}
+.console-refresh:disabled{opacity:.5}
+
+.console-tabs{
+  display:flex;
+  gap:6px;
+  overflow-x:auto;
+  padding-bottom:2px;
+  scrollbar-width:none;
+}
+.console-tabs::-webkit-scrollbar{display:none}
+.console-tab{
+  flex:0 0 auto;
+  min-height:36px;
+  padding:7px 15px;
+  border-radius:var(--r-pill);
+  border:1px solid var(--line);
+  background:rgba(255,255,255,.04);
+  color:var(--text-3);
+  font-family:inherit;font-size:11.5px;font-weight:700;
+  cursor:pointer;
+  transition:border-color .14s,background .14s,color .14s;
+}
+.console-tab.is-active{
+  border-color:var(--brand-line);
+  background:var(--brand-wash);
+  color:var(--brand-2);
+}
+
+.console-kpis{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(132px,1fr));
+  gap:9px;
+}
+.console-kpi{
+  display:grid;gap:2px;
+  padding:13px 14px;
+  border-radius:var(--r-md);
+  border:1px solid var(--line);
+  background:rgba(255,255,255,.028);
+}
+.console-kpi small{font-size:10px;line-height:1.5;color:var(--text-3)}
+.console-kpi b{font-size:22px;line-height:1.25;letter-spacing:-.5px}
+.console-kpi span{font-size:10px;color:var(--text-3)}
+
+.console-critical{
+  display:grid;gap:7px;
+  padding:14px;
+  border-radius:var(--r-md);
+  border:1px solid var(--danger-line);
+  background:var(--danger-wash);
+}
+.console-critical>b{font-size:12px;color:var(--danger);margin-bottom:2px}
+.console-critical-row{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:9px 11px;
+  border-radius:9px;
+  border:1px solid rgba(255,90,80,.28);
+  background:rgba(0,0,0,.14);
+  color:var(--text);font-family:inherit;font-size:11.5px;font-weight:600;
+  cursor:pointer;text-align:right;
+}
+.console-critical-row:hover{background:rgba(0,0,0,.24)}
+.console-critical-row b{font-size:14px;color:var(--danger)}
+
+.console-card{
+  display:grid;gap:10px;
+  padding:15px;
+  border-radius:var(--r-md);
+  border:1px solid var(--line);
+  background:rgba(255,255,255,.022);
+}
+.console-card h4{margin:0;font-size:12.5px;font-weight:800;letter-spacing:-.1px}
+
+.console-alerts{display:grid;gap:6px}
+.console-alert{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:10px 12px;
+  border-radius:9px;
+  border:1px solid var(--line);
+  background:rgba(255,255,255,.028);
+  color:var(--text);font-family:inherit;font-size:11.5px;text-align:right;
+  cursor:pointer;
+}
+.console-alert:hover{border-color:var(--brand-line);background:var(--brand-wash)}
+.console-alert.is-high{border-color:var(--warn);background:var(--warn-wash)}
+.console-alert b{
+  flex:0 0 auto;
+  min-width:24px;height:24px;
+  display:grid;place-items:center;
+  border-radius:var(--r-pill);
+  background:rgba(255,255,255,.1);
+  font-size:11.5px;font-weight:800;
+}
+
+.console-actions{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(138px,1fr));
+  gap:8px;
+}
+.console-action{
+  min-height:42px;
+  padding:9px 12px;
+  border-radius:var(--r-sm);
+  border:1px solid var(--line);
+  background:rgba(255,255,255,.035);
+  color:var(--text);
+  font-family:inherit;font-size:11.5px;font-weight:700;
+  cursor:pointer;text-align:center;
+  transition:border-color .14s,background .14s;
+}
+.console-action:hover{border-color:var(--brand-line);background:var(--brand-wash)}
+
+.console-feed{display:grid;gap:0}
+.console-feed-row{
+  display:grid;
+  grid-template-columns:26px 1fr auto;
+  gap:9px;
+  align-items:center;
+  padding:9px 2px;
+  border-bottom:1px solid var(--line);
+}
+.console-feed-row:last-child{border-bottom:0}
+.console-feed-kind{
+  width:26px;height:26px;
+  display:grid;place-items:center;
+  border-radius:8px;
+  background:rgba(255,255,255,.05);
+  font-size:11px;font-weight:800;color:var(--text-3);
+}
+.console-feed-kind.is-attendance{background:var(--ok-wash);color:var(--ok)}
+.console-feed-kind.is-deduction{background:var(--danger-wash);color:var(--danger)}
+.console-feed-kind.is-task{background:var(--brand-wash);color:var(--brand-2)}
+.console-feed-row>div{display:grid;gap:1px;min-width:0}
+.console-feed-row b{font-size:11.5px;line-height:1.5}
+.console-feed-row small{font-size:10px;color:var(--text-3);overflow-wrap:anywhere}
+.console-feed-row time{font-size:9.5px;color:var(--text-3);white-space:nowrap}
+
+.console-empty{
+  margin:0;padding:16px;
+  text-align:center;
+  font-size:11.5px;line-height:1.8;
+  color:var(--text-3);
+}
+
+/* --- Reports --- */
+.console-report{display:grid;gap:12px}
+.console-report-head{display:grid;gap:10px}
+.console-report-head label{margin:0;font-size:11px}
+.console-report-types{display:flex;flex-wrap:wrap;gap:6px}
+.console-chip{
+  padding:6px 13px;
+  border-radius:var(--r-pill);
+  border:1px solid var(--line);
+  background:rgba(255,255,255,.04);
+  color:var(--text-3);
+  font-family:inherit;font-size:10.5px;font-weight:700;
+  cursor:pointer;
+}
+.console-chip.is-active{
+  border-color:var(--brand-line);background:var(--brand-wash);color:var(--brand-2);
+}
+
+.report-totals{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(104px,1fr));
+  gap:8px;
+}
+.report-total{
+  display:grid;gap:1px;justify-items:center;
+  padding:11px 8px;
+  border-radius:var(--r-sm);
+  border:1px solid var(--line);
+  background:rgba(255,255,255,.028);
+  text-align:center;
+}
+.report-total small{font-size:9.5px;line-height:1.5;color:var(--text-3)}
+.report-total b{font-size:16px;line-height:1.3}
+.report-total span{font-size:9px;color:var(--text-3)}
+
+.report-table{display:grid;gap:0}
+.report-table-head,
+.report-table-row{
+  display:grid;
+  grid-auto-flow:column;
+  grid-auto-columns:1fr;
+  gap:6px;
+  padding:8px 6px;
+  align-items:center;
+}
+.report-table-head{
+  border-bottom:1px solid var(--line-2);
+  font-size:9.5px;font-weight:800;color:var(--text-3);text-align:center;
+}
+.report-table-row{
+  border-bottom:1px solid var(--line);
+  font-size:11px;text-align:center;
+}
+.report-table-row:last-child{border-bottom:0}
+.report-table-head span:first-child,
+.report-table-row span:first-child{text-align:right}
+.report-table-row .is-strong{font-weight:800;color:var(--brand-2)}
+
+[data-theme="light"] .console-head{background:linear-gradient(140deg,var(--brand-wash),rgba(255,255,255,.7))}
+[data-theme="light"] .console-kpi,
+[data-theme="light"] .console-card,
+[data-theme="light"] .console-alert,
+[data-theme="light"] .console-action,
+[data-theme="light"] .report-total{background:rgba(15,35,55,.035)}
+[data-theme="light"] .console-tab,
+[data-theme="light"] .console-chip,
+[data-theme="light"] .console-refresh{background:rgba(15,35,55,.045);color:var(--text-2)}
+[data-theme="light"] .console-tab.is-active,
+[data-theme="light"] .console-chip.is-active{background:var(--brand-wash);border-color:var(--brand-line);color:var(--brand-2)}
+[data-theme="light"] .console-critical-row{background:rgba(255,255,255,.6)}
+[data-theme="light"] .console-feed-kind{background:rgba(15,35,55,.05)}
