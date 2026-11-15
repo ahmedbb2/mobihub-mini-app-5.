@@ -3287,3 +3287,191 @@ main{display:grid;gap:14px;min-width:0}
 [data-theme="light"] .proc-stock-row{background:rgba(15,35,55,.035)}
 [data-theme="light"] .proc-stock-row:hover{background:var(--brand-wash)}
 [data-theme="light"] .proc-stock-row.is-low{background:var(--danger-wash)}
+
+/* ===================================================================
+   V1.22 — DASHBOARD: grouped module grid + cleaner console
+   =================================================================== */
+
+/* Grouped sections replace the single flat grid. */
+.manager-modules{
+  display:grid;
+  grid-template-columns:1fr;
+  gap:20px;
+  padding:0;
+}
+.manager-module-group{display:grid;gap:10px}
+.manager-module-group-label{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  margin:0;
+  padding:0 2px 8px;
+  border-bottom:1px solid var(--line);
+  font-size:10.5px;
+  font-weight:800;
+  letter-spacing:.5px;
+  color:var(--text-3);
+  text-transform:none;
+}
+.manager-module-group-label::before{
+  content:'';
+  width:3px;height:14px;
+  border-radius:2px;
+  background:var(--brand);
+  flex:0 0 auto;
+}
+.manager-module-group-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+  gap:10px;
+}
+.manager-module{
+  min-height:88px;
+  padding:14px;
+  gap:6px;
+  border-radius:var(--r-md);
+  background:linear-gradient(150deg,rgba(255,255,255,.04),rgba(255,255,255,.012));
+  transition:border-color .14s,background .14s,transform .12s;
+}
+.manager-module:hover{
+  border-color:var(--brand-line);
+  background:var(--brand-wash);
+}
+.manager-module:active{transform:scale(.985)}
+.manager-module b{font-size:12px;line-height:1.5}
+.manager-module small{font-size:9.5px;line-height:1.6;color:var(--text-3)}
+
+/* Console: tighten vertical rhythm so the page is not airy. */
+.console{gap:16px}
+.console-head{padding:14px 16px}
+.console-kpis{gap:8px}
+.console-kpi{padding:11px 13px}
+.console-kpi b{font-size:20px}
+.console-card{padding:13px 14px;gap:9px}
+.console-actions{gap:7px}
+.console-action{min-height:38px;font-size:11px}
+.console-feed-row{padding:8px 2px}
+.console-critical{padding:12px}
+
+/* The legacy hero/heading are removed from the console layout entirely. */
+#managerDashboard .manager-hero,
+#managerDashboard .manager-dashboard-head,
+#managerDashboard .manager-section-head,
+#managerMetrics{display:none !important}
+
+[data-theme="light"] .manager-module{
+  background:linear-gradient(150deg,rgba(15,35,55,.035),rgba(15,35,55,.012));
+}
+[data-theme="light"] .manager-module:hover{background:var(--brand-wash)}
+
+@media (max-width:420px){
+  .manager-module-group-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .manager-module{min-height:82px;padding:11px}
+  .manager-module b{font-size:11.5px}
+  .manager-module small{font-size:9px}
+}
+
+/* ===================================================================
+   V1.22b — HARD HIDE of legacy dashboard chrome
+   The console replaces these entirely; they must never render.
+   =================================================================== */
+#managerDashboard > .manager-hero,
+#managerDashboard > .manager-dashboard-head,
+#managerDashboard > .manager-section-head,
+#managerDashboard #managerMetrics,
+#managerDashboard #managerDashboardDate,
+#managerDashboard #refreshManagerDashboard{
+  display:none !important;
+  height:0 !important;
+  margin:0 !important;
+  padding:0 !important;
+  overflow:hidden !important;
+}
+
+/* The console slot is the first thing the user sees. */
+#consoleSlot{display:block}
+#consoleSlot:empty{display:none}
+
+/* ===================================================================
+   V1.23 — DASHBOARD SPACING PASS
+   The page had large empty gaps: the welcome card, the console header
+   and the module grid each carried their own margins. This unifies the
+   vertical rhythm and removes dead space.
+   =================================================================== */
+
+/* One consistent gap for the whole manager workspace. */
+#managerWorkspace{
+  display:grid;
+  gap:14px;
+}
+#managerDashboard{
+  display:grid;
+  gap:14px;
+  align-content:start;
+}
+
+/* Welcome card: tighter, no trailing margin. */
+.welcome{
+  margin:0;
+  padding:16px 18px;
+}
+.welcome h1{font-size:18px;line-height:1.35}
+.welcome .eyebrow{font-size:10px}
+
+/* Console header: compact, no double padding. */
+.console-head{
+  padding:13px 15px;
+  border-radius:var(--r-md);
+}
+.console-head h3{font-size:16px}
+.console-head small{font-size:10.5px}
+
+/* Tabs sit closer to the header they belong to. */
+.console-tabs{
+  margin-top:-2px;
+}
+
+/* KPI cards: denser grid, less vertical waste. */
+.console-kpis{
+  grid-template-columns:repeat(auto-fit,minmax(118px,1fr));
+  gap:8px;
+}
+.console-kpi{padding:10px 12px;gap:1px}
+.console-kpi b{font-size:19px}
+.console-kpi small{font-size:9.5px}
+.console-kpi span{font-size:9px}
+
+/* Cards: consistent internal spacing. */
+.console-card{padding:12px 13px;gap:8px}
+.console-card h4{font-size:12px}
+
+/* Alerts: tighter rows. */
+.console-alert{padding:9px 11px;font-size:11px}
+.console-critical{padding:11px;gap:6px}
+.console-critical-row{padding:8px 10px;font-size:11px}
+
+/* Feed: compact. */
+.console-feed-row{padding:7px 2px;gap:8px}
+.console-feed-row b{font-size:11px}
+.console-feed-row small{font-size:9.5px}
+
+/* Module groups: less air between sections. */
+.manager-modules{gap:16px}
+.manager-module-group{gap:8px}
+.manager-module-group-label{padding-bottom:6px;font-size:10px}
+.manager-module-group-grid{gap:8px}
+.manager-module{min-height:80px;padding:12px;gap:5px}
+.manager-module b{font-size:11.5px}
+.manager-module small{font-size:9px;line-height:1.55}
+
+/* Remove the empty band that appeared under the console. */
+#consoleSlot{margin:0}
+#consoleSlot > .console{margin:0}
+
+@media (max-width:420px){
+  #managerWorkspace,#managerDashboard{gap:12px}
+  .welcome{padding:14px}
+  .console-head{padding:11px 13px}
+  .console-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .manager-module{min-height:76px;padding:10px}
+}

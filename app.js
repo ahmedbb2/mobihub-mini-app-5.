@@ -433,7 +433,32 @@
     try {
       const data = await api('console_overview');
       consoleState.data = data;
+
+      // openManagerModule() reads this cache for permission checks. The legacy
+      // renderer used to be its only writer; without this every button failed.
+      managerDashboardCache = {
+        date: data.date,
+        month: data.month,
+        role: data.role,
+        modules: data.modules || {},
+        metrics: {
+          activeEmployees: data.staff ? data.staff.active : null,
+          presentNow: data.attendance ? data.attendance.presentNow : null,
+          checkedInToday: data.attendance ? data.attendance.checkedInToday : null,
+          pendingRequests: data.requests ? data.requests.pendingRequests : null,
+          pendingLeaves: data.requests ? data.requests.pendingLeaves : null,
+          pendingCash: data.money ? data.money.pendingAdvances : null,
+          openComplaints: data.requests ? data.requests.openComplaints : null,
+          activeDevices: data.operations ? data.operations.activeDevices : null,
+          pendingAbsences: data.requests ? data.requests.pendingAbsences : null,
+          pendingOvertime: data.requests ? data.requests.pendingOvertime : null
+        },
+        monthlyReport: data.monthlyReport || null
+      };
+
       drawConsoleInto(slot);
+      groupModuleGrid();
+      applyModulePermissions();
       // Hide the legacy dashboard chrome: the hero, the "نظرة عامة" header and
       // the old metric tiles. They would otherwise stack above the console.
       const legacyHero = host.querySelector('.manager-hero');
@@ -3512,6 +3537,76 @@
   }
 
   /* Renders the console directly into the dashboard section (no modal). */
+  /* ============================================================
+   * DASHBOARD MODULE GRID — permission aware
+   * Hides modules the role cannot use, and groups them into four
+   * clear sections instead of one flat list.
+   * ============================================================ */
+
+  const MODULE_GROUPS = [
+    { key: 'ops', title: 'التشغيل اليومي', icon: '◷', modules: ['daily', 'shifts', 'requests'] },
+    { key: 'team', title: 'الفريق والمهام', icon: '♙', modules: ['staff', 'tasks', 'parts', 'procurement'] },
+    { key: 'money', title: 'المالية', icon: 'ج.م', modules: ['finance', 'overtime'] },
+    { key: 'system', title: 'الأجهزة والتقارير', icon: '▥', modules: ['devices', 'system'] },
+    { key: 'control', title: 'الإشعارات والصلاحيات', icon: '🎛', modules: ['notifications', 'notificationMatrix', 'buttonsMatrix', 'managers'] }
+  ];
+
+  function applyModulePermissions() {
+    const modules = (managerDashboardCache && managerDashboardCache.modules) || {};
+    const grid = $('managerModules');
+    if (!grid) return;
+
+    // 1. Hide every module the current role cannot open.
+    grid.querySelectorAll('[data-manager-module]').forEach(function(btn) {
+      const key = btn.getAttribute('data-manager-module');
+      const allowed = modules[key] === true;
+      btn.classList.toggle('hidden', !allowed);
+    });
+
+    // 2. Hide group headings that have no visible button left.
+    grid.querySelectorAll('.manager-module-group').forEach(function(group) {
+      const anyVisible = [...group.querySelectorAll('[data-manager-module]')].some(b => !b.classList.contains('hidden'));
+      group.classList.toggle('hidden', !anyVisible);
+    });
+  }
+
+  /** Rebuilds the grid into grouped sections (runs once per dashboard load). */
+  function groupModuleGrid() {
+    const grid = $('managerModules');
+    if (!grid || grid.dataset.grouped === 'true') return;
+
+    const buttons = {};
+    grid.querySelectorAll('[data-manager-module]').forEach(function(btn) {
+      buttons[btn.getAttribute('data-manager-module')] = btn;
+    });
+    if (!Object.keys(buttons).length) return;
+
+    const frag = document.createDocumentFragment();
+    MODULE_GROUPS.forEach(function(group) {
+      const present = group.modules.filter(function(m) { return buttons[m]; });
+      if (!present.length) return;
+
+      const section = document.createElement('div');
+      section.className = 'manager-module-group';
+
+      const heading = document.createElement('div');
+      heading.className = 'manager-module-group-label';
+      heading.textContent = group.title;
+      section.appendChild(heading);
+
+      const row = document.createElement('div');
+      row.className = 'manager-module-group-grid';
+      present.forEach(function(m) { row.appendChild(buttons[m]); });
+      section.appendChild(row);
+      frag.appendChild(section);
+    });
+
+    grid.innerHTML = '';
+    grid.appendChild(frag);
+    grid.dataset.grouped = 'true';
+  }
+
+
   function drawConsoleInto(host) {
     drawConsoleShell(host);
   }
