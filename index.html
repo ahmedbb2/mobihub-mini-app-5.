@@ -66,6 +66,7 @@
             <button class="manager-module" data-manager-module="requests"><span>▤</span><b>طلبات المهندسين</b><small>الطلبات والأذونات والشكاوى</small></button>
             <button class="manager-module" data-manager-module="finance"><span>ج.م</span><b>الإدارة المالية</b><small>السلف والعهد والخصومات</small></button>
             <button class="manager-module" data-manager-module="overtime"><span>◷</span><b>الأوفر تايم</b><small>طلبات الموافقة والتسوية المالية</small></button>
+            <button class="manager-module" data-manager-module="tasks"><span>📌</span><b>المهام والتسكات</b><small>إنشاء ومتابعة ومراجعة مهام الفنيين</small></button>
             <button class="manager-module" data-manager-module="devices"><span>▣</span><b>الأجهزة والصيانة</b><small>الأجهزة المسجلة وحركتها</small></button>
             <button class="manager-module" data-manager-module="system"><span>▥</span><b>التقارير والنظام</b><small>التقارير الشهرية والإعدادات</small></button>
             <button class="manager-module" data-manager-module="notifications"><span>♢</span><b>الإشعارات</b><small>سجل الإشعارات وإعداداتها وإرسال تنبيه</small></button>
@@ -289,6 +290,11 @@
         <div class="menu-section">
           <div class="menu-section-title">🏆 الأداء والتواصل <span>المكافآت والتقارير والشكاوى</span></div>
           <div class="legacy-menu-grid">
+            <button class="home-card task-card" data-home-action="tasks">
+              <span class="home-icon">📌</span>
+              <div class="home-card-text"><b>تسكاتي</b><small>مهامك المطلوبة من الإدارة</small></div>
+              <span id="tasksBadge" class="task-badge hidden">0</span>
+            </button>
             <button class="home-card" data-home-action="rewards">
               <span class="home-icon">🏆</span>
               <div class="home-card-text"><b>مكافآتي</b><small>النقاط والمكافأة الشهرية</small></div>

@@ -341,6 +341,8 @@
     $('workspaceSwitch').setAttribute('aria-label', workspaceRole === 'manager' ? 'التحويل إلى لوحة المهندس' : 'التحويل إلى لوحة المدير');
 
     renderStats(data.summary || {});
+    // Task badge comes from bootstrap so it is correct on first paint.
+    refreshTasksBadge(data.tasks || { open: 0, overdue: 0 });
     buildWorkspace(currentRole, data.permissions || {});
     // Manager panels stay hidden on the landing page and are moved into a modal only when opened.
     if (workspaceRole === 'manager') {
@@ -351,6 +353,7 @@
 
   const managerModuleTitles = {
     daily:'المتابعة اليومية', staff:'شؤون المهندسين', shifts:'إدارة الورديات', requests:'طلبات المهندسين والتواصل',
+    tasks:'المهام والتسكات',
     finance:'الإدارة المالية', overtime:'الأوفر تايم', devices:'الأجهزة والصيانة', system:'التقارير والنظام', notifications:'مركز الإشعارات', managers:'إدارة المديرين'
   };
   let managerDashboardCache = null;
@@ -397,6 +400,7 @@
     const permitted=managerDashboardCache?.modules?.[module];
     if(!permitted) { if(tg?.showAlert) tg.showAlert('هذه الخدمة غير متاحة حسب صلاحية حسابك.'); return; }
     const title=managerModuleTitles[module] || 'الإدارة';
+    if(module==='tasks') { closeModal(); await openTaskAdminPanel(); return; }
     if(module==='requests') {
       const panel=managerPanel(title,'<button type="button" class="manager-action-card" id="managerOpenPendingRequests"><b>مراجعة الطلبات والأذونات</b><small>مراجعة الطلبات المقدمة من المهندسين</small></button><button type="button" class="manager-action-card" id="managerOpenComplaints"><b>شكاوى المهندسين</b><small>فتح الشكاوى ومتابعة الردود والحالات</small></button>');
       panel.querySelector('#managerOpenPendingRequests').addEventListener('click',async()=>{closeModal();openModal('مراجعة الطلبات والأذونات',$('reviewCenter'));await loadReviews();});
@@ -793,6 +797,7 @@
     if(action==='deductions'){showList('deductions');return;}
     if(action==='rewards'){ $('financeCenter').classList.remove('hidden'); openModal('مكافآتي', $('financeCenter')); loadFinanceSummary(); return;}
     if(action==='monthly'){loadMonthlySummary();return;}
+    if(action==='tasks'){await openTasksPanel();return;}
     if(action==='devices'){await openEmployeeDevices();return;}
     if(action==='inspection'){await openStandaloneDeviceInspection();return;}
     if(action==='repair-prices'){await openRepairPriceBook();return;}
@@ -816,6 +821,7 @@
     try{
       const data=await api('bootstrap');
       renderStats(data.summary||{});
+      refreshTasksBadge(data.tasks || { open: 0, overdue: 0 });
       if (currentRole === 'employee' && currentAttendance) await refreshAttendance();
       $('attendance').classList.add('hidden');
       if(tg&&typeof tg.showAlert==='function') tg.showAlert('تم تحديث لوحة المهندس بنجاح.');
@@ -1672,6 +1678,326 @@
       if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
     });
   }
+
+  /* ============================================================
+   * TASKS — «تسكاتي»
+   * Employees see only their own tasks; progress moves forward and
+   * completion is approved by a manager.
+   * ============================================================ */
+
+  const TASK_STATUS_LABEL = {
+    'جديدة': 'جديدة',
+    'قيد التنفيذ': 'قيد التنفيذ',
+    'بانتظار المراجعة': 'بانتظار المراجعة',
+    'مكتملة': 'مكتملة',
+    'ملغاة': 'ملغاة'
+  };
+  const TASK_STATUS_CLASS = {
+    'جديدة': 'is-new',
+    'قيد التنفيذ': 'is-progress',
+    'بانتظار المراجعة': 'is-review',
+    'مكتملة': 'is-done',
+    'ملغاة': 'is-cancelled'
+  };
+
+  function taskStatusBadge(status) {
+    return `<span class="task-status ${TASK_STATUS_CLASS[status] || 'is-new'}">${escapeHtml(TASK_STATUS_LABEL[status] || status)}</span>`;
+  }
+
+  function taskDueLabel(task) {
+    if (!task.dueDate) return 'بدون تاريخ استحقاق';
+    if (task.overdue) return `متأخرة · ${task.dueDate}`;
+    return `الاستحقاق ${task.dueDate}`;
+  }
+
+  /** Refresh the home badge with open/overdue task counts. */
+  async function refreshTasksBadge(counts) {
+    const badge = $('tasksBadge');
+    if (!badge) return;
+    let data = counts;
+    if (!data) {
+      try { data = (await api('tasks_list')).summary; } catch (_) { return; }
+    }
+    const open = Number(data.open || 0);
+    const overdue = Number(data.overdue || 0);
+    if (!open) { badge.classList.add('hidden'); badge.textContent = '0'; return; }
+    badge.textContent = open > 99 ? '99+' : String(open);
+    badge.classList.toggle('is-urgent', overdue > 0);
+    badge.classList.remove('hidden');
+  }
+
+  async function openTasksPanel() {
+    const panel = managerPanel('تسكاتي', '<div class="manager-loading">جاري تحميل مهامك...</div>');
+    const content = panel.querySelector('.manager-module-content');
+    await renderTasksList(content);
+  }
+
+  async function renderTasksList(content, filter) {
+    content.innerHTML = '<div class="manager-loading">جاري تحميل مهامك...</div>';
+    try {
+      const data = await api('tasks_list');
+      const tasks = data.tasks || [];
+      const summary = data.summary || {};
+      const current = filter || 'open';
+      const visible = current === 'all' ? tasks
+        : current === 'done' ? tasks.filter(t => t.status === 'مكتملة')
+        : tasks.filter(t => ['جديدة', 'قيد التنفيذ', 'بانتظار المراجعة'].indexOf(t.status) >= 0);
+
+      content.innerHTML = `<div class="tasks-screen">
+        <div class="tasks-summary">
+          <div class="tasks-summary-item"><b>${summary.open || 0}</b><small>مفتوحة</small></div>
+          <div class="tasks-summary-item${summary.overdue ? ' is-urgent' : ''}"><b>${summary.overdue || 0}</b><small>متأخرة</small></div>
+          <div class="tasks-summary-item"><b>${summary.done || 0}</b><small>مكتملة</small></div>
+        </div>
+
+        <div class="tasks-tabs">
+          <button type="button" class="tasks-tab${current === 'open' ? ' active' : ''}" data-task-filter="open">المفتوحة</button>
+          <button type="button" class="tasks-tab${current === 'done' ? ' active' : ''}" data-task-filter="done">المكتملة</button>
+          <button type="button" class="tasks-tab${current === 'all' ? ' active' : ''}" data-task-filter="all">الكل</button>
+        </div>
+
+        <div class="tasks-list">
+          ${visible.length ? visible.map(task => `<button type="button" class="task-row${task.overdue ? ' is-overdue' : ''}" data-task-id="${escapeHtml(task.id)}">
+            <span class="task-row-main">
+              <b>${escapeHtml(task.title)}</b>
+              <small>${escapeHtml(task.type || 'مهمة')} · ${escapeHtml(task.priority)} · ${escapeHtml(taskDueLabel(task))}</small>
+              <span class="task-progress"><span style="width:${Math.max(0, Math.min(100, Number(task.progress) || 0))}%"></span></span>
+            </span>
+            ${taskStatusBadge(task.status)}
+          </button>`).join('') : `<p class="manager-empty-state"><b>لا توجد مهام هنا</b><p>${current === 'done' ? 'لم تُكمل أي مهمة بعد.' : 'لا توجد مهام مفتوحة حاليًا. أحسنت!'}</p></p>`}
+        </div>
+      </div>`;
+
+      content.querySelectorAll('[data-task-filter]').forEach(btn =>
+        btn.addEventListener('click', () => renderTasksList(content, btn.dataset.taskFilter))
+      );
+      content.querySelectorAll('[data-task-id]').forEach(btn =>
+        btn.addEventListener('click', () => openTaskDetail(content, btn.dataset.taskId))
+      );
+    } catch (e) {
+      content.innerHTML = `<div class="manager-load-error">${escapeHtml(e.message)}</div>`;
+    }
+  }
+
+  async function openTaskDetail(content, taskId) {
+    const data = await api('tasks_list');
+    const task = (data.tasks || []).find(t => t.id === taskId);
+    if (!task) { renderTasksList(content); return; }
+
+    const canSubmit = ['جديدة', 'قيد التنفيذ'].indexOf(task.status) >= 0;
+    const waiting = task.status === 'بانتظار المراجعة';
+    const done = task.status === 'مكتملة';
+
+    content.innerHTML = `<div class="tasks-screen">
+      <div class="price-screen-head">
+        <button type="button" class="price-back" id="taskBackList">← المهام</button>
+        <div><h4>${escapeHtml(task.title)}</h4><small>${escapeHtml(task.type || 'مهمة')} · ${escapeHtml(task.priority)}</small></div>
+      </div>
+
+      <div class="task-detail-card">
+        <div class="task-detail-row"><span>الحالة</span><b>${taskStatusBadge(task.status)}</b></div>
+        <div class="task-detail-row"><span>الاستحقاق</span><b class="${task.overdue ? 'is-late' : ''}">${escapeHtml(task.dueDate || '—')}${task.overdue ? ' (متأخرة)' : ''}</b></div>
+        <div class="task-detail-row"><span>نسبة الإنجاز</span><b>${Number(task.progress) || 0}%</b></div>
+        ${task.proofUrl ? `<div class="task-detail-row"><span>الدليل</span><a href="${escapeHtml(task.proofUrl)}" target="_blank" rel="noopener">فتح الرابط</a></div>` : ''}
+      </div>
+
+      ${task.details ? `<div class="task-details-text">${escapeHtml(task.details)}</div>` : ''}
+
+      ${done ? `<p class="task-done-note">تم اعتماد هذه المهمة. شكرًا لالتزامك.</p>` : ''}
+      ${waiting ? `<p class="task-waiting-note">أُرسلت للمراجعة. سيتم إبلاغك بعد اعتماد المدير.</p>` : ''}
+
+      ${canSubmit ? `<div class="task-edit">
+        <label>نسبة الإنجاز
+          <input id="taskProgressRange" type="range" min="0" max="100" step="5" value="${Number(task.progress) || 0}">
+          <output id="taskProgressValue">${Number(task.progress) || 0}%</output>
+        </label>
+        <label>رابط الدليل (اختياري)<input id="taskProofInput" type="url" maxlength="500" placeholder="رابط صورة أو فيديو أو منشور" value="${escapeHtml(task.proofUrl || '')}"></label>
+        <label>ملاحظتك<textarea id="taskNoteInput" rows="3" maxlength="1000" placeholder="اكتب ما تم إنجازه...">${escapeHtml(task.employeeNote || '')}</textarea></label>
+        <button type="button" class="primary-btn" id="taskSubmitReview">إرسال للمراجعة</button>
+        <button type="button" class="secondary-btn" id="taskSaveDraft">حفظ التقدم فقط</button>
+      </div>` : ''}
+    </div>`;
+
+    content.querySelector('#taskBackList').addEventListener('click', () => renderTasksList(content));
+
+    if (canSubmit) {
+      const range = content.querySelector('#taskProgressRange');
+      const output = content.querySelector('#taskProgressValue');
+      range.addEventListener('input', () => { output.textContent = range.value + '%'; });
+
+      const collect = status => ({
+        taskId: task.id,
+        status,
+        progress: Number(range.value),
+        proofUrl: content.querySelector('#taskProofInput').value.trim(),
+        note: content.querySelector('#taskNoteInput').value.trim()
+      });
+
+      content.querySelector('#taskSaveDraft').addEventListener('click', async ev => {
+        const btn = ev.currentTarget;
+        btn.disabled = true;
+        try {
+          const res = await api('task_update', collect('قيد التنفيذ'));
+          if (tg?.showAlert) tg.showAlert(res.message || 'تم حفظ التقدم.');
+          refreshTasksBadge();
+          renderTasksList(content);
+        } catch (e) {
+          if (tg?.showAlert) tg.showAlert(e.message);
+          btn.disabled = false;
+        }
+      });
+
+      content.querySelector('#taskSubmitReview').addEventListener('click', async ev => {
+        const btn = ev.currentTarget;
+        btn.disabled = true;
+        try {
+          const res = await api('task_update', collect('بانتظار المراجعة'));
+          if (tg?.showAlert) tg.showAlert(res.message || 'تم إرسال المهمة للمراجعة.');
+          refreshTasksBadge();
+          renderTasksList(content);
+        } catch (e) {
+          if (tg?.showAlert) tg.showAlert(e.message);
+          btn.disabled = false;
+        }
+      });
+    }
+  }
+
+  /* ---------- Manager side: create and review tasks ---------- */
+
+  async function openTaskAdminPanel() {
+    const panel = managerPanel('المهام والتسكات', '<div class="manager-loading">جاري تحميل المهام...</div>');
+    const content = panel.querySelector('.manager-module-content');
+    await renderTaskAdmin(content);
+  }
+
+  async function renderTaskAdmin(content) {
+    content.innerHTML = '<div class="manager-loading">جاري تحميل المهام...</div>';
+    try {
+      const data = await api('tasks_list', { scope: 'all' });
+      const tasks = data.tasks || [];
+      const review = tasks.filter(t => t.status === 'بانتظار المراجعة');
+      const open = tasks.filter(t => ['جديدة', 'قيد التنفيذ'].indexOf(t.status) >= 0);
+
+      content.innerHTML = `<div class="tasks-screen">
+        <div class="tasks-summary">
+          <div class="tasks-summary-item"><b>${open.length}</b><small>قيد العمل</small></div>
+          <div class="tasks-summary-item${review.length ? ' is-urgent' : ''}"><b>${review.length}</b><small>بانتظار المراجعة</small></div>
+          <div class="tasks-summary-item"><b>${data.summary.done || 0}</b><small>مكتملة</small></div>
+        </div>
+
+        <button type="button" class="primary-btn" id="taskCreateOpen">+ إنشاء مهمة جديدة</button>
+        <button type="button" class="secondary-btn" id="taskSeedMarketing">إضافة مهام الدعاية لكل الفنيين</button>
+
+        ${review.length ? `<h5 class="price-group-title">تحتاج مراجعتك</h5>
+          <div class="tasks-list">${review.map(t => `<div class="task-row is-review">
+            <span class="task-row-main"><b>${escapeHtml(t.title)}</b><small>${escapeHtml(t.employeeName)} · ${escapeHtml(t.dueDate || '')}</small></span>
+            <span class="task-row-actions">
+              <button type="button" class="task-mini-btn is-approve" data-task-approve="${escapeHtml(t.id)}">اعتماد</button>
+              <button type="button" class="task-mini-btn" data-task-return="${escapeHtml(t.id)}">إعادة</button>
+            </span>
+          </div>`).join('')}</div>` : ''}
+
+        <h5 class="price-group-title">كل المهام</h5>
+        <div class="tasks-list">
+          ${tasks.length ? tasks.map(t => `<article class="task-row">
+            <span class="task-row-main"><b>${escapeHtml(t.title)}</b><small>${escapeHtml(t.employeeName)} · ${escapeHtml(t.type)} · ${escapeHtml(taskDueLabel(t))}</small></span>
+            ${taskStatusBadge(t.status)}
+          </article>`).join('') : '<p class="manager-empty-state">لا توجد مهام بعد.</p>'}
+        </div>
+      </div>`;
+
+      content.querySelector('#taskCreateOpen').addEventListener('click', () => renderTaskCreateForm(content));
+      content.querySelector('#taskSeedMarketing').addEventListener('click', async ev => {
+        const btn = ev.currentTarget;
+        btn.disabled = true;
+        try {
+          const res = await api('task_seed_marketing');
+          if (tg?.showAlert) tg.showAlert(res.seeded ? `تمت إضافة ${res.seeded} مهمة لـ ${res.technicians} فني.` : (res.message || 'لا توجد مهام جديدة.'));
+          renderTaskAdmin(content);
+        } catch (e) {
+          if (tg?.showAlert) tg.showAlert(e.message);
+          btn.disabled = false;
+        }
+      });
+      content.querySelectorAll('[data-task-approve]').forEach(btn =>
+        btn.addEventListener('click', () => reviewTask(content, btn.dataset.taskApprove, 'اعتماد'))
+      );
+      content.querySelectorAll('[data-task-return]').forEach(btn =>
+        btn.addEventListener('click', () => reviewTask(content, btn.dataset.taskReturn, 'إعادة'))
+      );
+    } catch (e) {
+      content.innerHTML = `<div class="manager-load-error">${escapeHtml(e.message)}</div>`;
+    }
+  }
+
+  async function reviewTask(content, taskId, decision) {
+    try {
+      const res = await api('task_review', { taskId, decision });
+      if (tg?.showAlert) tg.showAlert(decision === 'اعتماد' ? 'تم اعتماد المهمة.' : 'أُعيدت المهمة للفني.');
+      renderTaskAdmin(content);
+    } catch (e) {
+      if (tg?.showAlert) tg.showAlert(e.message);
+    }
+  }
+
+  async function renderTaskCreateForm(content) {
+    content.innerHTML = '<div class="manager-loading">جاري تحميل الفنيين...</div>';
+    try {
+      const employees = await api('active_employees');
+      content.innerHTML = `<div class="tasks-screen">
+        <div class="price-screen-head">
+          <button type="button" class="price-back" id="taskCreateBack">← المهام</button>
+          <div><h4>مهمة جديدة</h4><small>تُرسل إشعارات للمعينين تلقائيًا</small></div>
+        </div>
+        <label>عنوان المهمة<input id="taskTitleInput" maxlength="120" placeholder="مثال: ٥ ستوريات دعائية"></label>
+        <label>التفاصيل<textarea id="taskDetailsInput" rows="3" maxlength="1500" placeholder="اشرح المطلوب بدقة..."></textarea></label>
+        <label>النوع<select id="taskTypeInput"><option>دعاية</option><option>صيانة</option><option>تدريب</option><option>جودة</option><option>أخرى</option></select></label>
+        <label>الأولوية<select id="taskPriorityInput"><option>عادية</option><option>مهمة</option><option>عاجلة</option></select></label>
+        <label>تاريخ الاستحقاق<input id="taskDueInput" type="date"></label>
+        <label>الفنيون
+          <div class="task-employee-picker">
+            <label class="task-pick-all"><input type="checkbox" id="taskPickAll"> كل الفنيين (${employees.length})</label>
+            ${employees.map(e => `<label><input type="checkbox" class="task-emp" value="${escapeHtml(e['Chat ID'])}"> ${escapeHtml(e['اسم الموظف'])}</label>`).join('')}
+          </div>
+        </label>
+        <button type="button" class="primary-btn" id="taskCreateSubmit">إنشاء المهمة</button>
+      </div>`;
+
+      const today = new Date().toISOString().slice(0, 10);
+      content.querySelector('#taskDueInput').value = today;
+
+      content.querySelector('#taskCreateBack').addEventListener('click', () => renderTaskAdmin(content));
+      content.querySelector('#taskPickAll').addEventListener('change', ev => {
+        content.querySelectorAll('.task-emp').forEach(box => { box.checked = ev.target.checked; });
+      });
+
+      content.querySelector('#taskCreateSubmit').addEventListener('click', async ev => {
+        const btn = ev.currentTarget;
+        const ids = [...content.querySelectorAll('.task-emp:checked')].map(b => b.value);
+        if (content.querySelector('#taskPickAll').checked) ids.length = 0;
+        btn.disabled = true;
+        try {
+          const res = await api('task_create', {
+            title: content.querySelector('#taskTitleInput').value.trim(),
+            details: content.querySelector('#taskDetailsInput').value.trim(),
+            type: content.querySelector('#taskTypeInput').value,
+            priority: content.querySelector('#taskPriorityInput').value,
+            dueDate: content.querySelector('#taskDueInput').value,
+            employeeIds: content.querySelector('#taskPickAll').checked ? ['all'] : ids
+          });
+          if (tg?.showAlert) tg.showAlert(`تم إنشاء ${res.created} مهمة · إشعارات: ${res.notified}/${res.total}`);
+          renderTaskAdmin(content);
+        } catch (e) {
+          if (tg?.showAlert) tg.showAlert(e.message);
+          btn.disabled = false;
+        }
+      });
+    } catch (e) {
+      content.innerHTML = `<div class="manager-load-error">${escapeHtml(e.message)}</div>`;
+    }
+  }
+
 
   $('workspaceSwitch').addEventListener('click', switchWorkspace);
   $('refreshManagerDashboard').addEventListener('click',loadManagerDashboard);
