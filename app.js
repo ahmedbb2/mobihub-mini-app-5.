@@ -1729,13 +1729,26 @@
     $('deductionEmployee').innerHTML=options; $('rewardEmployee').innerHTML=options;
   }
   async function loadPendingDeductions(){
-    const box=$('pendingDeductions'); box.textContent='جاري تحميل الخصومات المعلقة...';
+    const box=$('pendingDeductions'), history=$('deductionHistory');
+    box.textContent='جاري تحميل الخصومات المعلقة...';
+    if(history) history.textContent='جاري تحميل سجل الخصومات...';
     try{
       const rows=await api('list',{entity:'deductions'});
-      const pending=rows.filter(r=>String(r['الحالة'])==='بانتظار اعتماد المدير');
-      box.innerHTML=pending.length?pending.map(r=>`<article class="review-item"><strong>${escapeHtml(r['اسم الموظف'])} · ${escapeHtml(r['نوع الخصم'])}</strong><p>${escapeHtml(r['السبب'])}<br>${escapeHtml(r['المبلغ بالجنيه'])} جنيه · ${escapeHtml(r['تاريخ الواقعة'])}</p><div class="review-actions"><button class="primary-btn" data-ded-row="${r.__row}" data-ded-decision="معتمد">اعتماد</button><button class="secondary-btn" data-ded-row="${r.__row}" data-ded-decision="مرفوض">رفض</button></div></article>`).join(''):'لا توجد خصومات معلقة.';
-      box.querySelectorAll('[data-ded-row]').forEach(b=>b.addEventListener('click',async()=>{const note=b.dataset.dedDecision==='مرفوض'?(prompt('سبب الرفض:')||''):'';if(b.dataset.dedDecision==='مرفوض'&&!note.trim())return;try{await api('deduction_decide',{row:Number(b.dataset.dedRow),decision:b.dataset.dedDecision,note});await loadPendingDeductions();}catch(e){financeMessage(e.message,true);}}));
-    }catch(e){box.textContent=e.message;}
+      const pending=rows.filter(r=>String(r['الحالة']||'').trim()==='بانتظار اعتماد المدير');
+      const reviewed=rows.filter(r=>String(r['الحالة']||'').trim()!=='بانتظار اعتماد المدير');
+      box.innerHTML=pending.length?pending.map(r=>`<article class="review-item"><strong>${escapeHtml(r['اسم الموظف'])} · ${escapeHtml(r['نوع الخصم'])}</strong><p>${escapeHtml(r['السبب'])}<br>${escapeHtml(r['المبلغ بالجنيه'])} جنيه · ${escapeHtml(r['تاريخ الواقعة'])}</p><div class="review-actions"><button class="primary-btn" data-ded-row="${Number(r.__row)}" data-ded-decision="معتمد">اعتماد</button><button class="secondary-btn" data-ded-row="${Number(r.__row)}" data-ded-decision="مرفوض">رفض</button></div></article>`).join(''):'لا توجد خصومات معلقة.';
+      if(history) history.innerHTML=reviewed.length?reviewed.slice(0,50).map(r=>`<article class="record"><strong>${escapeHtml(r['اسم الموظف']||'موظف')} · ${escapeHtml(r['نوع الخصم']||'خصم')}</strong><small class="record-meta">${escapeHtml(r['تاريخ الواقعة']||'')} · ${Number(r['المبلغ بالجنيه']||0).toLocaleString('en-EG')} جنيه · ${escapeHtml(r['الحالة']||'')}</small><p>${escapeHtml(r['السبب']||'')}${r['ملاحظات']?`<br><small>${escapeHtml(r['ملاحظات'])}</small>`:''}</p></article>`).join(''):'لا توجد خصومات تمت مراجعتها بعد.';
+      box.querySelectorAll('[data-ded-row]').forEach(b=>b.addEventListener('click',async()=>{const note=b.dataset.dedDecision==='مرفوض'?(prompt('سبب الرفض:')||''):'';if(b.dataset.dedDecision==='مرفوض'&&!note.trim())return;b.disabled=true;try{await api('deduction_decide',{row:Number(b.dataset.dedRow),decision:b.dataset.dedDecision,note});financeMessage(b.dataset.dedDecision==='معتمد'?'تم اعتماد الخصم.':'تم رفض الخصم.');await loadPendingDeductions();}catch(e){financeMessage(e.message,true);b.disabled=false;}}));
+    }catch(e){box.textContent=e.message;if(history)history.textContent='تعذر تحميل سجل الخصومات: '+e.message;}
+  }
+  async function loadRewardBonusHistory(){
+    const box=$('rewardBonusHistory');
+    if(!box) return;
+    box.textContent='جاري تحميل سجل المكافآت...';
+    try{
+      const rows=await api('list',{entity:'rewards'});
+      box.innerHTML=rows.length?rows.slice(0,50).map(r=>`<article class="record"><strong>${escapeHtml(r['اسم الموظف']||'موظف')} · ${Number(r['المبلغ بالجنيه']||0).toLocaleString('en-EG')} جنيه</strong><small class="record-meta">${escapeHtml(r['التاريخ']||'')} · ${escapeHtml(r['الشهر']||'')} · ${escapeHtml(r['الحالة']||'')}</small><p>${escapeHtml(r['السبب']||'')}</p></article>`).join(''):'لا توجد مكافآت إضافية مسجلة.';
+    }catch(e){box.textContent='تعذر تحميل سجل المكافآت: '+e.message;}
   }
   async function submitDeduction(){
     const b=$('submitDeduction');b.disabled=true;
@@ -1749,7 +1762,7 @@
   }
   async function submitBonus(){
     const b=$('submitBonus');b.disabled=true;
-    try{const r=await api('reward_bonus_create',{employeeId:$('rewardEmployee').value,amount:$('bonusAmount').value,reason:$('bonusReason').value});$('bonusAmount').value='';$('bonusReason').value='';financeMessage(`تمت إضافة المكافأة واعتمادها بقيمة ${r.amount} جنيه.`);}
+    try{const r=await api('reward_bonus_create',{employeeId:$('rewardEmployee').value,amount:$('bonusAmount').value,reason:$('bonusReason').value});$('bonusAmount').value='';$('bonusReason').value='';financeMessage(`تمت إضافة المكافأة واعتمادها بقيمة ${r.amount} جنيه.`);await loadRewardBonusHistory();}
     catch(e){financeMessage(e.message,true);}finally{b.disabled=false;}
   }
 
@@ -4306,7 +4319,7 @@
   document.querySelectorAll('[data-home-action]').forEach(b=>b.addEventListener('click',()=>openHomeAction(b.dataset.homeAction)));
   $('myFinanceTab').addEventListener('click',()=>{$('financeCenter').classList.remove('hidden');loadFinanceSummary();});
   $('deductionAdminTab').addEventListener('click',async()=>{switchFinance('deductions');try{await loadFinanceEmployees();await loadPendingDeductions();}catch(e){financeMessage(e.message,true);}});
-  $('rewardAdminTab').addEventListener('click',async()=>{switchFinance('rewards');try{await loadFinanceEmployees();}catch(e){financeMessage(e.message,true);}});
+  $('rewardAdminTab').addEventListener('click',async()=>{switchFinance('rewards');try{await loadFinanceEmployees();await loadRewardBonusHistory();}catch(e){financeMessage(e.message,true);}});
   $('submitDeduction').addEventListener('click',submitDeduction);
   $('saveHygiene').addEventListener('click',saveHygiene);
   $('submitBonus').addEventListener('click',submitBonus);

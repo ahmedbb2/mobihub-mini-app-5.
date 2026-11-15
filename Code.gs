@@ -369,6 +369,9 @@ function doPost(e) {
       case 'notify_matrix_bulk':
         data = notifyMatrixBulkMini_(profile, body);
         break;
+      case 'tasks_repair':
+        data = tasksRepairMini_(profile);
+        break;
       case 'task_delete':
         data = tasksDeleteMini_(profile, body);
         break;
@@ -677,7 +680,7 @@ function bootstrap_(profile) {
         'super_admin', 'admin', 'supervisor'
       ].indexOf(profile.role) >= 0,
       finance: [
-        'super_admin', 'finance'
+        'super_admin', 'admin', 'finance'
       ].indexOf(profile.role) >= 0
     },
     summary: {
@@ -825,7 +828,7 @@ function managerDashboard_(profile) {
     shifts: ['super_admin','admin'].includes(role),
     devices: ['super_admin','admin'].includes(role),
     requests: ['super_admin','admin','supervisor'].includes(role),
-    finance: ['super_admin','finance'].includes(role),
+    finance: ['super_admin','admin','finance'].includes(role),
     overtime: ['super_admin','admin','finance'].includes(role),
     tasks: ['super_admin','admin','supervisor'].includes(role),
     parts: ['super_admin','admin','finance','supervisor','procurement'].includes(role),
@@ -2688,16 +2691,42 @@ const MH_DEVICE_LOCATIONS = ['قسم الاستلام','ترابيزة الها�
 const MH_ADMIN_ROLES = ['Admin','Finance','Supervisor','Procurement'];
 
 function mhEnsureSheet_(name, headers) {
-  const ss=spreadsheet_(); let sh=ss.getSheetByName(name);
-  if(!sh) sh=ss.insertSheet(name);
-  if(sh.getLastRow()===0) sh.getRange(1,1,1,headers.length).setValues([headers]);
-  mhAssertHeaders_(sh,headers);
+  const ss = spreadsheet_();
+  let sh = ss.getSheetByName(name);
+  if (!sh) {
+    sh = ss.insertSheet(name);
+    sh.getRange(1,1,1,headers.length).setValues([headers]);
+    sh.setFrozenRows(1);
+    return sh;
+  }
+
+  if (sh.getLastRow() === 0) {
+    sh.getRange(1,1,1,headers.length).setValues([headers]);
+    return sh;
+  }
+
+  // Append only the missing columns so an older sheet keeps working.
+  const width = Math.max(sh.getLastColumn(), 1);
+  const existing = sh.getRange(1,1,1,width).getDisplayValues()[0]
+    .map(function(h) { return String(h).trim(); });
+  const missing = headers.filter(function(h) { return existing.indexOf(h) < 0; });
+  if (missing.length) sh.getRange(1, width + 1, 1, missing.length).setValues([missing]);
+  if (sh.getFrozenRows() === 0) sh.setFrozenRows(1);
   return sh;
 }
 function mhStamp_(){return Utilities.formatDate(new Date(),MH.TZ,'yyyy-MM-dd HH:mm:ss');}
 function mhAppendNotificationLog_(recipient,type,status,errorText) {
-  const sh=mhEnsureSheet_('سجل الإشعارات',MH_NOTIFICATION_HEADERS);
-  sh.appendRow([Utilities.getUuid(),mhStamp_(),String(recipient),String(type),'miniapp_'+Utilities.getUuid(),String(status),String(errorText||'')]);
+  // Logging must never break the caller. A legacy or malformed log sheet used
+  // to throw from inside catch blocks, turning a caught notification failure
+  // into a full INTERNAL_ERROR response.
+  try {
+    const sh = mhEnsureSheet_('سجل الإشعارات', MH_NOTIFICATION_HEADERS);
+    sh.appendRow([Utilities.getUuid(),mhStamp_(),String(recipient),String(type),'miniapp_'+Utilities.getUuid(),String(status),String(errorText||'')]);
+    return true;
+  } catch (e) {
+    try { console.error('Notification log failed: ' + (e && e.message || e)); } catch (ignored) {}
+    return false;
+  }
 }
 function mhTelegramSend_(chatId,message) {
   const token=PropertiesService.getScriptProperties().getProperty('MOBIHUB_TELEGRAM_BOT_TOKEN') ||
@@ -3774,20 +3803,51 @@ function tasksCreateMini_(profile, body) {
   const lock = LockService.getScriptLock(); lock.waitLock(20000);
   try {
     const startRow = sh.getLastRow() + 1;
+
+    // Map the header row once so sets are positional-safe. An older sheet may
+    // have extra or reordered columns; writing by name can never shift data.
+    const headerRow = sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), 1)).getDisplayValues()[0]
+      .map(function(h) { return String(h).trim(); });
+    const colIndex = {};
+    headerRow.forEach(function(h, i) { if (h) colIndex[h] = i; });
+
     const rows = targets.map(function(id, index) {
       const taskId = 'TSK-' + Utilities.formatDate(new Date(), MH.TZ, 'yyyyMMdd') + '-' +
         String(startRow + index).padStart(3, '0');
       created.push(taskId);
-      return [
-        taskId, title, details, type, id, byId[id] || '', priority, dueDate,
-        'جديدة', 0, '', '', String(profile.chatId), String(profile.name || ''), now, now, String(profile.name || '')
-      ];
+
+      const row = new Array(headerRow.length).fill('');
+      const set = function(header, value) {
+        if (colIndex[header] !== undefined) row[colIndex[header]] = value;
+      };
+      set('رقم المهمة', taskId);
+      set('العنوان', title);
+      set('التفاصيل', details);
+      set('النوع', type);
+      set('Chat ID', id);
+      set('اسم الفني', byId[id] || '');
+      set('الأولوية', priority);
+      set('تاريخ الاستحقاق', dueDate);
+      set('الحالة', 'جديدة');
+      set('نسبة الإنجاز', 0);
+      set('رابط الدليل', '');
+      set('ملاحظة الفني', '');
+      set('ملاحظة المراجعة', '');
+      set('أنشأها Chat ID', String(profile.chatId));
+      set('أنشأها', String(profile.name || ''));
+      set('تاريخ الإنشاء', now);
+      set('تاريخ آخر تحديث', now);
+      set('آخر تحديث بواسطة', String(profile.name || ''));
+      return row;
     });
-    sh.getRange(startRow, 1, rows.length, MH_TASK_HEADERS.length).setValues(rows);
+
+    sh.getRange(startRow, 1, rows.length, headerRow.length).setValues(rows);
   } finally { lock.releaseLock(); }
 
   // Notify each assignee in Telegram; failures are logged, never fatal.
+  // Guarded end-to-end: a notification problem must not undo created tasks.
   let notified = 0;
+  try {
   targets.forEach(function(id) {
     try {
       mhTelegramSend_(id,
@@ -3805,6 +3865,9 @@ function tasksCreateMini_(profile, body) {
       mhAppendNotificationLog_(id, 'مهمة جديدة', 'فشل', String(e && e.message || e));
     }
   });
+  } catch (notifyErr) {
+    try { console.error('Task notification block failed: ' + (notifyErr && notifyErr.message || notifyErr)); } catch (ignored) {}
+  }
 
   return { created: created.length, taskIds: created, notified: notified, total: targets.length };
 }
@@ -3886,16 +3949,42 @@ function tasksSeedMarketingMini_(profile) {
     targets.forEach(function(emp) {
       const chatId = String(emp['Chat ID']).trim();
       const name = String(emp['اسم الموظف'] || '');
-      const rows = seed.map(function(task, index) {
+      // Write by header name so the column count can never drift again.
+      const headerRow = sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), 1)).getDisplayValues()[0]
+        .map(function(h) { return String(h).trim(); });
+      const colIndex = {};
+      headerRow.forEach(function(h, i) { if (h) colIndex[h] = i; });
+
+      const rows = seed.map(function(task) {
         const taskId = 'TSK-' + Utilities.formatDate(new Date(), MH.TZ, 'yyyyMMdd') + '-' + String(rowPointer).padStart(3, '0');
         rowPointer++;
         created++;
-        return [
-          taskId, task.title, task.details, 'دعاية', chatId, name, task.priority,
-          due, 'جديدة', 0, '', '', String(profile.chatId), String(profile.name || ''), now, now, String(profile.name || '')
-        ];
+
+        const row = new Array(headerRow.length).fill('');
+        const set = function(header, value) {
+          if (colIndex[header] !== undefined) row[colIndex[header]] = value;
+        };
+        set('رقم المهمة', taskId);
+        set('العنوان', task.title);
+        set('التفاصيل', task.details);
+        set('النوع', 'دعاية');
+        set('Chat ID', chatId);
+        set('اسم الفني', name);
+        set('الأولوية', task.priority);
+        set('تاريخ الاستحقاق', due);
+        set('الحالة', 'جديدة');
+        set('نسبة الإنجاز', 0);
+        set('رابط الدليل', '');
+        set('ملاحظة الفني', '');
+        set('ملاحظة المراجعة', '');
+        set('أنشأها Chat ID', String(profile.chatId));
+        set('أنشأها', String(profile.name || ''));
+        set('تاريخ الإنشاء', now);
+        set('تاريخ آخر تحديث', now);
+        set('آخر تحديث بواسطة', String(profile.name || ''));
+        return row;
       });
-      sh.getRange(sh.getLastRow() + 1, 1, rows.length, MH_TASK_HEADERS.length).setValues(rows);
+      sh.getRange(sh.getLastRow() + 1, 1, rows.length, headerRow.length).setValues(rows);
     });
   } finally { lock.releaseLock(); }
 
@@ -5298,13 +5387,29 @@ function consoleOverviewMini_(profile) {
   const today = mhToday_();
   const month = today.slice(0, 7);
 
+  // Every module key the dashboard can render must exist here, otherwise
+  // openManagerModule() treats it as forbidden.
   const modules = {
-    staff: ['super_admin','admin'].includes(role),
+    // التشغيل اليومي
     daily: ['super_admin','admin','supervisor'].includes(role),
+    shifts: ['super_admin','admin'].includes(role),
     requests: ['super_admin','admin','supervisor'].includes(role),
-    finance: ['super_admin','finance','admin'].includes(role),
-    devices: ['super_admin','admin'].includes(role),
+    // الفريق
+    staff: ['super_admin','admin'].includes(role),
     tasks: ['super_admin','admin','supervisor'].includes(role),
+    parts: ['super_admin','admin','finance','supervisor','procurement'].includes(role),
+    procurement: ['super_admin','admin','procurement'].includes(role),
+    // المالية
+    finance: ['super_admin','finance','admin'].includes(role),
+    overtime: ['super_admin','finance','admin'].includes(role),
+    // الأجهزة والتقارير
+    devices: ['super_admin','admin'].includes(role),
+    system: ['super_admin','admin','supervisor','finance'].includes(role),
+    // الإشعارات والصلاحيات
+    notifications: ['super_admin','admin','supervisor'].includes(role),
+    notificationMatrix: ['super_admin','admin'].includes(role),
+    buttonsMatrix: ['super_admin','admin'].includes(role),
+    managers: ['super_admin'].includes(role),
     management: ['super_admin','admin'].includes(role)
   };
 
@@ -6009,5 +6114,119 @@ function mhAdjustStock_(partName, delta, actorName) {
 
   const minimum = Number(row['الحد الأدنى'] || 0);
   return { code: String(row['كود القطعة'] || ''), name: name, previous: current, current: next, minimum: minimum, low: next <= minimum };
+}
+
+/* =========================================================
+   V1.21 — TASK SHEET REPAIR
+   Older builds wrote 17 values into an 18-column sheet, which
+   shifted every cell one column to the left. Task IDs landed in
+   the wrong place and the row looked corrupted.
+
+   This repairs existing rows in place. It is safe to run more
+   than once: rows that already match their headers are skipped.
+========================================================= */
+
+/**
+ * Detects and realigns task rows written with the old 17-value layout.
+ * Returns a summary so the caller can report what changed.
+ */
+function tasksRepairSheet_(profile) {
+  mhRequireRole_(profile, ['super_admin','admin']);
+
+  const sh = mhTaskSheet_();
+  mhAssertHeaders_(sh, MH_TASK_HEADERS);
+
+  const lastRow = sh.getLastRow();
+  const lastCol = Math.max(sh.getLastColumn(), 1);
+  if (lastRow < 2) return { repaired: 0, checked: 0, message: 'لا توجد صفوف لفحصها.' };
+
+  const headers = sh.getRange(1, 1, 1, lastCol).getDisplayValues()[0]
+    .map(function(h) { return String(h).trim(); });
+  const colIndex = {};
+  headers.forEach(function(h, i) { if (h) colIndex[h] = i; });
+
+  const values = sh.getRange(2, 1, lastRow - 1, lastCol).getDisplayValues();
+  const repairs = [];
+
+  values.forEach(function(row, i) {
+    const rowNum = i + 2;
+
+    const getId = function(header) {
+      const idx = colIndex[header];
+      return idx === undefined ? '' : String(row[idx] || '').trim();
+    };
+
+    const taskId = getId('رقم المهمة');
+    if (!/^TSK-/.test(taskId)) return; // no identifier: nothing to repair
+
+    // The old bug kept the id in place and shifted the REST one column left.
+    // Detect impossible values in typed columns, which is unambiguous:
+    //   • «ملاحظة المراجعة» must never hold a pure number (chat id)
+    //   • «أنشأها Chat ID» must be numeric, never a person's name
+    //   • «أنشأها» must be text, never a timestamp
+    const cell = function(header) {
+      const idx = colIndex[header];
+      return idx === undefined ? '' : String(row[idx] || '').trim();
+    };
+
+    const reviewNote = cell('ملاحظة المراجعة');
+    const creatorId  = cell('أنشأها Chat ID');
+    const creatorName = cell('أنشأها');
+    const created = cell('تاريخ الإنشاء');
+
+    const shifted =
+      /^\d{5,20}$/.test(reviewNote) ||
+      (creatorId !== '' && !/^\d{5,20}$/.test(creatorId)) ||
+      (/^\d{4}-\d{2}-\d{2}/.test(creatorName) && creatorName !== '');
+
+    if (!shifted) return;
+    repairs.push({ rowNum: rowNum, raw: row.slice() });
+  });
+
+  if (!repairs.length) {
+    return { repaired: 0, checked: values.length, message: 'كل الصفوف سليمة — لا حاجة لإصلاح.' };
+  }
+
+  const lock = LockService.getScriptLock(); lock.waitLock(20000);
+  try {
+    repairs.forEach(function(item) {
+      // Recover what we can from the shifted row and rebuild it by name.
+      const raw = item.raw;
+      const findId = function() {
+        for (let c = 0; c < raw.length; c++) {
+          if (/^TSK-/.test(String(raw[c] || '').trim())) return String(raw[c]).trim();
+        }
+        return '';
+      };
+      const recoveredId = findId();
+      if (!recoveredId) return; // cannot repair without an identifier
+
+      // Columns before «ملاحظة المراجعة» are correct; everything from the
+      // missing-column position onward is one place to the left. Move that
+      // tail right by one cell and blank the now-duplicated slot.
+      const pivot = colIndex['ملاحظة المراجعة'];
+      const fixed = raw.slice();
+      if (pivot !== undefined) {
+        for (let c = fixed.length - 1; c >= pivot; c--) {
+          fixed[c] = c === pivot ? '' : fixed[c - 1];
+        }
+        // «ملاحظة المراجعة» is a free-text column that was absent in the old
+        // layout, so it starts empty for repaired rows.
+        fixed[pivot] = '';
+      }
+      sh.getRange(item.rowNum, 1, 1, fixed.length).setValues([fixed]);
+    });
+  } finally { lock.releaseLock(); }
+
+  return {
+    repaired: repairs.length,
+    checked: values.length,
+    message: 'تم إصلاح ' + repairs.length + ' صفًا من ' + values.length + '.'
+  };
+}
+
+/** API entry: repair task rows from the dashboard. */
+function tasksRepairMini_(profile) {
+  return tasksRepairSheet_(profile);
 }
 

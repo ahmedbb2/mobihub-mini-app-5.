@@ -208,6 +208,7 @@
           <label>السبب<textarea id="deductionReason" rows="2" maxlength="500" placeholder="سبب الخصم بالتفصيل"></textarea></label>
           <button id="submitDeduction" class="primary-btn submit-action">تسجيل الخصم للمراجعة</button>
           <div class="form-divider"></div><h3>الخصومات المعلقة</h3><div id="pendingDeductions">جاري التحميل...</div>
+          <div class="form-divider"></div><h3>سجل الخصومات السابقة</h3><div id="deductionHistory" class="finance-history">سيظهر هنا سجل الخصومات بعد تحميله.</div>
         </div>
         <div id="rewardAdminView" class="request-form hidden">
           <div class="form-title"><span class="form-title-icon">★</span><div><h3>إدارة المكافآت</h3><p>تقييم النظافة وإضافة مكافأة مالية مستقلة</p></div></div>
@@ -221,6 +222,7 @@
           <label>المبلغ بالجنيه<input id="bonusAmount" type="number" min="0.01" step="0.01" placeholder="مثال: 200"></label>
           <label>سبب المكافأة<input id="bonusReason" maxlength="250" placeholder="سبب منح المكافأة"></label>
           <button id="submitBonus" class="primary-btn submit-action">إضافة المكافأة واعتمادها</button>
+          <div class="form-divider"></div><h3>سجل المكافآت الإضافية</h3><div id="rewardBonusHistory" class="finance-history">سيظهر هنا سجل المكافآت بعد تحميله.</div>
         </div>
         <p id="financeMessage" class="inline-message hidden" aria-live="polite"></p>
       </section>
