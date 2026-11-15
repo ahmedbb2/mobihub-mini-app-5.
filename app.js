@@ -375,7 +375,7 @@
 
   const managerModuleTitles = {
     daily:'المتابعة اليومية', staff:'شؤون المهندسين', shifts:'إدارة الورديات', requests:'طلبات المهندسين والتواصل',
-    tasks:'المهام والتسكات', parts:'قطع الغيار',
+    tasks:'المهام والتسكات', parts:'قطع الغيار', procurement:'المشتريات والمخزون',
     finance:'الإدارة المالية', overtime:'الأوفر تايم', devices:'الأجهزة والصيانة', system:'التقارير والنظام', notifications:'مركز الإشعارات', notificationMatrix:'التحكم في الإشعارات', buttonsMatrix:'التحكم في الأزرار', managers:'إدارة المديرين'
   };
   let managerDashboardCache = null;
@@ -443,6 +443,7 @@
     const title=managerModuleTitles[module] || 'الإدارة';
     if(module==='tasks') { closeModal(); await openTaskAdminPanel(); return; }
     if(module==='parts') { closeModal(); await openPartAdminPanel(); return; }
+    if(module==='procurement') { closeModal(); await openProcurementPanel(); return; }
     if(module==='notificationMatrix') { closeModal(); await openNotificationMatrix(); return; }
     if(module==='buttonsMatrix') { closeModal(); await openButtonsMatrix(); return; }
     if(module==='requests') {
@@ -3723,6 +3724,7 @@
       overtime: function() { openManagerModule('overtime'); },
       devices: function() { openManagerModule('devices'); },
       parts: function() { openPartAdminPanel(); },
+      procurement: function() { openProcurementPanel(); },
       managers: function() { openManagerModule('managers'); },
       buttonsMatrix: function() { openButtonsMatrix(); },
       requests: function() { openManagerModule('requests'); },
@@ -3923,6 +3925,225 @@
   }
 
 
+  /* ============================================================
+   * PROCUREMENT — «المشتريات والمخزون»
+   * Purchasing officers approve part requests and keep stock.
+   * ============================================================ */
+
+  async function openProcurementPanel() {
+    const panel = managerPanel('المشتريات والمخزون', '<div class="manager-loading">جاري تحميل البيانات...</div>');
+    const content = panel.querySelector('.manager-module-content');
+    await renderProcurement(content);
+  }
+
+  async function renderProcurement(content, tab) {
+    const current = tab || 'requests';
+    content.innerHTML = '<div class="manager-loading">جاري تحميل البيانات...</div>';
+    try {
+      const data = await api('inventory_overview');
+      const c = data.counts || {};
+
+      content.innerHTML = `<div class="console">
+        <div class="console-kpis">
+          ${procKpi('طلبات بانتظار الموافقة', c.pendingRequests, 'تحتاج قرارك')}
+          ${procKpi('معتمدة بانتظار الصرف', c.awaitingIssue, 'جاهزة للتسليم')}
+          ${procKpi('أصناف في المخزون', c.totalItems, 'إجمالي')}
+          ${procKpi('تحت الحد الأدنى', c.lowStock, 'تحتاج توريد')}
+        </div>
+
+        <nav class="console-tabs">
+          <button type="button" class="console-tab${current === 'requests' ? ' is-active' : ''}" data-proc-tab="requests">الطلبات</button>
+          <button type="button" class="console-tab${current === 'stock' ? ' is-active' : ''}" data-proc-tab="stock">المخزون</button>
+        </nav>
+
+        <div id="procBody"></div>
+      </div>`;
+
+      content.querySelectorAll('[data-proc-tab]').forEach(function(btn) {
+        btn.addEventListener('click', function() { renderProcurement(content, btn.dataset.procTab); });
+      });
+
+      const body = content.querySelector('#procBody');
+      if (current === 'requests') drawProcRequests(body, data);
+      else drawProcStock(body, data);
+    } catch (e) {
+      content.innerHTML = `<div class="manager-load-error">${escapeHtml(e.message)}</div>`;
+    }
+  }
+
+  function procKpi(label, value, sub) {
+    const v = (value === null || value === undefined) ? '—' : value;
+    return `<article class="console-kpi"><small>${escapeHtml(label)}</small><b>${escapeHtml(String(v))}</b><span>${escapeHtml(sub || '')}</span></article>`;
+  }
+
+  function drawProcRequests(body, data) {
+    const pending = data.pending || [];
+    const awaiting = data.approvedAwaitingIssue || [];
+    const demand = data.demand || [];
+
+    body.innerHTML = `
+      ${demand.length ? `<section class="console-card">
+        <h4>القطع المطلوبة — مجمّعة</h4>
+        <div class="proc-demand">
+          ${demand.map(function(d) {
+            return `<div class="proc-demand-row"><b>${escapeHtml(d.name)}</b><span>${d.quantity} قطعة · ${d.count} طلب</span></div>`;
+          }).join('')}
+        </div>
+      </section>` : ''}
+
+      <section class="console-card">
+        <h4>بانتظار قرارك (${pending.length})</h4>
+        ${pending.length ? `<div class="tasks-list">
+          ${pending.map(function(p) {
+            return `<article class="task-row proc-row">
+              <span class="task-row-main">
+                <b>${escapeHtml(p.partName)} <span class="part-qty">×${p.quantity}</span></b>
+                <small>${escapeHtml(p.employeeName)} · ${escapeHtml(p.purpose)}${p.deviceRef ? ' · ' + escapeHtml(p.deviceRef) : ''}</small>
+                <small class="part-reason">${escapeHtml(p.reason)}</small>
+              </span>
+              <span class="task-row-actions">
+                <button type="button" class="task-mini-btn is-approve" data-proc-approve="${escapeHtml(p.id)}">اعتماد</button>
+                <button type="button" class="task-mini-btn" data-proc-reject="${escapeHtml(p.id)}">رفض</button>
+              </span>
+            </article>`;
+          }).join('')}
+        </div>` : '<p class="console-empty">لا توجد طلبات بانتظار الموافقة.</p>'}
+      </section>
+
+      <section class="console-card">
+        <h4>معتمدة بانتظار الصرف (${awaiting.length})</h4>
+        ${awaiting.length ? `<div class="tasks-list">
+          ${awaiting.map(function(p) {
+            return `<article class="task-row proc-row">
+              <span class="task-row-main">
+                <b>${escapeHtml(p.partName)} <span class="part-qty">×${p.quantity}</span></b>
+                <small>${escapeHtml(p.employeeName)} · ${escapeHtml(p.purpose)}</small>
+              </span>
+              <span class="task-row-actions">
+                <button type="button" class="task-mini-btn is-approve" data-proc-issue="${escapeHtml(p.id)}">تم الصرف</button>
+              </span>
+            </article>`;
+          }).join('')}
+        </div>` : '<p class="console-empty">لا توجد قطع معتمدة بانتظار الصرف.</p>'}
+      </section>`;
+
+    const decide = async function(id, decision) {
+      try {
+        await api('part_request_decide', { requestId: id, decision: decision });
+        if (tg?.showAlert) tg.showAlert(decision === 'تم الصرف' ? 'تم صرف القطعة وتحديث المخزون.' : 'تم تحديث الطلب.');
+        renderProcurement(body.closest('.manager-module-content'), 'requests');
+      } catch (e) {
+        if (tg?.showAlert) tg.showAlert(e.message);
+      }
+    };
+    body.querySelectorAll('[data-proc-approve]').forEach(function(b) { b.addEventListener('click', function() { decide(b.dataset.procApprove, 'معتمد'); }); });
+    body.querySelectorAll('[data-proc-reject]').forEach(function(b) { b.addEventListener('click', function() { decide(b.dataset.procReject, 'مرفوض'); }); });
+    body.querySelectorAll('[data-proc-issue]').forEach(function(b) { b.addEventListener('click', function() { decide(b.dataset.procIssue, 'تم الصرف'); }); });
+  }
+
+  function drawProcStock(body, data) {
+    const items = data.inventory || [];
+    const low = items.filter(function(i) { return i.low; });
+
+    body.innerHTML = `
+      <section class="console-card">
+        <div class="proc-stock-head">
+          <h4>المخزون (${items.length})</h4>
+          <button type="button" class="task-mini-btn" id="procAddItem">+ إضافة قطعة</button>
+        </div>
+        <input id="procStockSearch" type="search" placeholder="ابحث بالاسم أو الكود…" autocomplete="off">
+        ${low.length ? `<p class="proc-low-note">⚠️ ${low.length} صنف تحت الحد الأدنى</p>` : ''}
+        <div id="procStockList" class="proc-stock-list"></div>
+      </section>`;
+
+    const draw = function(filter) {
+      const q = String(filter || '').toLowerCase().trim();
+      const shown = items.filter(function(i) {
+        return !q || i.name.toLowerCase().indexOf(q) >= 0 || i.code.toLowerCase().indexOf(q) >= 0;
+      });
+      const holder = body.querySelector('#procStockList');
+      if (!shown.length) {
+        holder.innerHTML = '<p class="console-empty">لا توجد أصناف. أضف أول قطعة.</p>';
+        return;
+      }
+      holder.innerHTML = shown.map(function(i) {
+        return `<button type="button" class="proc-stock-row${i.low ? ' is-low' : ''}" data-stock-code="${escapeHtml(i.code)}">
+          <span class="proc-stock-main">
+            <b>${escapeHtml(i.name)}</b>
+            <small>${escapeHtml(i.code)}${i.category ? ' · ' + escapeHtml(i.category) : ''}${i.location ? ' · ' + escapeHtml(i.location) : ''}</small>
+          </span>
+          <span class="proc-stock-qty">
+            <b>${i.quantity}</b>
+            <small>الحد ${i.minimum}</small>
+          </span>
+        </button>`;
+      }).join('');
+      holder.querySelectorAll('[data-stock-code]').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          const item = items.find(function(x) { return x.code === btn.dataset.stockCode; });
+          if (item) openStockEditor(body, item);
+        });
+      });
+    };
+
+    draw('');
+    body.querySelector('#procStockSearch').addEventListener('input', function(ev) { draw(ev.target.value); });
+    body.querySelector('#procAddItem').addEventListener('click', function() { openStockEditor(body, null); });
+  }
+
+  function openStockEditor(body, item) {
+    const isNew = !item;
+    const holder = body.querySelector('#procStockList');
+    const editor = document.createElement('div');
+    editor.className = 'proc-editor';
+    editor.innerHTML = `
+      <div class="proc-editor-head">
+        <b>${isNew ? 'قطعة جديدة' : 'تعديل: ' + escapeHtml(item.name)}</b>
+        <button type="button" class="task-mini-btn" data-editor-close>إغلاق</button>
+      </div>
+      <label>اسم القطعة<input id="stkName" maxlength="120" value="${isNew ? '' : escapeHtml(item.name)}"></label>
+      <div class="task-form-row">
+        <label>الكود<input id="stkCode" maxlength="60" value="${isNew ? '' : escapeHtml(item.code)}" ${isNew ? 'placeholder="تلقائي"' : 'readonly'}></label>
+        <label>الفئة<input id="stkCat" maxlength="60" value="${isNew ? '' : escapeHtml(item.category)}"></label>
+      </div>
+      <div class="task-form-row">
+        <label>الكمية<input id="stkQty" type="number" min="0" max="100000" value="${isNew ? 0 : item.quantity}"></label>
+        <label>الحد الأدنى<input id="stkMin" type="number" min="0" max="100000" value="${isNew ? 0 : item.minimum}"></label>
+      </div>
+      <div class="task-form-row">
+        <label>سعر الشراء<input id="stkPrice" type="number" min="0" step="0.01" value="${isNew ? 0 : item.price}"></label>
+        <label>الموقع<input id="stkLoc" maxlength="60" value="${isNew ? '' : escapeHtml(item.location)}"></label>
+      </div>
+      <label>المورد<input id="stkSup" maxlength="80" value="${isNew ? '' : escapeHtml(item.supplier)}"></label>
+      <button type="button" class="primary-btn" id="stkSave">${isNew ? 'إضافة القطعة' : 'حفظ التعديل'}</button>`;
+
+    holder.parentNode.insertBefore(editor, holder);
+
+    editor.querySelector('[data-editor-close]').addEventListener('click', function() { editor.remove(); });
+    editor.querySelector('#stkSave').addEventListener('click', async function() {
+      const btn = this;
+      btn.disabled = true;
+      try {
+        const res = await api('inventory_save', {
+          code: editor.querySelector('#stkCode').value.trim(),
+          name: editor.querySelector('#stkName').value.trim(),
+          category: editor.querySelector('#stkCat').value.trim(),
+          quantity: Number(editor.querySelector('#stkQty').value || 0),
+          minimum: Number(editor.querySelector('#stkMin').value || 0),
+          price: Number(editor.querySelector('#stkPrice').value || 0),
+          location: editor.querySelector('#stkLoc').value.trim(),
+          supplier: editor.querySelector('#stkSup').value.trim()
+        });
+        if (tg?.showAlert) tg.showAlert(res.created ? 'تمت إضافة القطعة للمخزون.' : 'تم تحديث بيانات القطعة.');
+        renderProcurement(body.closest('.manager-module-content'), 'stock');
+      } catch (e) {
+        if (tg?.showAlert) tg.showAlert(e.message);
+        btn.disabled = false;
+      }
+    });
+  }
+
+
   $('workspaceSwitch').addEventListener('click', switchWorkspace);
   $('refreshManagerDashboard').addEventListener('click',loadManagerDashboard);
   document.querySelectorAll('[data-manager-module]').forEach(btn=>btn.addEventListener('click',()=>openManagerModule(btn.dataset.managerModule)));
@@ -3971,7 +4192,7 @@
   document.querySelectorAll('[data-entity]').forEach(btn => btn.addEventListener('click', () => showList(btn.dataset.entity)));
   $('backBtn').addEventListener('click', () => { const title=$('resultTitle').textContent; $('results').classList.add('hidden'); if(['الطلبات العامة','طلبات الأذونات','السلف والعهد'].includes(title)) showRequestPicker(); else closeModal(); });
   // Exposed for automated UI previews; never used by app logic.
-  window.__mhConsole = { render: renderConsoleInto, setTab: function(t){ consoleState.tab = t; }, taskForm: renderTaskCreateForm, taskAdmin: openTaskAdminPanel };
+  window.__mhConsole = { render: renderConsoleInto, setTab: function(t){ consoleState.tab = t; }, taskForm: renderTaskCreateForm, taskAdmin: openTaskAdminPanel, procurement: openProcurementPanel };
   initTheme();
   start();
 })();

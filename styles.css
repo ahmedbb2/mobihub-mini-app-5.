@@ -3219,3 +3219,71 @@ main{display:grid;gap:14px;min-width:0}
   padding-bottom:8px;
 }
 .manager-module-group-label:first-child{margin-top:6px}
+
+/* ===================================================================
+   V1.20 — PROCUREMENT & INVENTORY
+   =================================================================== */
+.proc-demand{display:grid;gap:6px}
+.proc-demand-row{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:9px 12px;
+  border-radius:9px;
+  border:1px solid var(--line);
+  background:rgba(255,255,255,.028);
+}
+.proc-demand-row b{font-size:11.5px}
+.proc-demand-row span{font-size:10.5px;color:var(--text-3);white-space:nowrap}
+
+.proc-row{align-items:flex-start}
+.proc-row .task-row-actions{display:grid;gap:5px}
+
+.proc-stock-head{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+}
+.proc-low-note{
+  margin:0;
+  padding:8px 11px;
+  border-radius:9px;
+  border:1px solid var(--warn);
+  background:var(--warn-wash);
+  font-size:10.5px;font-weight:700;color:var(--warn);
+}
+.proc-stock-list{display:grid;gap:6px;margin-top:2px}
+.proc-stock-row{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  width:100%;padding:11px 13px;
+  border-radius:10px;
+  border:1px solid var(--line);
+  background:rgba(255,255,255,.026);
+  color:var(--text);text-align:right;cursor:pointer;
+  transition:border-color .14s,background .14s;
+}
+.proc-stock-row:hover{border-color:var(--brand-line);background:var(--brand-wash)}
+.proc-stock-row.is-low{border-color:var(--danger-line);background:var(--danger-wash)}
+.proc-stock-main{display:grid;gap:2px;min-width:0}
+.proc-stock-main b{font-size:12px}
+.proc-stock-main small{font-size:10px;color:var(--text-3)}
+.proc-stock-qty{flex:0 0 auto;display:grid;gap:1px;text-align:center;min-width:52px}
+.proc-stock-qty b{font-size:16px;line-height:1.2}
+.proc-stock-qty small{font-size:9px;color:var(--text-3)}
+.proc-stock-row.is-low .proc-stock-qty b{color:var(--danger)}
+
+.proc-editor{
+  display:grid;gap:9px;
+  margin:10px 0;
+  padding:14px;
+  border-radius:var(--r-md);
+  border:1px solid var(--brand-line);
+  background:var(--brand-wash);
+}
+.proc-editor-head{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+}
+.proc-editor-head b{font-size:12px;color:var(--brand-2)}
+.proc-editor label{margin:0;font-size:11px}
+.proc-editor input[readonly]{opacity:.7}
+
+[data-theme="light"] .proc-demand-row,
+[data-theme="light"] .proc-stock-row{background:rgba(15,35,55,.035)}
+[data-theme="light"] .proc-stock-row:hover{background:var(--brand-wash)}
+[data-theme="light"] .proc-stock-row.is-low{background:var(--danger-wash)}

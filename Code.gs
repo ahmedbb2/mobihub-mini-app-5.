@@ -318,6 +318,15 @@ function doPost(e) {
       case 'task_assignees':
         data = tasksAssigneesMini_(profile);
         break;
+      case 'inventory_overview':
+        data = inventoryOverviewMini_(profile);
+        break;
+      case 'inventory_search':
+        data = inventorySearchMini_(profile, body);
+        break;
+      case 'inventory_save':
+        data = inventorySaveMini_(profile, body);
+        break;
       case 'console_overview':
         data = consoleOverviewMini_(profile);
         break;
@@ -633,6 +642,9 @@ function normalizeRole_(role) {
   if (value === 'Supervisor' || lower.indexOf('مشرف') >= 0) {
     return 'supervisor';
   }
+  if (value === 'Procurement' || /مشتريات|مورد|procurement/i.test(value)) {
+    return 'procurement';
+  }
   return 'employee';
 }
 
@@ -816,7 +828,8 @@ function managerDashboard_(profile) {
     finance: ['super_admin','finance'].includes(role),
     overtime: ['super_admin','admin','finance'].includes(role),
     tasks: ['super_admin','admin','supervisor'].includes(role),
-    parts: ['super_admin','admin','finance','supervisor'].includes(role),
+    parts: ['super_admin','admin','finance','supervisor','procurement'].includes(role),
+    procurement: ['super_admin','admin','procurement'].includes(role),
     notificationMatrix: ['super_admin','admin'].includes(role),
     buttonsMatrix: ['super_admin','admin'].includes(role),
     system: ['super_admin','admin'].includes(role),
@@ -2672,7 +2685,7 @@ const MH_NOTIFICATION_SETTING_HEADERS = ['الإعداد','القيمة','الو
 const MH_MANAGER_HEADERS = ['Chat ID','اسم المدير','الصلاحية','الحالة','أضيف بواسطة','تاريخ الإضافة','آخر تحديث'];
 const MH_DEVICE_STATUSES = ['تم الاستلام','قيد الفحص','يحتاج قطعة غيار','يحتاج التواصل مع العميل','بانتظار رد العميل','لم يتم الرد','قيد الإصلاح','مراجعة الجودة','يحتاج إعادة فحص','جاهز للتسليم','تم التسليم'];
 const MH_DEVICE_LOCATIONS = ['قسم الاستلام','ترابيزة الهاردوير','درج الفحص 1','درج الفحص 2','درج مراجعة الجودة','درج انتظار قطع الغيار','درج انتظار العميل','درج جاهز للتسليم','مكان آخر'];
-const MH_ADMIN_ROLES = ['Admin','Finance','Supervisor'];
+const MH_ADMIN_ROLES = ['Admin','Finance','Supervisor','Procurement'];
 
 function mhEnsureSheet_(name, headers) {
   const ss=spreadsheet_(); let sh=ss.getSheetByName(name);
@@ -4323,7 +4336,7 @@ function partRequestCreateMini_(profile, body) {
     ]);
   } finally { lock.releaseLock(); }
 
-  mhNotifyManagement_(
+  const partMessage =
     '🔧 طلب قطعة غيار جديد\n━━━━━━━━━━━━━━━━━━\n' +
     '🆔 ' + id + '\n' +
     '⚙️ القطعة: ' + partName + ' × ' + quantity + '\n' +
@@ -4331,9 +4344,31 @@ function partRequestCreateMini_(profile, body) {
     (deviceRef ? '📱 الجهاز: ' + deviceRef + '\n' : '') +
     '👤 ' + String(profile.name || '') + '\n' +
     '📝 ' + reason.slice(0, 200) + '\n' +
-    '━━━━━━━━━━━━━━━━━━\nافتح لوحة الإدارة ← قطع الغيار.',
-    'طلب قطعة غيار'
-  );
+    '━━━━━━━━━━━━━━━━━━\n';
+
+  // Management decides, purchasing follows the stock.
+  mhNotifyManagement_(partMessage + 'افتح لوحة الإدارة ← قطع الغيار.', 'طلب قطعة غيار');
+
+  // The purchasing officer owns parts and inventory, so they must know first.
+  mhNotifyProcurement_(
+    partMessage + 'أنت مسئول المشتريات: راجع التوفر في المخزون ثم اعتمد الصرف.',
+    'طلب قطعة غيار');
+
+  // Warn the officer immediately if stock cannot cover the request.
+  try {
+    const stockItem = mhInventoryRows_().find(function(i) {
+      return i.name.trim().toLowerCase() === partName.trim().toLowerCase();
+    });
+    if (stockItem && stockItem.quantity < quantity) {
+      mhNotifyProcurement_(
+        '⚠️ المخزون غير كافٍ لطلب قطعة\n━━━━━━━━━━━━━━━━━━\n' +
+        '⚙️ ' + partName + '\n' +
+        '📦 المتاح: ' + stockItem.quantity + ' · المطلوب: ' + quantity + '\n' +
+        '🆔 ' + id + '\n' +
+        '━━━━━━━━━━━━━━━━━━\nيلزم توفير القطعة أو رفض الطلب.',
+        'نقص مخزون');
+    }
+  } catch (e) { /* inventory is optional */ }
 
   return {
     submitted: true,
@@ -4393,7 +4428,8 @@ function mhTaskLikePartRows_(sh) {
 
 /** Manager approves / rejects / marks a part as handed over. */
 function partRequestDecideMini_(profile, body) {
-  mhRequireRole_(profile, ['super_admin','admin','finance']);
+  // Purchasing officers approve and issue parts for their own stock.
+  mhRequireRole_(profile, ['super_admin','admin','finance','procurement']);
   const id = String(body.requestId || '').trim();
   const decision = String(body.decision || '').trim();
   if (['معتمد','مرفوض','تم الصرف'].indexOf(decision) < 0) throw new Error('INVALID_DECISION');
@@ -4423,6 +4459,26 @@ function partRequestDecideMini_(profile, body) {
   const label = decision === 'معتمد' ? '✅ تمت الموافقة على طلب القطعة'
     : decision === 'تم الصرف' ? '📦 تم صرف القطعة المطلوبة'
     : '❌ تم رفض طلب القطعة';
+
+  // Issuing a part moves stock. Keep the inventory honest automatically.
+  if (decision === 'تم الصرف') {
+    const adjustment = mhAdjustStock_(
+      String(found['القطعة المطلوبة'] || ''),
+      -Number(found['الكمية'] || 1),
+      String(profile.name || profile.chatId)
+    );
+    if (adjustment) {
+      found.__stock = adjustment;
+      if (adjustment.low) {
+        mhNotifyProcurement_(
+          '📉 المخزون وصل للحد الأدنى\n━━━━━━━━━━━━━━━━━━\n' +
+          '⚙️ ' + adjustment.name + '\n' +
+          '📦 المتاح الآن: ' + adjustment.current + ' · الحد الأدنى: ' + adjustment.minimum + '\n' +
+          '━━━━━━━━━━━━━━━━━━\nأعد التوريد قبل نفاد القطعة.',
+          'نقص مخزون');
+      }
+    }
+  }
 
   mhNotifyEmployee_(String(found['Chat ID'] || '').trim(),
     label + '\n━━━━━━━━━━━━━━━━━━\n' +
@@ -5236,7 +5292,7 @@ function mhDateInMonth_(value, month) {
  */
 function consoleOverviewMini_(profile) {
   const role = String(profile.role || '');
-  mhRequireRole_(profile, ['super_admin','admin','finance','supervisor']);
+  mhRequireRole_(profile, ['super_admin','admin','finance','supervisor','procurement']);
 
   const ss = spreadsheet_();
   const today = mhToday_();
@@ -5708,5 +5764,250 @@ function consoleReportMini_(profile, body) {
   }
 
   throw new Error('INVALID_REPORT_TYPE');
+}
+
+/* =========================================================
+   V1.20 — PURCHASING OFFICER + INVENTORY
+   A dedicated role that owns spare parts and stock:
+     - receives every part request immediately
+     - approves / rejects and issues parts
+     - maintains stock levels per part
+   Role value in «المديرين»: Procurement / مشتريات / مسئول مشتريات
+========================================================= */
+const MH_INVENTORY_HEADERS = [
+  'كود القطعة','اسم القطعة','الفئة','الكمية المتاحة','الحد الأدنى','سعر الشراء',
+  'المورد','الموقع','آخر تحديث','آخر تحديث بواسطة','ملاحظات'
+];
+const MH_INVENTORY_SHEET_ = 'المخزون';
+const MH_PROCUREMENT_ROLES_ = ['super_admin', 'procurement'];
+
+/** True when this profile owns purchasing. */
+function mhIsProcurement_(profile) {
+  return !!profile && MH_PROCUREMENT_ROLES_.indexOf(String(profile.role || '')) >= 0;
+}
+
+/** True for anyone allowed to see procurement screens (procurement + admin). */
+function mhCanProcure_(profile) {
+  return !!profile && ['super_admin','admin','procurement'].indexOf(String(profile.role || '')) >= 0;
+}
+
+function mhInventorySheet_() {
+  const ss = spreadsheet_();
+  let sh = ss.getSheetByName(MH_INVENTORY_SHEET_);
+  if (!sh) {
+    sh = ss.insertSheet(MH_INVENTORY_SHEET_);
+    sh.getRange(1, 1, 1, MH_INVENTORY_HEADERS.length).setValues([MH_INVENTORY_HEADERS]);
+    sh.setFrozenRows(1);
+    return sh;
+  }
+  const width = Math.max(sh.getLastColumn(), 1);
+  const existing = sh.getRange(1, 1, 1, width).getDisplayValues()[0]
+    .map(function(h) { return String(h).trim(); });
+  const missing = MH_INVENTORY_HEADERS.filter(function(h) { return existing.indexOf(h) < 0; });
+  if (missing.length) sh.getRange(1, width + 1, 1, missing.length).setValues([missing]);
+  if (sh.getFrozenRows() === 0) sh.setFrozenRows(1);
+  return sh;
+}
+
+/**
+ * Every account that belongs to purchasing, resolved from the managers sheet.
+ * Falls back to the employees sheet so a technician can also be appointed by job.
+ */
+function mhProcurementRecipients_() {
+  const ids = [];
+  try {
+    rowsAsObjects_(spreadsheet_(), MH.SHEETS.managers).forEach(function(r) {
+      const id = String(r['Chat ID'] || '').trim();
+      const role = String(r['الصلاحية'] || '').trim();
+      const active = String(r['الحالة'] || 'نشط').trim() === 'نشط';
+      if (!id || !active) return;
+      if (/procurement|مشتريات|مورد/i.test(role) && ids.indexOf(id) < 0) ids.push(id);
+    });
+  } catch (e) { /* managers sheet optional */ }
+
+  // Also accept an employee whose job title is a purchasing role.
+  try {
+    rowsAsObjects_(spreadsheet_(), MH.SHEETS.employees).forEach(function(r) {
+      const id = String(r['Chat ID'] || '').trim();
+      const job = String(r['الوظيفة'] || '');
+      const active = mhEmployeeIsActive_(r);
+      if (!id || !active) return;
+      if (/مشتريات|مسئول\s*مشتريات|procurement/i.test(job) && ids.indexOf(id) < 0) ids.push(id);
+    });
+  } catch (e) { /* employees sheet always exists, but stay safe */ }
+
+  return ids;
+}
+
+/** Sends a message to every purchasing officer (never throws). */
+function mhNotifyProcurement_(message, eventType) {
+  const ids = mhProcurementRecipients_();
+  ids.forEach(function(id) { mhNotifyEmployee_(id, message, eventType || 'المشتريات'); });
+  return ids.length;
+}
+
+/* ---------------- Inventory reads ---------------- */
+
+function mhInventoryRows_() {
+  return mhRowsObjects_(mhInventorySheet_()).map(function(r) {
+    const qty = Number(r['الكمية المتاحة'] || 0);
+    const min = Number(r['الحد الأدنى'] || 0);
+    return {
+      code: String(r['كود القطعة'] || ''),
+      name: String(r['اسم القطعة'] || ''),
+      category: String(r['الفئة'] || ''),
+      quantity: isFinite(qty) ? qty : 0,
+      minimum: isFinite(min) ? min : 0,
+      price: mhMoney_(r['سعر الشراء']),
+      supplier: String(r['المورد'] || ''),
+      location: String(r['الموقع'] || ''),
+      updatedAt: String(r['آخر تحديث'] || ''),
+      note: String(r['ملاحظات'] || ''),
+      low: (isFinite(qty) ? qty : 0) <= (isFinite(min) ? min : 0)
+    };
+  });
+}
+
+/** Procurement dashboard: pending requests + stock alerts. */
+function inventoryOverviewMini_(profile) {
+  if (!mhCanProcure_(profile)) throw new Error('FORBIDDEN');
+
+  let parts = [];
+  try { parts = mhRowsObjects_(mhPartSheet_()); } catch (e) { parts = []; }
+  const inventory = mhInventoryRows_();
+
+  const pending = parts.filter(function(r) { return String(r['الحالة'] || '').trim() === 'بانتظار الموافقة'; });
+  const approved = parts.filter(function(r) { return String(r['الحالة'] || '').trim() === 'معتمد'; });
+  const low = inventory.filter(function(i) { return i.low; });
+
+  // Requests grouped by part name so the officer sees demand at a glance.
+  const demand = {};
+  pending.forEach(function(r) {
+    const key = String(r['القطعة المطلوبة'] || '').trim();
+    if (!key) return;
+    if (!demand[key]) demand[key] = { name: key, count: 0, quantity: 0 };
+    demand[key].count++;
+    demand[key].quantity += Number(r['الكمية'] || 1);
+  });
+
+  const toList = function(r) {
+    return {
+      id: String(r['رقم الطلب'] || ''),
+      employeeName: String(r['اسم الفني'] || ''),
+      employeeId: String(r['Chat ID'] || ''),
+      partName: String(r['القطعة المطلوبة'] || ''),
+      quantity: Number(r['الكمية'] || 1),
+      purpose: String(r['الغرض'] || ''),
+      reason: String(r['سبب الاستخدام'] || ''),
+      deviceRef: String(r['جهاز مرتبط'] || ''),
+      status: String(r['الحالة'] || ''),
+      createdAt: String(r['التاريخ والوقت'] || '')
+    };
+  };
+
+  return {
+    pending: pending.slice(-40).map(toList),
+    approvedAwaitingIssue: approved.slice(-40).map(toList),
+    demand: Object.keys(demand).map(function(k) { return demand[k]; }).sort(function(a, b) { return b.quantity - a.quantity; }),
+    inventory: inventory,
+    counts: {
+      pendingRequests: pending.length,
+      awaitingIssue: approved.length,
+      lowStock: low.length,
+      totalItems: inventory.length
+    }
+  };
+}
+
+/** Search inventory by name or code. */
+function inventorySearchMini_(profile, body) {
+  if (!mhCanProcure_(profile)) throw new Error('FORBIDDEN');
+  const q = String(body.query || '').trim().toLowerCase();
+  const stock = mhInventoryRows_();
+  if (!q) return { items: stock.slice(0, 100), total: stock.length };
+  const hits = stock.filter(function(i) {
+    return i.name.toLowerCase().indexOf(q) >= 0 || i.code.toLowerCase().indexOf(q) >= 0;
+  });
+  return { items: hits.slice(0, 100), total: hits.length };
+}
+
+/** Create or update one inventory item (procurement + admin). */
+function inventorySaveMini_(profile, body) {
+  if (!mhCanProcure_(profile)) throw new Error('FORBIDDEN');
+
+  const code = String(body.code || '').trim();
+  const name = String(body.name || '').trim();
+  if (name.length < 2 || name.length > 120) throw new Error('INVALID_INVENTORY_NAME');
+  if (code.length > 60) throw new Error('INVALID_INVENTORY_CODE');
+
+  const quantity = mhFirstNumber_(body.quantity);
+  const minimum = mhFirstNumber_(body.minimum);
+  const price = mhFirstNumber_(body.price);
+  if (quantity < 0 || quantity > 100000) throw new Error('INVALID_INVENTORY_QUANTITY');
+  if (minimum < 0 || minimum > 100000) throw new Error('INVALID_INVENTORY_MINIMUM');
+  if (price < 0 || price > 1000000) throw new Error('INVALID_INVENTORY_PRICE');
+
+  const sh = mhInventorySheet_();
+  mhAssertHeaders_(sh, MH_INVENTORY_HEADERS);
+  const map = mhHeaderMap_(sh);
+  const rows = mhRowsObjects_(sh);
+
+  const found = rows.find(function(r) {
+    if (code) return String(r['كود القطعة'] || '').trim() === code;
+    return String(r['اسم القطعة'] || '').trim().toLowerCase() === name.toLowerCase();
+  });
+
+  const lock = LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    if (found) {
+      if (map['اسم القطعة']) sh.getRange(found.__row, map['اسم القطعة']).setValue(name);
+      if (map['الكمية المتاحة']) sh.getRange(found.__row, map['الكمية المتاحة']).setValue(quantity);
+      if (map['الحد الأدنى']) sh.getRange(found.__row, map['الحد الأدنى']).setValue(minimum);
+      if (map['سعر الشراء']) sh.getRange(found.__row, map['سعر الشراء']).setValue(price);
+      if (body.category !== undefined && map['الفئة']) sh.getRange(found.__row, map['الفئة']).setValue(String(body.category || ''));
+      if (body.supplier !== undefined && map['المورد']) sh.getRange(found.__row, map['المورد']).setValue(String(body.supplier || ''));
+      if (body.location !== undefined && map['الموقع']) sh.getRange(found.__row, map['الموقع']).setValue(String(body.location || ''));
+      if (body.note !== undefined && map['ملاحظات']) sh.getRange(found.__row, map['ملاحظات']).setValue(String(body.note || '').slice(0, 300));
+      sh.getRange(found.__row, map['آخر تحديث']).setValue(mhStamp_());
+      if (map['آخر تحديث بواسطة']) sh.getRange(found.__row, map['آخر تحديث بواسطة']).setValue(String(profile.name || profile.chatId));
+      return { saved: true, updated: true, code: code || String(found['كود القطعة'] || ''), name: name, quantity: quantity };
+    }
+
+    const newCode = code || ('ITM-' + Utilities.getUuid().slice(0, 6).toUpperCase());
+    sh.appendRow([
+      newCode, name, String(body.category || ''), quantity, minimum, price,
+      String(body.supplier || ''), String(body.location || ''), mhStamp_(),
+      String(profile.name || profile.chatId), String(body.note || '').slice(0, 300)
+    ]);
+    return { saved: true, created: true, code: newCode, name: name, quantity: quantity };
+  } finally { lock.releaseLock(); }
+}
+
+/**
+ * Adjusts stock by a delta (issue on approval, restock on delivery).
+ * Negative delta is clamped so stock never goes below zero.
+ */
+function mhAdjustStock_(partName, delta, actorName) {
+  const name = String(partName || '').trim();
+  if (!name || !delta) return null;
+  let sh;
+  try { sh = mhInventorySheet_(); } catch (e) { return null; }
+  const map = mhHeaderMap_(sh);
+  const row = mhRowsObjects_(sh).find(function(r) {
+    return String(r['اسم القطعة'] || '').trim().toLowerCase() === name.toLowerCase();
+  });
+  if (!row) return null;
+
+  const current = Number(row['الكمية المتاحة'] || 0);
+  const next = Math.max(0, current + Number(delta));
+  const lock = LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    sh.getRange(row.__row, map['الكمية المتاحة']).setValue(next);
+    sh.getRange(row.__row, map['آخر تحديث']).setValue(mhStamp_());
+    if (map['آخر تحديث بواسطة']) sh.getRange(row.__row, map['آخر تحديث بواسطة']).setValue(String(actorName || ''));
+  } finally { lock.releaseLock(); }
+
+  const minimum = Number(row['الحد الأدنى'] || 0);
+  return { code: String(row['كود القطعة'] || ''), name: name, previous: current, current: next, minimum: minimum, low: next <= minimum };
 }
 
