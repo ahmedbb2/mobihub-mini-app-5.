@@ -358,7 +358,7 @@
   const managerModuleTitles = {
     daily:'المتابعة اليومية', staff:'شؤون المهندسين', shifts:'إدارة الورديات', requests:'طلبات المهندسين والتواصل',
     tasks:'المهام والتسكات', parts:'قطع الغيار',
-    finance:'الإدارة المالية', overtime:'الأوفر تايم', devices:'الأجهزة والصيانة', system:'التقارير والنظام', notifications:'مركز الإشعارات', managers:'إدارة المديرين'
+    finance:'الإدارة المالية', overtime:'الأوفر تايم', devices:'الأجهزة والصيانة', system:'التقارير والنظام', notifications:'مركز الإشعارات', notificationMatrix:'التحكم في الإشعارات', managers:'إدارة المديرين'
   };
   let managerDashboardCache = null;
   function renderManagerDashboard(data) {
@@ -406,6 +406,7 @@
     const title=managerModuleTitles[module] || 'الإدارة';
     if(module==='tasks') { closeModal(); await openTaskAdminPanel(); return; }
     if(module==='parts') { closeModal(); await openPartAdminPanel(); return; }
+    if(module==='notificationMatrix') { closeModal(); await openNotificationMatrix(); return; }
     if(module==='requests') {
       const panel=managerPanel(title,'<button type="button" class="manager-action-card" id="managerOpenPendingRequests"><b>مراجعة الطلبات والأذونات</b><small>مراجعة الطلبات المقدمة من المهندسين</small></button><button type="button" class="manager-action-card" id="managerOpenComplaints"><b>شكاوى المهندسين</b><small>فتح الشكاوى ومتابعة الردود والحالات</small></button>');
       panel.querySelector('#managerOpenPendingRequests').addEventListener('click',async()=>{closeModal();openModal('مراجعة الطلبات والأذونات',$('reviewCenter'));await loadReviews();});
@@ -2388,6 +2389,128 @@
         b.addEventListener('click', () => decide(b.dataset.partIssue, 'تم الصرف')));
     } catch (e) {
       content.innerHTML = `<div class="manager-load-error">${escapeHtml(e.message)}</div>`;
+    }
+  }
+
+
+  /* ============================================================
+   * NOTIFICATION CONTROL (Super Admin)
+   * One row per technician, two switches per event:
+   *   داخل التطبيق  |  على البوت
+   * ============================================================ */
+
+  let notifyMatrixCache = null;
+
+  async function openNotificationMatrix() {
+    const panel = managerPanel('التحكم في الإشعارات', '<div class="manager-loading">جاري تحميل قواعد الإشعارات...</div>');
+    const content = panel.querySelector('.manager-module-content');
+    await renderNotificationMatrix(content);
+  }
+
+  async function renderNotificationMatrix(content, selectedId) {
+    content.innerHTML = '<div class="manager-loading">جاري تحميل قواعد الإشعارات...</div>';
+    try {
+      const data = await api('notify_matrix_get');
+      notifyMatrixCache = data;
+      const employees = data.employees || [];
+      const events = data.events || [];
+
+      // Group events by area so the matrix reads like the workflow.
+      const groups = {};
+      events.forEach(ev => {
+        if (!groups[ev.group]) groups[ev.group] = [];
+        groups[ev.group].push(ev);
+      });
+
+      const current = employees.find(e => e.employeeId === selectedId) || employees[0];
+
+      content.innerHTML = `<div class="notify-matrix">
+        <div class="notify-intro">
+          <b>تحكم كامل لكل فني على حدة</b>
+          <p>أوقف أي إشعار عن أي فني، في التطبيق أو على البوت. الإيقاف يمنع الوصول فعليًا — لا يخفي الشكل فقط.</p>
+        </div>
+
+        <label class="notify-picker">الفني
+          <select id="notifyPickEmployee">
+            ${employees.map(e => `<option value="${escapeHtml(e.employeeId)}"${current && e.employeeId === current.employeeId ? ' selected' : ''}>${escapeHtml(e.name)}${e.job ? ' — ' + escapeHtml(e.job) : ''}</option>`).join('')}
+          </select>
+        </label>
+
+        ${current ? `
+          <div class="notify-bulk">
+            <button type="button" class="secondary-btn" id="notifyAllOn">تفعيل الكل</button>
+            <button type="button" class="danger-btn" id="notifyAllOff">إيقاف الكل</button>
+          </div>
+
+          ${Object.keys(groups).map(group => `<div class="notify-group">
+            <h5 class="price-group-title">${escapeHtml(group)}</h5>
+            <div class="notify-head">
+              <span>الإشعار</span><span>التطبيق</span><span>البوت</span>
+            </div>
+            ${groups[group].map(ev => {
+              const s = current.settings[ev.key] || { inApp: true, bot: true };
+              return `<div class="notify-row">
+                <span class="notify-label">${escapeHtml(ev.label)}</span>
+                <label class="notify-switch">
+                  <input type="checkbox" data-notify-toggle data-emp="${escapeHtml(current.employeeId)}" data-event="${escapeHtml(ev.key)}" data-channel="inApp"${s.inApp ? ' checked' : ''}>
+                  <i></i>
+                </label>
+                <label class="notify-switch">
+                  <input type="checkbox" data-notify-toggle data-emp="${escapeHtml(current.employeeId)}" data-event="${escapeHtml(ev.key)}" data-channel="bot"${s.bot ? ' checked' : ''}>
+                  <i></i>
+                </label>
+              </div>`;
+            }).join('')}
+          </div>`).join('')}
+        ` : '<p class="manager-empty-state">لا يوجد فنيون نشطون.</p>'}
+      </div>`;
+
+      content.querySelector('#notifyPickEmployee')?.addEventListener('change', ev => {
+        renderNotificationMatrix(content, ev.target.value);
+      });
+
+      content.querySelector('#notifyAllOn')?.addEventListener('click', () => bulkNotify(content, current.employeeId, true));
+      content.querySelector('#notifyAllOff')?.addEventListener('click', () => bulkNotify(content, current.employeeId, false));
+
+      content.querySelectorAll('[data-notify-toggle]').forEach(box => {
+        box.addEventListener('change', async () => {
+          const target = box.dataset;
+          box.disabled = true;
+          try {
+            await api('notify_matrix_set', {
+              employeeId: target.emp,
+              event: target.event,
+              channel: target.channel,
+              enabled: box.checked
+            });
+            const label = box.closest('.notify-row');
+            if (label) label.classList.toggle('is-muted', !box.checked);
+          } catch (e) {
+            box.checked = !box.checked;
+            if (tg?.showAlert) tg.showAlert(e.message);
+          } finally { box.disabled = false; }
+        });
+      });
+
+      // Reflect initial muted state visually.
+      content.querySelectorAll('[data-notify-toggle]').forEach(box => {
+        if (!box.checked) {
+          const row = box.closest('.notify-row');
+          if (row) row.classList.add('is-muted');
+        }
+      });
+    } catch (e) {
+      content.innerHTML = `<div class="manager-load-error">${escapeHtml(e.message)}</div>`;
+    }
+  }
+
+  async function bulkNotify(content, employeeId, enabled) {
+    try {
+      const res = await api('notify_matrix_bulk', { employeeId, enabled });
+      if (tg?.showAlert) tg.showAlert(enabled ? 'تم تفعيل كل الإشعارات لهذا الفني.' : 'تم إيقاف كل الإشعارات لهذا الفني.');
+      renderNotificationMatrix(content, employeeId);
+    } catch (e) {
+      if (tg?.showAlert) tg.showAlert(e.message);
     }
   }
 
