@@ -411,9 +411,24 @@
     $('managerRecentComplaints').innerHTML = complaints.length ? complaints.map(c=>`<article class="manager-complaint"><div><b>${escapeHtml(c.id || 'شكوى')} · ${escapeHtml(c.type || 'شكوى')}</b><small>${escapeHtml(c.employee || 'مهندس')} · ${escapeHtml(c.date || '')}</small></div><span class="status-pill">${escapeHtml(c.status || 'جديدة')}</span><p>${escapeHtml(c.details || '')}</p><button type="button" class="secondary-btn" data-manager-complaint="${escapeHtml(c.id)}">فتح الشكوى</button></article>`).join('') : '<p class="muted">لا توجد شكاوى مفتوحة حاليًا.</p>';
     $('managerRecentComplaints').querySelectorAll('[data-manager-complaint]').forEach(b=>b.addEventListener('click',()=>{ $('results').classList.remove('hidden'); $('resultTitle').textContent='محادثة الشكوى'; openModal('محادثة الشكوى',$('results')); openComplaint(b.dataset.managerComplaint); }));
   }
+  function initManagerEnterpriseShell() {
+    document.body.classList.add('manager-enterprise');
+    const workspace = $('managerWorkspace');
+    if (workspace) workspace.setAttribute('data-admin-layout', 'enterprise');
+    const dashboard = $('managerDashboard');
+    if (dashboard) dashboard.setAttribute('aria-label', 'مركز إدارة MobiHub');
+    const grid = $('managerModules');
+    if (grid && !grid.dataset.enterpriseReady) {
+      grid.dataset.enterpriseReady = 'true';
+      grid.setAttribute('aria-label', 'التنقل بين أقسام الإدارة');
+    }
+  }
+
   async function loadManagerDashboard() {
     if (workspaceRole !== 'manager') return;
-    // The console replaces the legacy metric tiles entirely.
+    // Enterprise shell is presentation-only: existing module handlers,
+    // permission checks, API contracts and data sources remain unchanged.
+    initManagerEnterpriseShell();
     const host = $('managerDashboard');
     if (!host) return;
     await renderConsoleInto(host);
@@ -4859,7 +4874,10 @@
 
   $('workspaceSwitch').addEventListener('click', switchWorkspace);
   $('refreshManagerDashboard').addEventListener('click',loadManagerDashboard);
-  document.querySelectorAll('[data-manager-module]').forEach(btn=>btn.addEventListener('click',()=>openManagerModule(btn.dataset.managerModule)));
+  document.querySelectorAll('[data-manager-module]').forEach(btn=>btn.addEventListener('click',()=>{
+    document.querySelectorAll('[data-manager-module]').forEach(item=>item.classList.toggle('is-current', item===btn));
+    openManagerModule(btn.dataset.managerModule);
+  }));
   $('modalClose').addEventListener('click',closeModal);
   $('appModal').querySelectorAll('[data-modal-close]').forEach(el=>el.addEventListener('click',closeModal));
   document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('appModal').classList.contains('hidden'))closeModal();});
