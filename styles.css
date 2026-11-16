@@ -4363,3 +4363,165 @@ body.manager-enterprise .console{
   body.manager-enterprise .manager-module-group-grid > .manager-module b{font-size:12px}
   body.manager-enterprise .manager-module-group-grid > .manager-module small{font-size:9px}
 }
+
+/* ============================================================
+   MOBIHUB ADMIN — unified workspace refinement
+   One navigation system, no duplicate module rail, clear spacing.
+   ============================================================ */
+body.manager-enterprise .topbar{
+  position:relative !important;
+  top:auto !important;
+  z-index:2;
+  margin-bottom:18px;
+}
+body.manager-enterprise main{gap:22px !important}
+body.manager-enterprise #managerWorkspace{margin-top:8px}
+body.manager-enterprise .manager-workspace > .manager-dashboard{
+  display:flex !important;
+  flex-direction:column;
+  align-items:stretch;
+  gap:22px !important;
+  width:100%;
+  min-width:0;
+}
+body.manager-enterprise #consoleSlot{
+  order:0;
+  display:block;
+  width:100%;
+  min-width:0;
+  margin:0;
+}
+/* The old module rail is retained in the DOM for compatibility and
+   permission checks, but is no longer a second visible navigation. */
+body.manager-enterprise #managerModules{display:none !important}
+body.manager-enterprise .console{
+  display:flex;
+  flex-direction:column;
+  gap:20px !important;
+  width:100%;
+  min-width:0;
+}
+body.manager-enterprise .console-head{
+  position:relative;
+  z-index:1;
+  margin:0 !important;
+  min-height:112px;
+  border-radius:20px;
+  overflow:hidden;
+}
+body.manager-enterprise .console-tabs{
+  position:relative !important;
+  top:auto !important;
+  z-index:1;
+  display:grid !important;
+  grid-template-columns:repeat(5,minmax(0,1fr));
+  gap:9px !important;
+  width:100%;
+  margin:0 !important;
+  padding:9px;
+  overflow:visible !important;
+  border-radius:17px;
+}
+body.manager-enterprise .console-tab{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  min-width:0;
+  min-height:54px;
+  padding:11px 9px;
+  border-radius:12px;
+  white-space:normal;
+  line-height:1.35;
+  transition:background .2s ease,border-color .2s ease,color .2s ease,transform .2s ease;
+}
+body.manager-enterprise .console-tab:active,
+body.manager-enterprise .console-action:active{transform:scale(.985)}
+body.manager-enterprise #consoleBody{
+  display:grid;
+  gap:18px;
+  min-width:0;
+  animation:mhConsoleEnter .28s ease both;
+}
+body.manager-enterprise .console-kpis{
+  gap:12px !important;
+  margin:0 !important;
+}
+body.manager-enterprise .console-kpi,
+body.manager-enterprise .console-card,
+body.manager-enterprise .console-critical{
+  margin:0 !important;
+  border-radius:17px;
+}
+body.manager-enterprise .console-card{padding:20px;gap:15px}
+body.manager-enterprise .console-card h4{margin:0 0 4px}
+body.manager-enterprise .console-actions{
+  display:grid !important;
+  grid-template-columns:repeat(auto-fit,minmax(175px,1fr));
+  gap:10px !important;
+  width:100%;
+}
+body.manager-enterprise .console-action{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  min-height:52px;
+  margin:0 !important;
+  padding:12px 14px;
+  border-radius:13px;
+  text-align:center;
+  line-height:1.4;
+  transition:transform .18s ease,border-color .18s ease,background .18s ease,box-shadow .18s ease;
+}
+body.manager-enterprise .console-action:hover{
+  border-color:var(--brand-line);
+  box-shadow:0 7px 22px rgba(0,0,0,.12);
+}
+body.manager-enterprise #managerComplaintSection{
+  order:1;
+  width:100%;
+  margin:0 !important;
+  padding:20px;
+  border-radius:18px;
+}
+body.manager-enterprise .console-report-tools{margin-top:4px !important}
+body.manager-enterprise .console-feed-row{animation:mhFadeUp .32s ease both}
+body.manager-enterprise .console-kpi{animation:mhFadeUp .36s ease both}
+@keyframes mhConsoleEnter{
+  from{opacity:0;transform:translateY(7px)}
+  to{opacity:1;transform:translateY(0)}
+}
+@keyframes mhFadeUp{
+  from{opacity:0;transform:translateY(6px)}
+  to{opacity:1;transform:translateY(0)}
+}
+@media(max-width:900px){
+  body.manager-enterprise .console-tabs{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+@media(max-width:600px){
+  body.manager-enterprise .topbar{margin-bottom:14px}
+  body.manager-enterprise main{gap:18px !important}
+  body.manager-enterprise #managerWorkspace{margin-top:4px}
+  body.manager-enterprise .manager-workspace > .manager-dashboard{gap:17px !important}
+  body.manager-enterprise .console{gap:16px !important}
+  body.manager-enterprise .console-head{min-height:0;padding:17px;border-radius:16px}
+  body.manager-enterprise .console-tabs{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:7px !important;
+    padding:8px;
+    border-radius:15px;
+  }
+  body.manager-enterprise .console-tab{min-height:47px;padding:10px 7px;font-size:13px}
+  body.manager-enterprise #consoleBody{gap:14px}
+  body.manager-enterprise .console-kpis{gap:8px !important}
+  body.manager-enterprise .console-card{padding:15px;border-radius:15px}
+  body.manager-enterprise .console-actions{grid-template-columns:1fr;gap:8px !important}
+  body.manager-enterprise .console-action{min-height:48px}
+  body.manager-enterprise #managerComplaintSection{padding:15px;border-radius:15px}
+}
+@media(prefers-reduced-motion:reduce){
+  body.manager-enterprise #consoleBody,
+  body.manager-enterprise .console-kpi,
+  body.manager-enterprise .console-feed-row{animation:none !important}
+  body.manager-enterprise .console-tab,
+  body.manager-enterprise .console-action{transition:none !important}
+}

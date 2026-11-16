@@ -3640,9 +3640,10 @@
   function drawConsoleShell(content) {
     const d = consoleState.data || {};
     const tabs = CONSOLE_TABS.filter(function(t) {
-      if (t.key === 'team') return d.modules && (d.modules.staff || d.modules.daily);
-      if (t.key === 'money') return d.modules && d.modules.finance;
-      if (t.key === 'operations') return d.modules && (d.modules.devices || d.modules.tasks);
+      const m = d.modules || {};
+      if (t.key === 'team') return !!(m.staff || m.daily || m.shifts || m.tasks || m.buttonsMatrix || m.managers || m.notificationMatrix || m.notifications);
+      if (t.key === 'money') return !!(m.finance || m.overtime);
+      if (t.key === 'operations') return !!(m.requests || m.devices || m.tasks || m.parts || m.procurement || m.delivery);
       return true;
     });
 
@@ -3778,12 +3779,20 @@
         <div class="console-actions">
           ${d.modules.staff ? action('الموظفون', 'staff') : ''}
           ${d.modules.daily ? action('المتابعة اليومية', 'daily') : ''}
-          ${d.modules.staff ? action('الورديات', 'shifts') : ''}
+          ${d.modules.shifts ? action('الورديات', 'shifts') : ''}
           ${d.modules.tasks ? action('المهام والتسكات', 'tasks') : ''}
-          ${d.modules.staff ? action('التحكم في الأزرار', 'buttonsMatrix') : ''}
-          ${d.modules.staff ? action('إدارة المديرين', 'managers') : ''}
         </div>
       </section>
+
+      ${(d.modules.buttonsMatrix || d.modules.managers || d.modules.notificationMatrix || d.modules.notifications) ? `<section class="console-card">
+        <h4>إدارة النظام والصلاحيات</h4>
+        <div class="console-actions">
+          ${d.modules.buttonsMatrix ? action('التحكم في الأزرار', 'buttonsMatrix') : ''}
+          ${d.modules.managers ? action('إدارة المديرين', 'managers') : ''}
+          ${d.modules.notificationMatrix ? action('التحكم في الإشعارات', 'notificationMatrix') : ''}
+          ${d.modules.notifications ? action('مركز الإشعارات', 'notifications') : ''}
+        </div>
+      </section>` : ''}
 
       <section class="console-card">
         <h4>تقارير الفريق</h4>
@@ -3838,11 +3847,13 @@
       </div>
 
       <section class="console-card">
-        <h4>التشغيل</h4>
+        <h4>إدارة التشغيل</h4>
         <div class="console-actions">
+          ${d.modules.requests ? action('طلبات المهندسين والشكاوى', 'requests') : ''}
           ${d.modules.devices ? action('الأجهزة والصيانة', 'devices') : ''}
-          ${d.modules.devices ? action('قطع الغيار', 'parts') : ''}
-          ${d.modules.tasks ? action('المهام والتسكات', 'tasks') : ''}
+          ${d.modules.delivery ? action('الجودة والتسليم', 'delivery') : ''}
+          ${d.modules.parts ? action('قطع الغيار', 'parts') : ''}
+          ${d.modules.procurement ? action('المشتريات والمخزون', 'procurement') : ''}
         </div>
       </section>
 
@@ -3890,7 +3901,9 @@
       managers: function() { openManagerModule('managers'); },
       buttonsMatrix: function() { openButtonsMatrix(); },
       requests: function() { openManagerModule('requests'); },
-      notifications: function() { openManagerModule('notifications'); }
+      notifications: function() { openManagerModule('notifications'); },
+      notificationMatrix: function() { openManagerModule('notificationMatrix'); },
+      system: function() { openManagerModule('system'); }
     };
     const fn = map[key];
     if (fn) fn();
@@ -3925,6 +3938,7 @@
         </div>
       </div>
       <div id="reportBody"><div class="manager-loading">جاري تجهيز التقرير...</div></div>
+      ${d.modules.system ? `<section class="console-card console-report-tools"><h4>تقارير النظام</h4><div class="console-actions">${action('ملخص الحضور والتشغيل', 'system')}</div></section>` : ''}
     </div>`;
 
     body.querySelectorAll('[data-report-type]').forEach(function(btn) {
@@ -3937,6 +3951,7 @@
     body.querySelector('#reportMonth').addEventListener('change', function(ev) {
       loadReport(consoleHost(ev.target), ev.target.value);
     });
+    wireActions(body);
 
     loadReport(consoleHost(body), (d.month || ''));
   }
