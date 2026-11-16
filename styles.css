@@ -3994,3 +3994,182 @@ body.manager-enterprise .manager-load-error{
   body.manager-enterprise .console-kpi b{font-size:21px}
   body.manager-enterprise .manager-module{flex-basis:172px}
 }
+
+/* ==========================================================
+   MobiHub Admin Enterprise — Mobile Navigation Refinement
+   Desktop layout is intentionally unchanged.
+   ========================================================== */
+@media (max-width:760px){
+  body.manager-enterprise,
+  body.manager-enterprise main,
+  body.manager-enterprise .manager-workspace,
+  body.manager-enterprise #managerDashboard{
+    max-width:100%;
+    min-width:0;
+    overflow-x:hidden;
+  }
+  body.manager-enterprise .manager-workspace>.manager-dashboard{
+    display:flex;
+    flex-direction:column;
+    align-items:stretch;
+    gap:12px;
+    width:100%;
+  }
+  /* Put the navigation first so every section is immediately discoverable. */
+  body.manager-enterprise #managerModules{order:0}
+  body.manager-enterprise #consoleSlot{order:1}
+  body.manager-enterprise #managerComplaintSection{order:2}
+
+  body.manager-enterprise #managerModules{
+    display:flex;
+    flex-direction:column;
+    align-items:stretch;
+    width:100%;
+    max-width:100%;
+    min-width:0;
+    max-height:none;
+    overflow:visible;
+    padding:12px;
+    gap:12px;
+    border-radius:17px;
+  }
+  body.manager-enterprise #managerModules::before{
+    content:"اختار قسم الإدارة";
+    padding:2px 5px 11px;
+    font-size:13px;
+    letter-spacing:0;
+    color:var(--text-1);
+  }
+  body.manager-enterprise .manager-module-group{
+    display:grid;
+    grid-template-columns:minmax(0,1fr);
+    gap:6px;
+    width:100%;
+    min-width:0;
+  }
+  body.manager-enterprise .manager-module-group-label{
+    display:flex;
+    align-items:center;
+    min-height:34px;
+    margin:0;
+    padding:5px 9px;
+    border-bottom:1px solid var(--line);
+    color:var(--brand-2);
+    font-size:12px;
+    font-weight:800;
+  }
+  body.manager-enterprise .manager-module-group-grid{
+    display:grid;
+    grid-template-columns:minmax(0,1fr);
+    gap:6px;
+    width:100%;
+    min-width:0;
+    overflow:visible;
+    padding:0;
+  }
+  body.manager-enterprise .manager-module-group-grid>.manager-module{
+    display:grid;
+    grid-template-columns:40px minmax(0,1fr) 28px;
+    grid-template-rows:auto auto;
+    align-items:center;
+    justify-items:stretch;
+    column-gap:10px;
+    row-gap:1px;
+    width:100%;
+    min-width:0;
+    min-height:66px;
+    flex:none;
+    padding:10px 11px;
+    border:1px solid var(--line-2);
+    border-radius:13px;
+    text-align:right;
+    background:linear-gradient(110deg,rgba(20,31,42,.96),rgba(13,21,29,.96));
+  }
+  body.manager-enterprise .manager-module-group-grid>.manager-module span{
+    grid-column:1;
+    grid-row:1 / span 2;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    width:38px;
+    height:38px;
+    margin:0;
+    border:1px solid var(--brand-line);
+    border-radius:11px;
+    font-size:15px;
+  }
+  body.manager-enterprise .manager-module-group-grid>.manager-module b{
+    grid-column:2;
+    grid-row:1;
+    min-width:0;
+    font-size:13px;
+    line-height:1.45;
+    white-space:normal;
+  }
+  body.manager-enterprise .manager-module-group-grid>.manager-module small{
+    grid-column:2;
+    grid-row:2;
+    min-width:0;
+    font-size:10px;
+    line-height:1.4;
+    white-space:normal;
+  }
+  body.manager-enterprise .manager-module-group-grid>.manager-module::after{
+    content:"‹";
+    grid-column:3;
+    grid-row:1 / span 2;
+    justify-self:center;
+    color:var(--brand-2);
+    font-size:24px;
+    line-height:1;
+  }
+  body.manager-enterprise .manager-module.is-current{
+    border-color:var(--brand);
+    box-shadow:inset -3px 0 0 var(--brand);
+  }
+  body.manager-enterprise #consoleSlot,
+  body.manager-enterprise .console,
+  body.manager-enterprise .console>*{
+    width:100%;
+    max-width:100%;
+    min-width:0;
+  }
+  body.manager-enterprise .console-tabs{
+    position:relative;
+    top:auto;
+    display:flex;
+    flex-wrap:wrap;
+    overflow:visible;
+    gap:6px;
+    padding:7px;
+  }
+  body.manager-enterprise .console-tab{
+    flex:1 1 calc(50% - 6px);
+    min-width:0;
+    white-space:normal;
+    text-align:center;
+    padding:9px 8px;
+  }
+  body.manager-enterprise .console-kpis{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    width:100%;
+  }
+  body.manager-enterprise .console-card,
+  body.manager-enterprise .console-critical,
+  body.manager-enterprise #managerComplaintSection{
+    min-width:0;
+    max-width:100%;
+  }
+  body.manager-enterprise #managerComplaintSection{padding:12px}
+}
+@media (max-width:390px){
+  body.manager-enterprise #managerModules{padding:10px}
+  body.manager-enterprise .manager-module-group-grid>.manager-module{
+    min-height:62px;
+    padding:9px;
+    column-gap:8px;
+  }
+  body.manager-enterprise .manager-module-group-grid>.manager-module b{font-size:12px}
+  body.manager-enterprise .manager-module-group-grid>.manager-module small{font-size:9px}
+  body.manager-enterprise .console-tab{flex-basis:calc(50% - 6px)}
+}
