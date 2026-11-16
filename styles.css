@@ -3594,3 +3594,123 @@ main{display:grid;gap:14px;min-width:0}
 [data-theme="light"] .emp-quick-item:hover,
 [data-theme="light"] .emp-next-row:hover{background:var(--brand-wash)}
 [data-theme="light"] .emp-state-dot{box-shadow:0 0 0 4px rgba(15,35,55,.05)}
+/* Delivery forms reuse the finance/task primitives; only the checkbox needs help. */
+#deliveryForm .task-pick-all{
+  padding:10px 12px;
+  border-radius:var(--r-sm);
+  border:1px solid var(--line);
+  background:rgba(255,255,255,.03);
+  font-size:11.5px;
+  font-weight:600;
+  cursor:pointer;
+}
+#deliveryForm .task-pick-all input{width:16px;height:16px;margin:0;accent-color:var(--brand)}
+[data-theme="light"] #deliveryForm .task-pick-all{background:rgba(15,35,55,.04)}
+
+
+/* ===================================================================
+   V1.27 — MANAGER CARDS MATCH THE ENGINEER CARDS
+   The manager tile was a vertical grid (icon above text) while the
+   engineer tile is a horizontal row (icon beside text). This makes the
+   manager grid read exactly like the engineer menu.
+   Markup is <span icon><b title><small subtitle>, so a 2-column grid
+   places the icon left and the two text lines stacked right.
+   =================================================================== */
+
+.manager-module{
+  display:grid;
+  grid-template-columns:34px minmax(0,1fr);
+  grid-template-rows:auto auto;
+  column-gap:11px;
+  row-gap:0;
+  align-items:center;
+  align-content:center;
+  min-height:72px;
+  padding:12px 13px;
+  border-radius:var(--r-md);
+  border:1px solid var(--line);
+  background:linear-gradient(150deg,rgba(255,255,255,.04),rgba(255,255,255,.012));
+  color:var(--text);
+  text-align:right;
+  cursor:pointer;
+  transition:border-color .14s,background .14s,transform .12s;
+}
+.manager-module:hover{border-color:var(--brand-line);background:var(--brand-wash)}
+.manager-module:active{transform:scale(.985)}
+.manager-module:disabled{opacity:.42;cursor:not-allowed;transform:none}
+
+/* Icon chip spans both text rows, mirroring .home-icon. */
+.manager-module > span{
+  grid-column:1;
+  grid-row:1 / span 2;
+  width:34px;height:34px;
+  display:grid;place-items:center;
+  border-radius:10px;
+  background:var(--brand-wash);
+  border:1px solid var(--brand-line);
+  font-size:14px;
+  line-height:1;
+}
+
+.manager-module > b{
+  grid-column:2;
+  grid-row:1;
+  align-self:end;
+  font-size:12.5px;
+  font-weight:700;
+  line-height:1.45;
+  margin:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.manager-module > small{
+  grid-column:2;
+  grid-row:2;
+  align-self:start;
+  font-size:10px;
+  line-height:1.5;
+  color:var(--text-3);
+  margin-top:1px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+/* Same 2-column density as the engineer menu, widening on tablets. */
+.manager-module-group-grid{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:9px;
+  direction:rtl;
+}
+
+
+/* Cards keep a consistent width; an odd last card simply sits alone
+   rather than stretching, which keeps every group visually even. */
+.manager-module-group-grid > .manager-module{grid-column:auto}
+
+@media (min-width:720px){
+  .manager-module-group-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+@media (max-width:360px){
+  .manager-module-group-grid{grid-template-columns:1fr}
+  .manager-module{grid-template-columns:30px minmax(0,1fr);min-height:66px;padding:10px 11px;column-gap:9px}
+  .manager-module > span{width:30px;height:30px;font-size:12px}
+  .manager-module > b{font-size:11.5px}
+  .manager-module > small{font-size:9.5px}
+}
+
+[data-theme="light"] .manager-module{
+  background:linear-gradient(150deg,rgba(15,35,55,.035),rgba(15,35,55,.012));
+}
+[data-theme="light"] .manager-module:hover{background:var(--brand-wash)}
+[data-theme="light"] .manager-module > span{background:var(--brand-wash)}
+/* The activity feed had a large empty band under it because the card
+   stretched to match the taller KPI grid above. Cap it. */
+.console-card:has(.console-feed){align-content:start}
+.console-feed{max-height:320px;overflow-y:auto}
+/* Critical-alert box was tall for one row; tighten it to content. */
+.console-critical{align-content:start;gap:6px}
+.console-critical-row{min-height:34px}
+.console-critical>b{margin:0}

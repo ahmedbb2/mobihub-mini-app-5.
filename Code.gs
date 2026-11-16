@@ -262,6 +262,15 @@ function doPost(e) {
       case 'device_staff':
         data = deviceStaffMiniV105_(profile);
         break;
+      case 'device_quality_review':
+        data = deviceQualityReviewMini_(profile, body);
+        break;
+      case 'device_deliver':
+        data = deviceDeliverMini_(profile, body);
+        break;
+      case 'device_delivery_options':
+        data = deviceDeliveryOptionsMini_(profile);
+        break;
       case 'device_status_update':
         data = deviceStatusUpdateMiniV105_(profile, body);
         break;
@@ -833,6 +842,7 @@ function managerDashboard_(profile) {
     staff: ['super_admin','admin'].includes(role),
     shifts: ['super_admin','admin'].includes(role),
     devices: ['super_admin','admin'].includes(role),
+    delivery: ['super_admin','admin','supervisor'].includes(role),
     requests: ['super_admin','admin','supervisor'].includes(role),
     finance: ['super_admin','finance'].includes(role),
     overtime: ['super_admin','admin','finance'].includes(role),
@@ -5472,6 +5482,7 @@ function consoleOverviewMini_(profile) {
     overtime: ['super_admin','finance','admin'].includes(role),
     // الأجهزة والتقارير
     devices: ['super_admin','admin'].includes(role),
+    delivery: ['super_admin','admin','supervisor'].includes(role),
     system: ['super_admin','admin','supervisor','finance'].includes(role),
     // الإشعارات والصلاحيات
     notifications: ['super_admin','admin','supervisor'].includes(role),
@@ -6551,6 +6562,214 @@ function employeeOverviewMini_(profile) {
     requests: { pending: pendingRequests, pendingLeaves: pendingLeaves },
     money: { openCustody: openCustody, partsPending: partsPending },
     complaints: { open: openComplaints }
+  };
+}
+
+/* =========================================================
+   V1.26 — QUALITY & DELIVERY
+   A device has to pass quality review before it can be handed to the
+   customer. Delivery records who received it and confirms the payment.
+========================================================= */
+
+const MH_DELIVERY_HEADERS = [
+  'تاريخ التسليم','رقم الطلب','اسم المستلم','رقم الهاتف','صلة القرابة',
+  'المبلغ المحصل','طريقة الدفع','تم فحص الجهاز أمام العميل','ملاحظات',
+  'سلّم بواسطة Chat ID','سلّم بواسطة','حالة الضمان','مدة الضمان بالأيام','رقم الإيصال'
+];
+const MH_DELIVERY_SHEET_ = 'سجل تسليم الأجهزة';
+
+function mhDeliverySheet_() {
+  const ss = spreadsheet_();
+  let sh = ss.getSheetByName(MH_DELIVERY_SHEET_);
+  if (!sh) {
+    sh = ss.insertSheet(MH_DELIVERY_SHEET_);
+    sh.getRange(1, 1, 1, MH_DELIVERY_HEADERS.length).setValues([MH_DELIVERY_HEADERS]);
+    sh.setFrozenRows(1);
+    return sh;
+  }
+  const width = Math.max(sh.getLastColumn(), 1);
+  const existing = sh.getRange(1, 1, 1, width).getDisplayValues()[0]
+    .map(function(h) { return String(h).trim(); });
+  const missing = MH_DELIVERY_HEADERS.filter(function(h) { return existing.indexOf(h) < 0; });
+  if (missing.length) sh.getRange(1, width + 1, 1, missing.length).setValues([missing]);
+  if (sh.getFrozenRows() === 0) sh.setFrozenRows(1);
+  return sh;
+}
+
+/**
+ * Quality review: a device must be marked «جاهز للتسليم» by quality before
+ * the delivery action is allowed. This endpoint records the outcome.
+ */
+function deviceQualityReviewMini_(profile, body) {
+  mhRequireRole_(profile, ['super_admin','admin','supervisor','procurement']);
+  const orderId = String(body.orderId || '').trim();
+  const passed = body.passed === true;
+  const note = String(body.note || '').trim().slice(0, 500);
+  if (!orderId) throw new Error('DEVICE_NOT_FOUND');
+  if (!passed && note.length < 3) throw new Error('INVALID_QUALITY_NOTE');
+
+  const ss = spreadsheet_();
+  const sh = ss.getSheetByName(MH.SHEETS.devices);
+  if (!sh) throw new Error('DEVICE_SHEETS_MISSING');
+  mhAssertHeaders_(sh, MH_DEVICE.DEVICE_HEADERS);
+  const rows = mhRowsObjects_(sh);
+  const found = rows.find(function(r) { return String(r['رقم الطلب'] || '').trim() === orderId; });
+  if (!found) throw new Error('DEVICE_NOT_FOUND');
+
+  const current = String(found['حالة الجهاز'] || '').trim();
+  if (passed && ['جاهز للتسليم','تم التسليم'].indexOf(current) >= 0) {
+    return { updated: false, status: current, message: 'الجهاز جاهز للتسليم بالفعل.' };
+  }
+
+  const nextStatus = passed ? 'جاهز للتسليم' : 'يحتاج إعادة فحص';
+  const nextLocation = passed ? 'درج جاهز للتسليم' : 'درج مراجعة الجودة';
+  const now = mhStamp_();
+
+  const lock = LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    const map = mhHeaderMap_(sh);
+    sh.getRange(found.__row, map['حالة الجهاز']).setValue(nextStatus);
+    sh.getRange(found.__row, map['مكان الجهاز']).setValue(nextLocation);
+    sh.getRange(found.__row, map['آخر تحديث']).setValue(now);
+
+    const movement = mhEnsureSheet_('سجل حركة الأجهزة', MH_DEVICE.MOVEMENT_HEADERS);
+    movement.appendRow([
+      now, orderId, passed ? 'مراجعة جودة — نجاح' : 'مراجعة جودة — إعادة فحص',
+      '', '', String(found['الموظف المسؤول Chat ID'] || ''), String(found['الموظف المسؤول'] || ''),
+      nextStatus, nextLocation, note, String(profile.chatId), String(profile.name || '')
+    ]);
+  } finally { lock.releaseLock(); }
+
+  // The technician who repaired it must know the verdict.
+  const ownerId = String(found['الموظف المسؤول Chat ID'] || '').trim();
+  if (ownerId) {
+    mhNotifyEmployee_(ownerId,
+      (passed ? '✅ اجتاز جهازك مراجعة الجودة' : '🔄 جهازك يحتاج إعادة فحص') +
+      '\n━━━━━━━━━━━━━━━━━━\n' +
+      '🆔 ' + orderId + '\n' +
+      '📱 ' + String(found['اسم الجهاز'] || '') + '\n' +
+      (note ? '📝 ' + note + '\n' : '') +
+      '━━━━━━━━━━━━━━━━━━\n' +
+      (passed ? 'الجهاز جاهز للتسليم للعميل.' : 'راجع الجهاز وأعد تقديمه للمراجعة.'),
+      'مراجعة جودة', 'device.assigned');
+  }
+
+  return { updated: true, orderId: orderId, status: nextStatus, location: nextLocation, passed: passed };
+}
+
+/**
+ * Delivery: only allowed when the device is ready. Records the recipient,
+ * the amount collected and the warranty so there is a signed trail.
+ */
+function deviceDeliverMini_(profile, body) {
+  mhRequireRole_(profile, ['super_admin','admin','supervisor']);
+
+  const orderId = String(body.orderId || '').trim();
+  const recipient = String(body.recipient || '').trim();
+  const phone = String(body.phone || '').trim();
+  const relation = String(body.relation || '').trim().slice(0, 60);
+  const amount = mhFirstNumber_(body.amount);
+  const method = String(body.method || '').trim();
+  const checked = body.checkedInFront === true;
+  const note = String(body.note || '').trim().slice(0, 500);
+  const warranty = String(body.warranty || 'بدون ضمان').trim();
+  const warrantyDays = mhFirstNumber_(body.warrantyDays);
+  const receipt = String(body.receipt || '').trim().slice(0, 60);
+
+  if (!orderId) throw new Error('DEVICE_NOT_FOUND');
+  if (recipient.length < 2 || recipient.length > 80) throw new Error('INVALID_RECIPIENT');
+  if (phone && mhNormalizePhone_(phone).length < 7) throw new Error('INVALID_RECIPIENT_PHONE');
+  if (!checked) throw new Error('DELIVERY_MUST_BE_CHECKED');
+  if (amount < 0 || amount > 1000000) throw new Error('INVALID_AMOUNT');
+
+  const ss = spreadsheet_();
+  const sh = ss.getSheetByName(MH.SHEETS.devices);
+  if (!sh) throw new Error('DEVICE_SHEETS_MISSING');
+  mhAssertHeaders_(sh, MH_DEVICE.DEVICE_HEADERS);
+  const rows = mhRowsObjects_(sh);
+  const found = rows.find(function(r) { return String(r['رقم الطلب'] || '').trim() === orderId; });
+  if (!found) throw new Error('DEVICE_NOT_FOUND');
+
+  const current = String(found['حالة الجهاز'] || '').trim();
+  if (current === 'تم التسليم') throw new Error('DEVICE_ALREADY_DELIVERED');
+  if (current !== 'جاهز للتسليم') throw new Error('DEVICE_NOT_READY_FOR_DELIVERY');
+
+  const now = mhStamp_();
+  const lock = LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    const map = mhHeaderMap_(sh);
+    sh.getRange(found.__row, map['حالة الجهاز']).setValue('تم التسليم');
+    sh.getRange(found.__row, map['مكان الجهاز']).setValue('مكان آخر');
+    sh.getRange(found.__row, map['آخر تحديث']).setValue(now);
+
+    const delivery = mhDeliverySheet_();
+    delivery.appendRow([
+      now, orderId, recipient, mhNormalizePhone_(phone), relation,
+      amount, method, 'نعم', note,
+      String(profile.chatId), String(profile.name || ''), warranty, warrantyDays, receipt
+    ]);
+
+    const movement = mhEnsureSheet_('سجل حركة الأجهزة', MH_DEVICE.MOVEMENT_HEADERS);
+    movement.appendRow([
+      now, orderId, 'تسليم للعميل', '', '', '', recipient,
+      'تم التسليم', 'مكان آخر',
+      'المستلم: ' + recipient + (relation ? ' (' + relation + ')' : '') +
+        ' · المحصل: ' + amount + ' جنيه' + (method ? ' · ' + method : ''),
+      String(profile.chatId), String(profile.name || '')
+    ]);
+  } finally { lock.releaseLock(); }
+
+  return {
+    delivered: true,
+    orderId: orderId,
+    recipient: recipient,
+    amount: amount,
+    warranty: warranty,
+    message: 'تم تسليم الجهاز لـ ' + recipient
+  };
+}
+
+/** Delivery screen data: devices ready to hand over, plus recipients history. */
+function deviceDeliveryOptionsMini_(profile) {
+  mhRequireRole_(profile, ['super_admin','admin','supervisor']);
+
+  const ss = spreadsheet_();
+  let devices = [];
+  try {
+    devices = mhRowsObjects_(ss.getSheetByName(MH.SHEETS.devices));
+  } catch (e) { devices = []; }
+
+  const ready = devices.filter(function(r) {
+    return String(r['حالة الجهاز'] || '').trim() === 'جاهز للتسليم';
+  }).map(function(r) {
+    return {
+      orderId: String(r['رقم الطلب'] || ''),
+      deviceName: String(r['اسم الجهاز'] || ''),
+      customerName: String(r['اسم العميل'] || ''),
+      customerPhone: String(r['رقم الهاتف'] || ''),
+      estimate: mhMoney_(r['التكلفة التقديرية']),
+      deposit: mhMoney_(r['العربون المدفوع']),
+      technician: String(r['الموظف المسؤول'] || '')
+    };
+  });
+
+  const awaitingQuality = devices.filter(function(r) {
+    return ['مراجعة الجودة','يحتاج إعادة فحص'].indexOf(String(r['حالة الجهاز'] || '').trim()) >= 0;
+  }).map(function(r) {
+    return {
+      orderId: String(r['رقم الطلب'] || ''),
+      deviceName: String(r['اسم الجهاز'] || ''),
+      status: String(r['حالة الجهاز'] || ''),
+      technician: String(r['الموظف المسؤول'] || '')
+    };
+  });
+
+  return {
+    ready: ready,
+    awaitingQuality: awaitingQuality,
+    counts: { ready: ready.length, awaitingQuality: awaitingQuality.length },
+    paymentMethods: ['نقدي','فودافون كاش','انستاباي','تحويل بنكي','بطاقة'],
+    warrantyOptions: ['بدون ضمان','7 أيام','15 يوم','شهر','3 شهور','6 شهور','سنة']
   };
 }
 

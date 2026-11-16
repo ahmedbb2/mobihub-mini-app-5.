@@ -381,7 +381,7 @@
   const managerModuleTitles = {
     daily:'المتابعة اليومية', staff:'شؤون المهندسين', shifts:'إدارة الورديات', requests:'طلبات المهندسين والتواصل',
     tasks:'المهام والتسكات', parts:'قطع الغيار', procurement:'المشتريات والمخزون',
-    finance:'الإدارة المالية', overtime:'الأوفر تايم', devices:'الأجهزة والصيانة', system:'التقارير والنظام', notifications:'مركز الإشعارات', notificationMatrix:'التحكم في الإشعارات', buttonsMatrix:'التحكم في الأزرار', managers:'إدارة المديرين'
+    finance:'الإدارة المالية', overtime:'الأوفر تايم', devices:'الأجهزة والصيانة', delivery:'الجودة والتسليم', system:'التقارير والنظام', notifications:'مركز الإشعارات', notificationMatrix:'التحكم في الإشعارات', buttonsMatrix:'التحكم في الأزرار', managers:'إدارة المديرين'
   };
   let managerDashboardCache = null;
   function renderManagerDashboard(data) {
@@ -610,6 +610,8 @@
         content.querySelectorAll('[data-assign-employee]').forEach(b=>b.addEventListener('click',()=>openManagerEmployeeForm('assign',rows.find(r=>String(r['Chat ID'])===b.dataset.assignEmployee),shifts)));
         content.querySelectorAll('[data-toggle-employee]').forEach(b=>b.addEventListener('click',async()=>{if(!confirm(`تأكيد ${b.dataset.nextStatus==='موقوف'?'إيقاف':'تفعيل'} حساب المهندس؟`))return;b.disabled=true;try{await api('employee_status',{employeeId:b.dataset.toggleEmployee,status:b.dataset.nextStatus});await loadManagerDashboard();closeModal();openManagerModule('staff');}catch(e){if(tg?.showAlert)tg.showAlert(e.message);b.disabled=false;}}));
         const search=content.querySelector('#managerEmployeeSearch'); search.addEventListener('input',()=>{const q=search.value.trim().toLowerCase();content.querySelectorAll('.manager-employee-row').forEach(row=>row.classList.toggle('hidden',!row.textContent.toLowerCase().includes(q)));});
+      } else if(module==='delivery') {
+        closeModal(); await openDeliveryPanel(); return;
       } else if(module==='devices') {
         const [rows,employees]=await Promise.all([api('device_list'),api('device_staff')]);
         const statuses=['تم الاستلام','قيد الفحص','يحتاج قطعة غيار','يحتاج التواصل مع العميل','بانتظار رد العميل','لم يتم الرد','قيد الإصلاح','مراجعة الجودة','يحتاج إعادة فحص','جاهز للتسليم','تم التسليم'];
@@ -3552,7 +3554,7 @@
     { key: 'ops', title: 'التشغيل اليومي', icon: '◷', modules: ['daily', 'shifts', 'requests'] },
     { key: 'team', title: 'الفريق والمهام', icon: '♙', modules: ['staff', 'tasks', 'parts', 'procurement'] },
     { key: 'money', title: 'المالية', icon: 'ج.م', modules: ['finance', 'overtime'] },
-    { key: 'system', title: 'الأجهزة والتقارير', icon: '▥', modules: ['devices', 'system'] },
+    { key: 'system', title: 'الأجهزة والتقارير', icon: '▥', modules: ['devices', 'delivery', 'system'] },
     { key: 'control', title: 'الإشعارات والصلاحيات', icon: '🎛', modules: ['notifications', 'notificationMatrix', 'buttonsMatrix', 'managers'] }
   ];
 
@@ -3867,6 +3869,7 @@
       finance: function() { openManagerModule('finance'); },
       overtime: function() { openManagerModule('overtime'); },
       devices: function() { openManagerModule('devices'); },
+      delivery: function() { openDeliveryPanel(); },
       parts: function() { openPartAdminPanel(); },
       procurement: function() { openProcurementPanel(); },
       managers: function() { openManagerModule('managers'); },
@@ -4656,6 +4659,204 @@
   }
 
 
+  /* ============================================================
+   * QUALITY & DELIVERY — «الجودة والتسليم»
+   * Quality review before handover, then a recorded delivery.
+   * ============================================================ */
+
+  async function openDeliveryPanel() {
+    const panel = managerPanel('الجودة والتسليم', '<div class="manager-loading">جاري تحميل الأجهزة...</div>');
+    const content = panel.querySelector('.manager-module-content');
+    await renderDeliveryPanel(content);
+  }
+
+  async function renderDeliveryPanel(content) {
+    content.innerHTML = '<div class="manager-loading">جاري تحميل الأجهزة...</div>';
+    try {
+      const data = await api('device_delivery_options');
+      const c = data.counts || {};
+
+      content.innerHTML = `<div class="console">
+        <div class="console-kpis">
+          ${finKpi('جاهزة للتسليم', c.ready, 'يمكن تسليمها الآن')}
+          ${finKpi('بانتظار الجودة', c.awaitingQuality, 'تحتاج مراجعة')}
+        </div>
+
+        <nav class="console-tabs">
+          <button type="button" class="console-tab is-active" data-del-tab="quality">مراجعة الجودة</button>
+          <button type="button" class="console-tab" data-del-tab="deliver">التسليم</button>
+        </nav>
+
+        <div id="delBody"></div>
+      </div>`;
+
+      const body = content.querySelector('#delBody');
+      const tabs = content.querySelectorAll('[data-del-tab]');
+
+      const draw = function(key) {
+        tabs.forEach(function(t) { t.classList.toggle('is-active', t.dataset.delTab === key); });
+        if (key === 'quality') drawQualityTab(body, data, content);
+        else drawDeliverTab(body, data, content);
+      };
+
+      tabs.forEach(function(t) {
+        t.addEventListener('click', function() { draw(t.dataset.delTab); });
+      });
+      draw('quality');
+    } catch (e) {
+      content.innerHTML = `<div class="manager-load-error">${escapeHtml(e.message)}</div>`;
+    }
+  }
+
+  /* ---------------- Quality review ---------------- */
+  function drawQualityTab(body, data, content) {
+    const list = data.awaitingQuality || [];
+
+    body.innerHTML = `<section class="console-card">
+      <h4>أجهزة بانتظار مراجعة الجودة (${list.length})</h4>
+      ${list.length ? `<div class="tasks-list">
+        ${list.map(function(d) {
+          return `<article class="task-row fin-row">
+            <span class="task-row-main">
+              <b>${escapeHtml(d.deviceName || d.orderId)}</b>
+              <small>${escapeHtml(d.orderId)} · ${escapeHtml(d.technician)}</small>
+            </span>
+            <span class="task-status ${d.status === 'يحتاج إعادة فحص' ? 'is-review' : 'is-progress'}">${escapeHtml(d.status)}</span>
+            <span class="task-row-actions">
+              <button type="button" class="task-mini-btn is-approve" data-qc-pass="${escapeHtml(d.orderId)}">اجتاز</button>
+              <button type="button" class="task-mini-btn" data-qc-fail="${escapeHtml(d.orderId)}">إعادة فحص</button>
+            </span>
+          </article>`;
+        }).join('')}
+      </div>` : '<p class="console-empty">لا توجد أجهزة بانتظار المراجعة.</p>'}
+      <p class="manager-note">لا يمكن تسليم أي جهاز قبل اجتيازه مراجعة الجودة.</p>
+    </section>`;
+
+    const review = async function(orderId, passed) {
+      let note = '';
+      if (!passed) {
+        note = window.prompt('سبب إعادة الفحص؟') || '';
+        if (note.trim().length < 3) return;
+      }
+      try {
+        await api('device_quality_review', { orderId: orderId, passed: passed, note: note });
+        if (tg?.showAlert) tg.showAlert(passed ? 'الجهاز جاهز للتسليم.' : 'أُعيد الجهاز للفحص.');
+        renderDeliveryPanel(content);
+      } catch (e) {
+        if (tg?.showAlert) tg.showAlert(e.message);
+      }
+    };
+
+    body.querySelectorAll('[data-qc-pass]').forEach(function(b) {
+      b.addEventListener('click', function() { review(b.dataset.qcPass, true); });
+    });
+    body.querySelectorAll('[data-qc-fail]').forEach(function(b) {
+      b.addEventListener('click', function() { review(b.dataset.qcFail, false); });
+    });
+  }
+
+  /* ---------------- Delivery ---------------- */
+  function drawDeliverTab(body, data, content) {
+    const list = data.ready || [];
+
+    body.innerHTML = `<section class="console-card">
+      <h4>أجهزة جاهزة للتسليم (${list.length})</h4>
+      ${list.length ? `<div class="tasks-list">
+        ${list.map(function(d) {
+          return `<article class="task-row fin-row">
+            <span class="task-row-main">
+              <b>${escapeHtml(d.deviceName || d.orderId)}</b>
+              <small>${escapeHtml(d.orderId)} · ${escapeHtml(d.customerName || 'بدون عميل')}</small>
+              <small class="fin-meta">تقديري ${formatMoney(d.estimate)} ج · عربون ${formatMoney(d.deposit)} ج</small>
+            </span>
+            <span class="task-row-actions">
+              <button type="button" class="task-mini-btn is-approve" data-deliver="${escapeHtml(d.orderId)}">تسليم</button>
+            </span>
+          </article>`;
+        }).join('')}
+      </div>` : '<p class="console-empty">لا توجد أجهزة جاهزة للتسليم. أكمل مراجعة الجودة أولًا.</p>'}
+    </section>`;
+
+    body.querySelectorAll('[data-deliver]').forEach(function(b) {
+      b.addEventListener('click', function() {
+        const item = list.find(function(x) { return x.orderId === b.dataset.deliver; });
+        if (item) openDeliveryForm(content, item, data);
+      });
+    });
+  }
+
+  function openDeliveryForm(content, item, options) {
+    const methods = options.paymentMethods || ['نقدي'];
+    const warranties = options.warrantyOptions || ['بدون ضمان'];
+
+    const panel = managerPanel('تسليم جهاز', `<form id="deliveryForm" class="manager-staff-form">
+      <div class="inspection-form-meta">
+        <b>${escapeHtml(item.orderId)}</b>
+        <span>${escapeHtml(item.deviceName)} · ${escapeHtml(item.customerName || '')}</span>
+        <small>تقديري ${formatMoney(item.estimate)} ج · عربون ${formatMoney(item.deposit)} ج</small>
+      </div>
+
+      <label>اسم المستلم *<input name="recipient" maxlength="80" required value="${escapeHtml(item.customerName || '')}"></label>
+      <label>رقم الهاتف<input name="phone" maxlength="20" inputmode="numeric" value="${escapeHtml(item.customerPhone || '')}"></label>
+      <label>صلة القرابة<input name="relation" maxlength="60" placeholder="العميل نفسه / أخ / زوجة…"></label>
+
+      <div class="task-form-row">
+        <label>المبلغ المحصل<input name="amount" type="number" min="0" step="0.01" value="${Math.max(0, (Number(item.estimate) || 0) - (Number(item.deposit) || 0))}"></label>
+        <label>طريقة الدفع<select name="method">${methods.map(function(m) { return `<option>${escapeHtml(m)}</option>`; }).join('')}</select></label>
+      </div>
+
+      <div class="task-form-row">
+        <label>الضمان<select name="warranty">${warranties.map(function(w) { return `<option>${escapeHtml(w)}</option>`; }).join('')}</select></label>
+        <label>مدة الضمان (أيام)<input name="warrantyDays" type="number" min="0" max="3650" value="0"></label>
+      </div>
+
+      <label>رقم الإيصال<input name="receipt" maxlength="60" placeholder="اختياري"></label>
+      <label>ملاحظات<textarea name="note" rows="2" maxlength="500" placeholder="اختياري"></textarea></label>
+
+      <label class="task-pick-all" style="display:flex;gap:8px;align-items:center">
+        <input type="checkbox" name="checkedInFront" value="1" required>
+        <span>تم فحص الجهاز أمام العميل</span>
+      </label>
+
+      <button type="submit" class="primary-btn">تأكيد التسليم</button>
+      <p id="deliveryMsg" class="inline-message hidden"></p>
+    </form>`);
+
+    const form = panel.querySelector('#deliveryForm');
+    form.addEventListener('submit', async function(ev) {
+      ev.preventDefault();
+      const btn = form.querySelector('button[type="submit"]');
+      const msg = form.querySelector('#deliveryMsg');
+      btn.disabled = true;
+      btn.textContent = 'جارٍ التسليم...';
+      try {
+        const fd = new FormData(form);
+        const res = await api('device_deliver', {
+          orderId: item.orderId,
+          recipient: fd.get('recipient'),
+          phone: fd.get('phone'),
+          relation: fd.get('relation'),
+          amount: fd.get('amount'),
+          method: fd.get('method'),
+          warranty: fd.get('warranty'),
+          warrantyDays: fd.get('warrantyDays'),
+          receipt: fd.get('receipt'),
+          note: fd.get('note'),
+          checkedInFront: fd.get('checkedInFront') === '1'
+        });
+        if (tg?.showAlert) tg.showAlert('تم تسليم الجهاز لـ ' + res.recipient);
+        closeModal();
+        renderDeliveryPanel(content);
+      } catch (e) {
+        msg.textContent = e.message;
+        msg.classList.remove('hidden');
+        btn.disabled = false;
+        btn.textContent = 'تأكيد التسليم';
+      }
+    });
+  }
+
+
   $('workspaceSwitch').addEventListener('click', switchWorkspace);
   $('refreshManagerDashboard').addEventListener('click',loadManagerDashboard);
   document.querySelectorAll('[data-manager-module]').forEach(btn=>btn.addEventListener('click',()=>openManagerModule(btn.dataset.managerModule)));
@@ -4704,7 +4905,7 @@
   document.querySelectorAll('[data-entity]').forEach(btn => btn.addEventListener('click', () => showList(btn.dataset.entity)));
   $('backBtn').addEventListener('click', () => { const title=$('resultTitle').textContent; $('results').classList.add('hidden'); if(['الطلبات العامة','طلبات الأذونات','السلف والعهد'].includes(title)) showRequestPicker(); else closeModal(); });
   // Exposed for automated UI previews; never used by app logic.
-  window.__mhConsole = { render: renderConsoleInto, setTab: function(t){ consoleState.tab = t; }, taskForm: renderTaskCreateForm, taskAdmin: openTaskAdminPanel, procurement: openProcurementPanel, finance: openFinanceCenter };
+  window.__mhConsole = { render: renderConsoleInto, setTab: function(t){ consoleState.tab = t; }, taskForm: renderTaskCreateForm, taskAdmin: openTaskAdminPanel, procurement: openProcurementPanel, finance: openFinanceCenter, delivery: openDeliveryPanel };
   initTheme();
   start();
 })();
