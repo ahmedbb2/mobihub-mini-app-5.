@@ -208,7 +208,6 @@
           <label>السبب<textarea id="deductionReason" rows="2" maxlength="500" placeholder="سبب الخصم بالتفصيل"></textarea></label>
           <button id="submitDeduction" class="primary-btn submit-action">تسجيل الخصم للمراجعة</button>
           <div class="form-divider"></div><h3>الخصومات المعلقة</h3><div id="pendingDeductions">جاري التحميل...</div>
-          <div class="form-divider"></div><h3>سجل الخصومات السابقة</h3><div id="deductionHistory" class="finance-history">سيظهر هنا سجل الخصومات بعد تحميله.</div>
         </div>
         <div id="rewardAdminView" class="request-form hidden">
           <div class="form-title"><span class="form-title-icon">★</span><div><h3>إدارة المكافآت</h3><p>تقييم النظافة وإضافة مكافأة مالية مستقلة</p></div></div>
@@ -222,7 +221,6 @@
           <label>المبلغ بالجنيه<input id="bonusAmount" type="number" min="0.01" step="0.01" placeholder="مثال: 200"></label>
           <label>سبب المكافأة<input id="bonusReason" maxlength="250" placeholder="سبب منح المكافأة"></label>
           <button id="submitBonus" class="primary-btn submit-action">إضافة المكافأة واعتمادها</button>
-          <div class="form-divider"></div><h3>سجل المكافآت الإضافية</h3><div id="rewardBonusHistory" class="finance-history">سيظهر هنا سجل المكافآت بعد تحميله.</div>
         </div>
         <p id="financeMessage" class="inline-message hidden" aria-live="polite"></p>
       </section>
@@ -306,12 +304,12 @@
           </div>
         </div>
 
-        <div class="menu-section menu-section-priority">
-          <div class="menu-section-title">📌 مهامي وأدائي <span>ابدأ بالمهام المطلوبة منك</span></div>
+        <div class="menu-section">
+          <div class="menu-section-title">📌 المهام والأداء <span>تسكاتك ومكافآتك وملخصك</span></div>
           <div class="legacy-menu-grid">
-            <button class="home-card task-card" data-home-action="tasks" aria-label="فتح مهامي المطلوبة">
+            <button class="home-card task-card" data-home-action="tasks">
               <span class="home-icon">📌</span>
-              <div class="home-card-text"><b>مهامي المطلوبة</b><small>المهام الجديدة والمتأخرة وبانتظار المراجعة</small></div>
+              <div class="home-card-text"><b>تسكاتي</b><small>مهامك المطلوبة من الإدارة</small></div>
               <span id="tasksBadge" class="task-badge hidden">0</span>
             </button>
             <button class="home-card" data-home-action="rewards">
@@ -320,17 +318,17 @@
             </button>
             <button class="home-card" data-home-action="deductions">
               <span class="home-icon">💸</span>
-              <div class="home-card-text"><b>خصوماتي</b><small>التأخير والخصومات المسجلة</small></div>
+              <div class="home-card-text"><b>خصوماتي</b><small>التأخير والخصومات</small></div>
             </button>
             <button class="home-card" data-home-action="monthly">
               <span class="home-icon">📊</span>
-              <div class="home-card-text"><b>ملخص الشهر</b><small>إحصائيات الالتزام والأداء</small></div>
+              <div class="home-card-text"><b>ملخص الشهر</b><small>إحصائيات التزامك</small></div>
             </button>
           </div>
         </div>
 
         <div class="menu-section">
-          <div class="menu-section-title">💬 الطلبات والتواصل <span>متابعة طلباتك والتواصل مع الإدارة</span></div>
+          <div class="menu-section-title">📩 الطلبات والتواصل <span>متابعة الطلبات والشكاوى</span></div>
           <div class="legacy-menu-grid">
             <button class="home-card" data-home-action="requests">
               <span class="home-icon">📩</span>
@@ -338,15 +336,15 @@
             </button>
             <button class="home-card" data-home-action="complaint-new">
               <span class="home-icon">📝</span>
-              <div class="home-card-text"><b>تقديم شكوى</b><small>إرسال شكوى إلى الإدارة</small></div>
+              <div class="home-card-text"><b>تقديم شكوى</b><small>ترسل للإدارة بسرية</small></div>
             </button>
             <button class="home-card" data-home-action="complaint-list">
               <span class="home-icon">📨</span>
-              <div class="home-card-text"><b>شكاواي</b><small>متابعة المحادثات والردود</small></div>
+              <div class="home-card-text"><b>شكاويي</b><small>المحادثات والردود</small></div>
             </button>
-            <button class="home-card legacy-menu-wide" data-home-action="refresh">
+            <button class="home-card" data-home-action="refresh">
               <span class="home-icon">🔄</span>
-              <div class="home-card-text"><b>تحديث اللوحة</b><small>تحديث الملخص وعدّاد المهام</small></div>
+              <div class="home-card-text"><b>تحديث اللوحة</b><small>إعادة تحميل البيانات</small></div>
             </button>
           </div>
         </div>

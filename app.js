@@ -251,7 +251,7 @@
   }
 
 
-  const MANAGER_ROLES = ['super_admin','admin','finance','supervisor','procurement'];
+  const MANAGER_ROLES = ['super_admin','admin','finance','supervisor'];
   function buildWorkspace(role, permissions) {
     // Workspace selection is authoritative for the visible shell. The role
     // still controls server permissions; it must not decide which shell renders.
@@ -302,6 +302,8 @@
       employee.classList.remove('hidden'); manager.classList.add('hidden');
       mount(employee, ['stats','homeActions','attendance','requestCenter','financeCenter','deviceRegisterPanel','results']);
       $('managerDashboard').classList.add('hidden');
+      // The manager workspace hides #stats; restore it for the engineer view.
+      $('stats').classList.remove('hidden');
       // The manager workspace hides this card grid. Always restore it when returning
       // to the engineer workspace (especially for dual-role Telegram accounts).
       $('homeActions').classList.remove('hidden');
@@ -314,8 +316,7 @@
       // Employee navigation mirrors the legacy bot keyboard; no secondary scroll navigation.
       nav.innerHTML = '';
       nav.classList.add('hidden');
-      // Employee summary counters are useful at-a-glance context; keep them visible
-      // above the service groups. The manager workspace still keeps them hidden.
+      // #stats holds the personal overview; never hide it in the employee view.
       $('stats').classList.remove('hidden');
       $('attendance').classList.add('hidden');
     }
@@ -330,16 +331,14 @@
    * A missing list means "no restrictions" so old hubs keep working. */
   function applyVisibleButtons(list) {
     const all = document.querySelectorAll('[data-home-action]');
-    // A missing/non-array value means an older API response with no visibility
-    // policy. An empty array is an explicit policy: no standard tiles are visible.
-    if (!Array.isArray(list)) {
+    if (!Array.isArray(list) || !list.length) {
       all.forEach(el => el.classList.remove('is-hidden-by-admin'));
       return;
     }
     const allowed = new Set(list);
     all.forEach(el => {
       const key = el.getAttribute('data-home-action');
-      // Device registration is separately gated by device_registration_options.
+      // device-register keeps its own permission logic, never force-shown.
       if (key === 'device-register') return;
       el.classList.toggle('is-hidden-by-admin', !allowed.has(key));
     });
@@ -366,7 +365,8 @@
     $('workspaceSwitch').textContent = workspaceRole === 'manager' ? 'لوحة المهندس' : 'لوحة المدير';
     $('workspaceSwitch').setAttribute('aria-label', workspaceRole === 'manager' ? 'التحويل إلى لوحة المهندس' : 'التحويل إلى لوحة المدير');
 
-    renderStats(data.summary || {});
+    // The overview owns #stats; legacy counters are hidden by CSS.
+    renderEmployeeOverview();
     // Task badge comes from bootstrap so it is correct on first paint.
     refreshTasksBadge(data.tasks || { open: 0, overdue: 0 });
     buildWorkspace(currentRole, data.permissions || {});
@@ -508,7 +508,8 @@
       panel.querySelector('#managerOpenComplaints').addEventListener('click',()=>{closeModal();showList('complaints');});
       return;
     }
-    if(module==='finance') {
+    if(module==='finance') { closeModal(); await openFinanceCenter(); return; }
+    if(module==='financeLegacy') {
       const panel=managerPanel(title,'<button type="button" class="manager-action-card" id="managerOpenCash"><b>السلف والعهد</b><small>الموافقة والصرف ومراجعة التسويات</small></button><button type="button" class="manager-action-card" id="managerOpenFinance"><b>الخصومات والمكافآت</b><small>إضافة ومراجعة الخصومات والمكافآت وتقييم النظافة</small></button>');
       panel.querySelector('#managerOpenCash').addEventListener('click',async()=>{closeModal();openModal('مراجعة السلف والعهد',$('cashReviewCenter'));await loadCashReviews();});
       panel.querySelector('#managerOpenFinance').addEventListener('click',async()=>{closeModal();$('financeCenter').classList.remove('hidden');openModal('الخصومات والمكافآت',$('financeCenter'));$('deductionAdminTab').click();});
@@ -941,7 +942,7 @@
     if(btn){btn.disabled=true;}
     try{
       const data=await api('bootstrap');
-      renderStats(data.summary||{});
+      renderEmployeeOverview();
       refreshTasksBadge(data.tasks || { open: 0, overdue: 0 });
       if (currentRole === 'employee' && currentAttendance) await refreshAttendance();
       $('attendance').classList.add('hidden');
@@ -1733,26 +1734,13 @@
     $('deductionEmployee').innerHTML=options; $('rewardEmployee').innerHTML=options;
   }
   async function loadPendingDeductions(){
-    const box=$('pendingDeductions'), history=$('deductionHistory');
-    box.textContent='جاري تحميل الخصومات المعلقة...';
-    if(history) history.textContent='جاري تحميل سجل الخصومات...';
+    const box=$('pendingDeductions'); box.textContent='جاري تحميل الخصومات المعلقة...';
     try{
       const rows=await api('list',{entity:'deductions'});
-      const pending=rows.filter(r=>String(r['الحالة']||'').trim()==='بانتظار اعتماد المدير');
-      const reviewed=rows.filter(r=>String(r['الحالة']||'').trim()!=='بانتظار اعتماد المدير');
-      box.innerHTML=pending.length?pending.map(r=>`<article class="review-item"><strong>${escapeHtml(r['اسم الموظف'])} · ${escapeHtml(r['نوع الخصم'])}</strong><p>${escapeHtml(r['السبب'])}<br>${escapeHtml(r['المبلغ بالجنيه'])} جنيه · ${escapeHtml(r['تاريخ الواقعة'])}</p><div class="review-actions"><button class="primary-btn" data-ded-row="${Number(r.__row)}" data-ded-decision="معتمد">اعتماد</button><button class="secondary-btn" data-ded-row="${Number(r.__row)}" data-ded-decision="مرفوض">رفض</button></div></article>`).join(''):'لا توجد خصومات معلقة.';
-      if(history) history.innerHTML=reviewed.length?reviewed.slice(0,50).map(r=>`<article class="record"><strong>${escapeHtml(r['اسم الموظف']||'موظف')} · ${escapeHtml(r['نوع الخصم']||'خصم')}</strong><small class="record-meta">${escapeHtml(r['تاريخ الواقعة']||'')} · ${Number(r['المبلغ بالجنيه']||0).toLocaleString('en-EG')} جنيه · ${escapeHtml(r['الحالة']||'')}</small><p>${escapeHtml(r['السبب']||'')}${r['ملاحظات']?`<br><small>${escapeHtml(r['ملاحظات'])}</small>`:''}</p></article>`).join(''):'لا توجد خصومات تمت مراجعتها بعد.';
-      box.querySelectorAll('[data-ded-row]').forEach(b=>b.addEventListener('click',async()=>{const note=b.dataset.dedDecision==='مرفوض'?(prompt('سبب الرفض:')||''):'';if(b.dataset.dedDecision==='مرفوض'&&!note.trim())return;b.disabled=true;try{await api('deduction_decide',{row:Number(b.dataset.dedRow),decision:b.dataset.dedDecision,note});financeMessage(b.dataset.dedDecision==='معتمد'?'تم اعتماد الخصم.':'تم رفض الخصم.');await loadPendingDeductions();}catch(e){financeMessage(e.message,true);b.disabled=false;}}));
-    }catch(e){box.textContent=e.message;if(history)history.textContent='تعذر تحميل سجل الخصومات: '+e.message;}
-  }
-  async function loadRewardBonusHistory(){
-    const box=$('rewardBonusHistory');
-    if(!box) return;
-    box.textContent='جاري تحميل سجل المكافآت...';
-    try{
-      const rows=await api('list',{entity:'rewards'});
-      box.innerHTML=rows.length?rows.slice(0,50).map(r=>`<article class="record"><strong>${escapeHtml(r['اسم الموظف']||'موظف')} · ${Number(r['المبلغ بالجنيه']||0).toLocaleString('en-EG')} جنيه</strong><small class="record-meta">${escapeHtml(r['التاريخ']||'')} · ${escapeHtml(r['الشهر']||'')} · ${escapeHtml(r['الحالة']||'')}</small><p>${escapeHtml(r['السبب']||'')}</p></article>`).join(''):'لا توجد مكافآت إضافية مسجلة.';
-    }catch(e){box.textContent='تعذر تحميل سجل المكافآت: '+e.message;}
+      const pending=rows.filter(r=>String(r['الحالة'])==='بانتظار اعتماد المدير');
+      box.innerHTML=pending.length?pending.map(r=>`<article class="review-item"><strong>${escapeHtml(r['اسم الموظف'])} · ${escapeHtml(r['نوع الخصم'])}</strong><p>${escapeHtml(r['السبب'])}<br>${escapeHtml(r['المبلغ بالجنيه'])} جنيه · ${escapeHtml(r['تاريخ الواقعة'])}</p><div class="review-actions"><button class="primary-btn" data-ded-row="${r.__row}" data-ded-decision="معتمد">اعتماد</button><button class="secondary-btn" data-ded-row="${r.__row}" data-ded-decision="مرفوض">رفض</button></div></article>`).join(''):'لا توجد خصومات معلقة.';
+      box.querySelectorAll('[data-ded-row]').forEach(b=>b.addEventListener('click',async()=>{const note=b.dataset.dedDecision==='مرفوض'?(prompt('سبب الرفض:')||''):'';if(b.dataset.dedDecision==='مرفوض'&&!note.trim())return;try{await api('deduction_decide',{row:Number(b.dataset.dedRow),decision:b.dataset.dedDecision,note});await loadPendingDeductions();}catch(e){financeMessage(e.message,true);}}));
+    }catch(e){box.textContent=e.message;}
   }
   async function submitDeduction(){
     const b=$('submitDeduction');b.disabled=true;
@@ -1766,7 +1754,7 @@
   }
   async function submitBonus(){
     const b=$('submitBonus');b.disabled=true;
-    try{const r=await api('reward_bonus_create',{employeeId:$('rewardEmployee').value,amount:$('bonusAmount').value,reason:$('bonusReason').value});$('bonusAmount').value='';$('bonusReason').value='';financeMessage(`تمت إضافة المكافأة واعتمادها بقيمة ${r.amount} جنيه.`);await loadRewardBonusHistory();}
+    try{const r=await api('reward_bonus_create',{employeeId:$('rewardEmployee').value,amount:$('bonusAmount').value,reason:$('bonusReason').value});$('bonusAmount').value='';$('bonusReason').value='';financeMessage(`تمت إضافة المكافأة واعتمادها بقيمة ${r.amount} جنيه.`);}
     catch(e){financeMessage(e.message,true);}finally{b.disabled=false;}
   }
 
@@ -1857,8 +1845,6 @@
     if (!open) { badge.classList.add('hidden'); badge.textContent = '0'; return; }
     badge.textContent = open > 99 ? '99+' : String(open);
     badge.classList.toggle('is-urgent', overdue > 0);
-    badge.title = overdue > 0 ? `${open} مهمة مفتوحة، منها ${overdue} متأخرة` : `${open} مهمة مفتوحة`;
-    badge.setAttribute('aria-label', badge.title);
     badge.classList.remove('hidden');
   }
 
@@ -3637,10 +3623,9 @@
   function drawConsoleShell(content) {
     const d = consoleState.data || {};
     const tabs = CONSOLE_TABS.filter(function(t) {
-      if (t.key === 'team') return d.modules && (d.modules.staff || d.modules.daily || d.modules.procurement);
+      if (t.key === 'team') return d.modules && (d.modules.staff || d.modules.daily);
       if (t.key === 'money') return d.modules && d.modules.finance;
-      if (t.key === 'operations') return d.modules && (d.modules.devices || d.modules.tasks || d.modules.procurement);
-      if (t.key === 'reports') return d.role !== 'procurement';
+      if (t.key === 'operations') return d.modules && (d.modules.devices || d.modules.tasks);
       return true;
     });
 
@@ -3885,11 +3870,9 @@
       parts: function() { openPartAdminPanel(); },
       procurement: function() { openProcurementPanel(); },
       managers: function() { openManagerModule('managers'); },
-      buttonsMatrix: function() { openManagerModule('buttonsMatrix'); },
-      notificationMatrix: function() { openManagerModule('notificationMatrix'); },
+      buttonsMatrix: function() { openButtonsMatrix(); },
       requests: function() { openManagerModule('requests'); },
-      notifications: function() { openManagerModule('notifications'); },
-      system: function() { openManagerModule('system'); }
+      notifications: function() { openManagerModule('notifications'); }
     };
     const fn = map[key];
     if (fn) fn();
@@ -4305,6 +4288,374 @@
   }
 
 
+  /* ============================================================
+   * FINANCE CENTER — four tabs
+   *   الخصومات · المكافآت · مستحقات المهندسين · التقارير
+   * ============================================================ */
+
+  let financeState = { tab: 'deductions', data: null, month: '' };
+
+  const FINANCE_TABS = [
+    { key: 'deductions', label: 'الخصومات' },
+    { key: 'rewards', label: 'المكافآت' },
+    { key: 'dues', label: 'مستحقات المهندسين' },
+    { key: 'reports', label: 'التقارير' }
+  ];
+
+  async function openFinanceCenter() {
+    const panel = managerPanel('الإدارة المالية', '<div class="manager-loading">جاري تحميل البيانات المالية...</div>');
+    const content = panel.querySelector('.manager-module-content');
+    await renderFinanceCenter(content);
+  }
+
+  async function renderFinanceCenter(content) {
+    content.innerHTML = '<div class="manager-loading">جاري تحميل البيانات المالية...</div>';
+    try {
+      const data = await api('finance_center', { month: financeState.month || '' });
+      financeState.data = data;
+      financeState.month = data.month;
+      drawFinanceCenter(content);
+    } catch (e) {
+      content.innerHTML = `<div class="manager-load-error">${escapeHtml(e.message)}</div>`;
+    }
+  }
+
+  function drawFinanceCenter(content) {
+    const d = financeState.data || {};
+    const t = d.totals || {};
+    const c = d.counts || {};
+
+    content.innerHTML = `<div class="console">
+      <div class="console-kpis">
+        ${finKpi('خصومات معتمدة', formatMoney(t.deductionsApproved) + ' ج', c.approvedDeductions + ' سجل')}
+        ${finKpi('خصومات معلقة', formatMoney(t.deductionsPending) + ' ج', c.pendingDeductions + ' بانتظار')}
+        ${finKpi('مكافآت الشهر', formatMoney(t.bonuses) + ' ج', c.bonuses + ' مكافأة')}
+        ${finKpi('الصافي', formatMoney(t.net) + ' ج', t.net >= 0 ? 'لصالح الفريق' : 'خصومات أعلى')}
+      </div>
+
+      <nav class="console-tabs">
+        ${FINANCE_TABS.map(function(tab) {
+          return `<button type="button" class="console-tab${financeState.tab === tab.key ? ' is-active' : ''}" data-fin-tab="${tab.key}">${escapeHtml(tab.label)}</button>`;
+        }).join('')}
+      </nav>
+
+      <div id="finBody"></div>
+    </div>`;
+
+    content.querySelectorAll('[data-fin-tab]').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        financeState.tab = btn.dataset.finTab;
+        drawFinanceCenter(content);
+      });
+    });
+
+    const body = content.querySelector('#finBody');
+    if (financeState.tab === 'deductions') drawFinDeductions(body, d, content);
+    else if (financeState.tab === 'rewards') drawFinRewards(body, d, content);
+    else if (financeState.tab === 'dues') drawFinDues(body, d);
+    else drawFinReports(body, d);
+  }
+
+  function finKpi(label, value, sub) {
+    return `<article class="console-kpi"><small>${escapeHtml(label)}</small><b>${escapeHtml(String(value))}</b><span>${escapeHtml(sub || '')}</span></article>`;
+  }
+
+  /* ---------------- Tab: deductions ---------------- */
+  function drawFinDeductions(body, d, content) {
+    const pending = d.pendingDeductions || [];
+    const recent = d.recentDeductions || [];
+    const t = d.totals || {};
+
+    body.innerHTML = `
+      <section class="console-card">
+        <div class="fin-head">
+          <h4>خصومات بانتظار الاعتماد (${pending.length})</h4>
+          <button type="button" class="task-mini-btn" id="finAddDeduction">+ خصم جديد</button>
+        </div>
+        ${pending.length ? `<div class="tasks-list">
+          ${pending.map(function(x) {
+            return `<article class="task-row fin-row">
+              <span class="task-row-main">
+                <b>${escapeHtml(x.employeeName)} · ${escapeHtml(x.type)}</b>
+                <small>${escapeHtml(x.reason)}</small>
+                <small class="fin-meta">${escapeHtml(x.date)} · ${x.automatic ? 'تلقائي' : 'يدوي'}</small>
+              </span>
+              <span class="fin-amount">${formatMoney(x.amount)} ج</span>
+              <span class="task-row-actions">
+                <button type="button" class="task-mini-btn is-approve" data-ded-approve="${x.row}">اعتماد</button>
+                <button type="button" class="task-mini-btn" data-ded-reject="${x.row}">رفض</button>
+              </span>
+            </article>`;
+          }).join('')}
+        </div>` : '<p class="console-empty">لا توجد خصومات بانتظار الاعتماد.</p>'}
+      </section>
+
+      <section class="console-card">
+        <h4>خصومات الشهر (${recent.length})</h4>
+        <div class="fin-split">
+          <div class="fin-split-item"><small>تلقائية</small><b>${formatMoney(t.deductionsAutomatic)} ج</b></div>
+          <div class="fin-split-item"><small>يدوية</small><b>${formatMoney(t.deductionsManual)} ج</b></div>
+        </div>
+        ${recent.length ? `<div class="tasks-list">
+          ${recent.map(function(x) {
+            return `<article class="task-row fin-row">
+              <span class="task-row-main">
+                <b>${escapeHtml(x.employeeName)} · ${escapeHtml(x.type)}</b>
+                <small>${escapeHtml(x.reason)}</small>
+                <small class="fin-meta">${escapeHtml(x.date)} · ${x.automatic ? 'تلقائي' : 'يدوي'}</small>
+              </span>
+              <span class="fin-amount">${formatMoney(x.amount)} ج</span>
+              <span class="task-status ${x.status === 'معتمد' ? 'is-done' : x.status === 'مرفوض' ? 'is-cancelled' : 'is-review'}">${escapeHtml(x.status)}</span>
+            </article>`;
+          }).join('')}
+        </div>` : '<p class="console-empty">لا توجد خصومات هذا الشهر.</p>'}
+      </section>`;
+
+    body.querySelector('#finAddDeduction').addEventListener('click', function() { openDeductionForm(content); });
+
+    const decide = async function(row, decision) {
+      try {
+        await api('deduction_decide', { row: row, decision: decision });
+        if (tg?.showAlert) tg.showAlert(decision === 'معتمد' ? 'تم اعتماد الخصم.' : 'تم رفض الخصم.');
+        renderFinanceCenter(content);
+      } catch (e) {
+        if (tg?.showAlert) tg.showAlert(e.message);
+      }
+    };
+    body.querySelectorAll('[data-ded-approve]').forEach(function(b) { b.addEventListener('click', function() { decide(Number(b.dataset.dedApprove), 'معتمد'); }); });
+    body.querySelectorAll('[data-ded-reject]').forEach(function(b) { b.addEventListener('click', function() { decide(Number(b.dataset.dedReject), 'مرفوض'); }); });
+  }
+
+  function openDeductionForm(content) {
+    const d = financeState.data || {};
+    const employees = d.employees || [];
+    const types = ['التأخير', 'عدم الالتزام باليونيفورم', 'عدم التسجيل على السيستم', 'نظافة المكان', 'خصم آخر'];
+
+    const panel = managerPanel('خصم جديد', `<form id="finDeductionForm" class="manager-staff-form">
+      <label>الموظف<select name="employeeId" required>
+        <option value="">— اختر الموظف —</option>
+        ${employees.map(function(e) { return `<option value="${escapeHtml(e.id)}">${escapeHtml(e.name)}${e.job ? ' — ' + escapeHtml(e.job) : ''}</option>`; }).join('')}
+      </select></label>
+      <label>نوع الخصم<select name="type">${types.map(function(t) { return `<option>${escapeHtml(t)}</option>`; }).join('')}</select></label>
+      <label>المبلغ بالجنيه<input name="amount" type="number" min="1" max="1000000" step="0.01" required></label>
+      <label>السبب<textarea name="reason" rows="3" maxlength="500" required placeholder="اشرح سبب الخصم..."></textarea></label>
+      <button type="submit" class="primary-btn">تسجيل الخصم</button>
+      <p id="finDedMsg" class="inline-message hidden"></p>
+    </form>`);
+
+    const form = panel.querySelector('#finDeductionForm');
+    form.addEventListener('submit', async function(ev) {
+      ev.preventDefault();
+      const btn = form.querySelector('button[type="submit"]');
+      const msg = form.querySelector('#finDedMsg');
+      btn.disabled = true;
+      btn.textContent = 'جارٍ التسجيل...';
+      try {
+        const fd = new FormData(form);
+        const res = await api('deduction_create', {
+          employeeId: fd.get('employeeId'),
+          type: fd.get('type'),
+          amount: fd.get('amount'),
+          reason: fd.get('reason'),
+          // One key per submission: a double tap cannot create two rows.
+          requestKey: 'ded-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)
+        });
+        if (tg?.showAlert) tg.showAlert(res.duplicate ? 'هذا الخصم مسجل بالفعل.' : 'تم تسجيل الخصم وإرساله للمراجعة.');
+        closeModal();
+        renderFinanceCenter(content);
+      } catch (e) {
+        msg.textContent = e.message;
+        msg.classList.remove('hidden');
+        btn.disabled = false;
+        btn.textContent = 'تسجيل الخصم';
+      }
+    });
+  }
+
+  /* ---------------- Tab: rewards ---------------- */
+  function drawFinRewards(body, d, content) {
+    const bonuses = d.recentBonuses || [];
+    const c = d.counts || {};
+
+    body.innerHTML = `
+      <section class="console-card">
+        <div class="fin-head">
+          <h4>مكافآت الشهر (${bonuses.length})</h4>
+          <button type="button" class="task-mini-btn" id="finAddBonus">+ مكافأة جديدة</button>
+        </div>
+        <div class="fin-split">
+          <div class="fin-split-item"><small>تقييم نظافة — نظيف</small><b>${c.hygieneClean || 0}</b></div>
+          <div class="fin-split-item"><small>تقييم نظافة — غير ملتزم</small><b>${c.hygieneNotClean || 0}</b></div>
+        </div>
+        ${bonuses.length ? `<div class="tasks-list">
+          ${bonuses.map(function(x) {
+            return `<article class="task-row fin-row">
+              <span class="task-row-main">
+                <b>${escapeHtml(x.employeeName)}</b>
+                <small>${escapeHtml(x.reason)}</small>
+                <small class="fin-meta">${escapeHtml(x.date)}</small>
+              </span>
+              <span class="fin-amount is-positive">${formatMoney(x.amount)} ج</span>
+            </article>`;
+          }).join('')}
+        </div>` : '<p class="console-empty">لا توجد مكافآت هذا الشهر.</p>'}
+      </section>
+
+      <section class="console-card">
+        <h4>تقييم النظافة</h4>
+        <p class="console-empty">تقييم النظافة يُسجَّل من تبويب المتابعة اليومية، ويظهر أثره هنا وفي مستحقات المهندس.</p>
+      </section>`;
+
+    body.querySelector('#finAddBonus').addEventListener('click', function() { openBonusForm(content); });
+  }
+
+  function openBonusForm(content) {
+    const d = financeState.data || {};
+    const employees = d.employees || [];
+
+    const panel = managerPanel('مكافأة جديدة', `<form id="finBonusForm" class="manager-staff-form">
+      <label>الموظف<select name="employeeId" required>
+        <option value="">— اختر الموظف —</option>
+        ${employees.map(function(e) { return `<option value="${escapeHtml(e.id)}">${escapeHtml(e.name)}${e.job ? ' — ' + escapeHtml(e.job) : ''}</option>`; }).join('')}
+      </select></label>
+      <label>المبلغ بالجنيه<input name="amount" type="number" min="1" max="100000" step="0.01" required></label>
+      <label>سبب المكافأة<textarea name="reason" rows="3" maxlength="250" required placeholder="اشرح سبب المكافأة..."></textarea></label>
+      <button type="submit" class="primary-btn">تسجيل المكافأة</button>
+      <p id="finBonusMsg" class="inline-message hidden"></p>
+    </form>`);
+
+    const form = panel.querySelector('#finBonusForm');
+    form.addEventListener('submit', async function(ev) {
+      ev.preventDefault();
+      const btn = form.querySelector('button[type="submit"]');
+      const msg = form.querySelector('#finBonusMsg');
+      btn.disabled = true;
+      btn.textContent = 'جارٍ التسجيل...';
+      try {
+        const fd = new FormData(form);
+        const res = await api('reward_bonus_create', {
+          employeeId: fd.get('employeeId'),
+          amount: fd.get('amount'),
+          reason: fd.get('reason'),
+          requestKey: 'bon-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)
+        });
+        if (tg?.showAlert) tg.showAlert(res.duplicate ? 'هذه المكافأة مسجلة بالفعل.' : 'تم تسجيل المكافأة.');
+        closeModal();
+        renderFinanceCenter(content);
+      } catch (e) {
+        msg.textContent = e.message;
+        msg.classList.remove('hidden');
+        btn.disabled = false;
+        btn.textContent = 'تسجيل المكافأة';
+      }
+    });
+  }
+
+  /* ---------------- Tab: employee dues ---------------- */
+  function drawFinDues(body, d) {
+    const rows = d.dues || [];
+    body.innerHTML = `<section class="console-card">
+      <h4>مستحقات المهندسين — ${escapeHtml(d.month || '')}</h4>
+      ${rows.length ? `<div class="report-table">
+        <div class="report-table-head">
+          <span>الموظف</span><span>مكافآت</span><span>خصومات</span><span>معلقة</span><span>الصافي</span>
+        </div>
+        ${rows.map(function(r) {
+          return `<div class="report-table-row">
+            <span>${escapeHtml(r.name)}</span>
+            <span>${formatMoney(r.bonuses)}</span>
+            <span>${formatMoney(r.deductions)}</span>
+            <span>${formatMoney(r.pendingDeductions)}</span>
+            <span class="is-strong">${formatMoney(r.net)}</span>
+          </div>`;
+        }).join('')}
+      </div>` : '<p class="console-empty">لا توجد حركات مالية هذا الشهر.</p>'}
+      <p class="manager-note">الصافي = المكافآت − الخصومات المعتمدة. الخصومات المعلقة معروضة للمتابعة ولا تدخل في الصافي.</p>
+    </section>`;
+  }
+
+  /* ---------------- Tab: reports ---------------- */
+  function drawFinReports(body, d) {
+    const t = d.totals || {};
+    const c = d.counts || {};
+    body.innerHTML = `<section class="console-card">
+      <h4>ملخص مالي — ${escapeHtml(d.month || '')}</h4>
+      <div class="report-totals">
+        ${reportTotal('خصومات معتمدة', formatMoney(t.deductionsApproved), 'جنيه')}
+        ${reportTotal('منها تلقائية', formatMoney(t.deductionsAutomatic), 'جنيه')}
+        ${reportTotal('منها يدوية', formatMoney(t.deductionsManual), 'جنيه')}
+        ${reportTotal('مكافآت', formatMoney(t.bonuses), 'جنيه')}
+        ${reportTotal('الصافي', formatMoney(t.net), 'جنيه')}
+      </div>
+      <div class="fin-split">
+        <div class="fin-split-item"><small>خصومات معلقة</small><b>${c.pendingDeductions || 0}</b></div>
+        <div class="fin-split-item"><small>مكافآت مسجلة</small><b>${c.bonuses || 0}</b></div>
+        <div class="fin-split-item"><small>تقييمات نظافة</small><b>${(c.hygieneClean || 0) + (c.hygieneNotClean || 0)}</b></div>
+      </div>
+      <p class="manager-note">نظام النقاط (٥٢ نقطة) مستقل تمامًا عن هذه الأرقام المالية ولا يتأثر بها.</p>
+    </section>`;
+  }
+
+
+  /* ============================================================
+   * EMPLOYEE HOME — personal summary + tidy sections
+   * The technician sees their own state at a glance instead of
+   * scrolling 22 tiles to find out what needs doing.
+   * ============================================================ */
+
+  async function renderEmployeeOverview() {
+    const host = $('stats');
+    if (!host) return;
+    // The manager workspace hides #stats; the employee view must show it again.
+    host.classList.remove('hidden');
+    try {
+      const d = await api('employee_overview');
+      host.innerHTML = `
+        <div class="emp-overview">
+          <div class="emp-state">
+            <span class="emp-state-dot ${d.attendance.state === 'حاضر الآن' ? 'is-in' : d.attendance.state === 'انتهى دوامك' ? 'is-done' : 'is-off'}"></span>
+            <div>
+              <b>${escapeHtml(d.attendance.state)}</b>
+              <small>${d.attendance.checkinTime ? 'حضور ' + escapeHtml(d.attendance.checkinTime) : 'لم تسجل حضور اليوم'}</small>
+            </div>
+          </div>
+
+          <div class="emp-quick">
+            ${empQuick('مهام مفتوحة', d.tasks.open, d.tasks.overdue ? d.tasks.overdue + ' متأخرة' : '', 'tasks')}
+            ${empQuick('طلبات معلقة', (d.requests.pending || 0) + (d.requests.pendingLeaves || 0), 'بانتظار القرار', 'requests')}
+            ${empQuick('عهد مفتوحة', d.money.openCustody, 'تحتاج تسوية', 'settlement')}
+            ${empQuick('قطع غيار', d.money.partsPending, 'بانتظار الموافقة', 'part-request')}
+          </div>
+
+          ${d.tasks.next && d.tasks.next.length ? `<div class="emp-next">
+            <small>أقرب مهامك</small>
+            ${d.tasks.next.map(function(t) {
+              return `<button type="button" class="emp-next-row" data-go="tasks">
+                <span>${escapeHtml(t.title)}</span>
+                <b>${t.due ? escapeHtml(t.due) : ''}</b>
+              </button>`;
+            }).join('')}
+          </div>` : ''}
+        </div>`;
+
+      host.querySelectorAll('[data-go]').forEach(function(btn) {
+        btn.addEventListener('click', function() { openHomeAction(btn.dataset.go); });
+      });
+    } catch (e) {
+      // Fall back to the simple counters if the overview fails.
+      host.innerHTML = '';
+    }
+  }
+
+  function empQuick(label, value, sub, go) {
+    return `<button type="button" class="emp-quick-item" data-go="${escapeHtml(go)}">
+      <b>${Number(value) || 0}</b>
+      <span>${escapeHtml(label)}</span>
+      ${sub ? `<small>${escapeHtml(sub)}</small>` : ''}
+    </button>`;
+  }
+
+
   $('workspaceSwitch').addEventListener('click', switchWorkspace);
   $('refreshManagerDashboard').addEventListener('click',loadManagerDashboard);
   document.querySelectorAll('[data-manager-module]').forEach(btn=>btn.addEventListener('click',()=>openManagerModule(btn.dataset.managerModule)));
@@ -4328,7 +4679,7 @@
   document.querySelectorAll('[data-home-action]').forEach(b=>b.addEventListener('click',()=>openHomeAction(b.dataset.homeAction)));
   $('myFinanceTab').addEventListener('click',()=>{$('financeCenter').classList.remove('hidden');loadFinanceSummary();});
   $('deductionAdminTab').addEventListener('click',async()=>{switchFinance('deductions');try{await loadFinanceEmployees();await loadPendingDeductions();}catch(e){financeMessage(e.message,true);}});
-  $('rewardAdminTab').addEventListener('click',async()=>{switchFinance('rewards');try{await loadFinanceEmployees();await loadRewardBonusHistory();}catch(e){financeMessage(e.message,true);}});
+  $('rewardAdminTab').addEventListener('click',async()=>{switchFinance('rewards');try{await loadFinanceEmployees();}catch(e){financeMessage(e.message,true);}});
   $('submitDeduction').addEventListener('click',submitDeduction);
   $('saveHygiene').addEventListener('click',saveHygiene);
   $('submitBonus').addEventListener('click',submitBonus);
@@ -4353,7 +4704,7 @@
   document.querySelectorAll('[data-entity]').forEach(btn => btn.addEventListener('click', () => showList(btn.dataset.entity)));
   $('backBtn').addEventListener('click', () => { const title=$('resultTitle').textContent; $('results').classList.add('hidden'); if(['الطلبات العامة','طلبات الأذونات','السلف والعهد'].includes(title)) showRequestPicker(); else closeModal(); });
   // Exposed for automated UI previews; never used by app logic.
-  window.__mhConsole = { render: renderConsoleInto, setTab: function(t){ consoleState.tab = t; }, taskForm: renderTaskCreateForm, taskAdmin: openTaskAdminPanel, procurement: openProcurementPanel };
+  window.__mhConsole = { render: renderConsoleInto, setTab: function(t){ consoleState.tab = t; }, taskForm: renderTaskCreateForm, taskAdmin: openTaskAdminPanel, procurement: openProcurementPanel, finance: openFinanceCenter };
   initTheme();
   start();
 })();
