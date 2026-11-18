@@ -126,10 +126,10 @@
     $('connection').textContent = 'تعذر الاتصال';
   }
 
-  async function api(action, extra = {}) {
+  async function api(action, extra = {}, timeoutMs = 30000) {
     const startedAt = performance.now();
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     let response;
     let result;
 
@@ -467,14 +467,69 @@
     }
   }
 
+  // One overview load at a time: rapid refreshes or workspace switches
+  // used to fire duplicate console_overview calls, each reading every sheet.
+  let managerDashboardLoadPromise = null;
+
   async function loadManagerDashboard() {
     if (workspaceRole !== 'manager') return;
+    if (managerDashboardLoadPromise) return managerDashboardLoadPromise;
     // Enterprise shell is presentation-only: existing module handlers,
     // permission checks, API contracts and data sources remain unchanged.
     initManagerEnterpriseShell();
     const host = $('managerDashboard');
     if (!host) return;
-    await renderConsoleInto(host);
+    managerDashboardLoadPromise = renderConsoleInto(host);
+    try {
+      await managerDashboardLoadPromise;
+    } finally {
+      managerDashboardLoadPromise = null;
+    }
+  }
+
+  // Paints the console from already-fetched overview data. Shared by the
+  // cached first paint and the fresh fetch, so both paths stay identical.
+  function paintConsoleInto(host, slot, data) {
+    consoleState.data = data;
+
+    // openManagerModule() reads this cache for permission checks. The legacy
+    // renderer used to be its only writer; without this every button failed.
+    managerDashboardCache = {
+      date: data.date,
+      month: data.month,
+      role: data.role,
+      modules: data.modules || {},
+      metrics: {
+        activeEmployees: data.staff ? data.staff.active : null,
+        presentNow: data.attendance ? data.attendance.presentNow : null,
+        checkedInToday: data.attendance ? data.attendance.checkedInToday : null,
+        pendingRequests: data.requests ? data.requests.pendingRequests : null,
+        pendingLeaves: data.requests ? data.requests.pendingLeaves : null,
+        pendingCash: data.money ? data.money.pendingAdvances : null,
+        openComplaints: data.requests ? data.requests.openComplaints : null,
+        activeDevices: data.operations ? data.operations.activeDevices : null,
+        pendingAbsences: data.requests ? data.requests.pendingAbsences : null,
+        pendingOvertime: data.requests ? data.requests.pendingOvertime : null
+      },
+      monthlyReport: data.monthlyReport || null
+    };
+
+    drawConsoleInto(slot);
+    groupModuleGrid();
+    applyModulePermissions();
+    // Hide the legacy dashboard chrome: the hero, the "نظرة عامة" header and
+    // the old metric tiles. They would otherwise stack above the console.
+    const legacyHero = host.querySelector('.manager-hero');
+    if (legacyHero) legacyHero.classList.add('hidden');
+    const legacyHead = host.querySelector('.manager-dashboard-head');
+    if (legacyHead) legacyHead.classList.add('hidden');
+    const metrics = $('managerMetrics');
+    if (metrics) metrics.classList.add('hidden');
+    const sectionHead = host.querySelector('.manager-section-head');
+    if (sectionHead) sectionHead.classList.add('hidden');
+    // Keep the legacy date line in sync (it is hidden but useful if shown later).
+    const dateEl = $('managerDashboardDate');
+    if (dateEl) dateEl.textContent = 'اليوم ' + (data.date || '') + ' · ' + (data.month || '');
   }
 
   async function renderConsoleInto(host) {
@@ -490,52 +545,28 @@
       if (modules && modules.parentNode === host) host.insertBefore(slot, modules);
       else host.appendChild(slot);
     }
-    slot.innerHTML = '<div class="manager-loading">جاري تحميل اللوحة...</div>';
+
+    // If the overview was loaded before (workspace switch, refresh after an
+    // action), paint it immediately so the dashboard opens at once, then
+    // refresh in the background. First open still shows the loader.
+    if (consoleState.data) {
+      paintConsoleInto(host, slot, consoleState.data);
+    } else {
+      slot.innerHTML = '<div class="manager-loading">جاري تحميل اللوحة...</div>';
+    }
 
     try {
-      const data = await api('console_overview');
-      consoleState.data = data;
-
-      // openManagerModule() reads this cache for permission checks. The legacy
-      // renderer used to be its only writer; without this every button failed.
-      managerDashboardCache = {
-        date: data.date,
-        month: data.month,
-        role: data.role,
-        modules: data.modules || {},
-        metrics: {
-          activeEmployees: data.staff ? data.staff.active : null,
-          presentNow: data.attendance ? data.attendance.presentNow : null,
-          checkedInToday: data.attendance ? data.attendance.checkedInToday : null,
-          pendingRequests: data.requests ? data.requests.pendingRequests : null,
-          pendingLeaves: data.requests ? data.requests.pendingLeaves : null,
-          pendingCash: data.money ? data.money.pendingAdvances : null,
-          openComplaints: data.requests ? data.requests.openComplaints : null,
-          activeDevices: data.operations ? data.operations.activeDevices : null,
-          pendingAbsences: data.requests ? data.requests.pendingAbsences : null,
-          pendingOvertime: data.requests ? data.requests.pendingOvertime : null
-        },
-        monthlyReport: data.monthlyReport || null
-      };
-
-      drawConsoleInto(slot);
-      groupModuleGrid();
-      applyModulePermissions();
-      // Hide the legacy dashboard chrome: the hero, the "نظرة عامة" header and
-      // the old metric tiles. They would otherwise stack above the console.
-      const legacyHero = host.querySelector('.manager-hero');
-      if (legacyHero) legacyHero.classList.add('hidden');
-      const legacyHead = host.querySelector('.manager-dashboard-head');
-      if (legacyHead) legacyHead.classList.add('hidden');
-      const metrics = $('managerMetrics');
-      if (metrics) metrics.classList.add('hidden');
-      const sectionHead = host.querySelector('.manager-section-head');
-      if (sectionHead) sectionHead.classList.add('hidden');
-      // Keep the legacy date line in sync (it is hidden but useful if shown later).
-      const dateEl = $('managerDashboardDate');
-      if (dateEl) dateEl.textContent = 'اليوم ' + (data.date || '') + ' · ' + (data.month || '');
+      // The overview reads many sheets in one Apps Script run; give it a
+      // longer budget than the default 30s so a cold start does not turn a
+      // slow load into an error.
+      const data = await api('console_overview', {}, 60000);
+      paintConsoleInto(host, slot, data);
     } catch (e) {
-      slot.innerHTML = '<div class="manager-load-error">' + escapeHtml(e.message) + '</div>';
+      // Keep already-painted data on a transient failure; only show the
+      // error screen when there is nothing to show yet.
+      if (!consoleState.data) {
+        slot.innerHTML = '<div class="manager-load-error">' + escapeHtml(e.message) + '</div>';
+      }
     }
   }
 
@@ -3593,7 +3624,7 @@
   async function renderConsole(content) {
     content.innerHTML = '<div class="manager-loading">جاري تحميل بيانات اللوحة...</div>';
     try {
-      const data = await api('console_overview');
+      const data = await api('console_overview', {}, 60000);
       consoleState.data = data;
       drawConsole(content);
     } catch (e) {

@@ -1778,6 +1778,38 @@ function rowsAsObjects_(ss, sheetName) {
     });
 }
 
+/*
+ * Read only the tail of an append-only sheet as objects.
+ * console_overview only ever needs this month and today from the attendance
+ * sheet, which grows every day; converting its whole history on every
+ * dashboard open is the slowest part of that call. Returns the last
+ * maxRows data rows, converted exactly like rowsAsObjects_.
+ */
+function rowsAsObjectsTail_(ss, sheetName, maxRows) {
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error('Missing sheet: ' + sheetName);
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+  const lastCol = sheet.getLastColumn();
+  const startRow = Math.max(2, lastRow - maxRows + 1);
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0]
+    .map(function(header) { return String(header).trim(); });
+  const values = sheet.getRange(startRow, 1, lastRow - startRow + 1, lastCol).getValues();
+  return values
+    .filter(function(row) {
+      return row.some(function(value) {
+        return value !== '' && value !== null;
+      });
+    })
+    .map(function(row) {
+      const object = {};
+      headers.forEach(function(header, index) {
+        object[header] = mhDateCell_(row[index], "yyyy-MM-dd'T'HH:mm:ss");
+      });
+      return object;
+    });
+}
+
 /**
  * Diagnostic: checks required sheet existence without logging employee data.
  */
@@ -5486,6 +5518,29 @@ function mhDateInMonth_(value, month) {
  * Everything the console needs, in one round trip.
  * Sections are gated by the same module map the old dashboard used.
  */
+/*
+ * Attendance for the console overview: only this month and today are ever
+ * used (month stats, today's feed, present-now). Read the last 2500 rows
+ * (about 4 months at ~20 check-in/out rows a day). If the tail does not
+ * reach the 1st of the current month — or the dates cannot be trusted —
+ * fall back to a full read so the month numbers stay correct. Pending
+ * items in other sheets can be old, so this shortcut is attendance-only.
+ */
+function readAttendanceRecent_(ss, month, enabled) {
+  if (!enabled) return [];
+  try {
+    const rows = rowsAsObjectsTail_(ss, MH.SHEETS.attendance, 2500);
+    if (!rows.length) return rows;
+    const earliest = mhDate_(rows[0]['التاريخ']);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(earliest) || earliest > month + '-01') {
+      return rowsAsObjects_(ss, MH.SHEETS.attendance);
+    }
+    return rows;
+  } catch (e) {
+    try { return rowsAsObjects_(ss, MH.SHEETS.attendance); } catch (e2) { return []; }
+  }
+}
+
 function consoleOverviewMini_(profile) {
   const role = String(profile.role || '');
   mhRequireRole_(profile, ['super_admin','admin','finance','supervisor','procurement']);
@@ -5535,7 +5590,7 @@ function consoleOverviewMini_(profile) {
   });
 
   /* ---------------- Attendance ---------------- */
-  const attendanceRows = read(MH.SHEETS.attendance, modules.daily);
+  const attendanceRows = readAttendanceRecent_(ss, month, modules.daily);
   const todayAttendance = attendanceRows.filter(function(r) { return mhDate_(r['التاريخ']) === today; });
   const monthAttendance = attendanceRows.filter(function(r) { return mhDateInMonth_(r['التاريخ'], month); });
 

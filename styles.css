@@ -4537,3 +4537,40 @@ button:disabled{pointer-events:none}
   html{scroll-behavior:auto}
   *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
 }
+
+/* ===================================================================
+   LIGHT MODE — MANAGER ENTERPRISE CONSOLE
+   The enterprise rules above paint the console with hard-coded dark
+   backgrounds. They outrank the generic [data-theme="light"] overrides
+   (higher specificity and later in the file), so in light mode the
+   console stayed dark while the text variables turned dark — dark text
+   on dark surfaces. These rules carry the same enterprise scope plus
+   the data-theme attribute, so they win, and they sit last in the file.
+   =================================================================== */
+[data-theme="light"] body.manager-enterprise .topbar{
+  background:rgba(255,255,255,.92);
+}
+[data-theme="light"] body.manager-enterprise #managerModules{
+  background:linear-gradient(180deg,rgba(255,255,255,.98),rgba(240,246,251,.98));
+}
+[data-theme="light"] body.manager-enterprise .console-head{
+  background:
+    radial-gradient(380px 180px at 0% 0%,rgba(224,124,16,.10),transparent 70%),
+    linear-gradient(115deg,rgba(255,255,255,.96),rgba(240,246,251,.98));
+  border-color:var(--brand-line);
+}
+[data-theme="light"] body.manager-enterprise .console-tabs{
+  background:rgba(255,255,255,.92);
+}
+[data-theme="light"] body.manager-enterprise .console-kpi,
+[data-theme="light"] body.manager-enterprise .console-card{
+  background:linear-gradient(150deg,rgba(15,35,55,.04),rgba(15,35,55,.012));
+  color:var(--text);
+}
+[data-theme="light"] body.manager-enterprise .manager-module-group-grid > .manager-module{
+  background:linear-gradient(150deg,rgba(15,35,55,.035),rgba(15,35,55,.012));
+  color:var(--text);
+}
+[data-theme="light"] body.manager-enterprise .console-tab:hover{
+  background:rgba(15,35,55,.05);
+}
