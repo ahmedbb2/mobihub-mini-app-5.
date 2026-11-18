@@ -4,6 +4,23 @@
   const API_URL = 'https://mobihub-telegram-proxy-v2.ahmedmtarek20.workers.dev/miniapp';
   const $ = (id) => document.getElementById(id);
   const titles = { requests: 'الطلبات العامة', leaves: 'طلبات الأذونات', complaints: 'شكاوي', cash: 'السلف والعهد', deductions: 'خصوماتي', devices: 'حالة الأجهزة', attendance: 'سجل الحضور والانصراف' };
+  // عرض 12 ساعة (AM/PM) — للعرض فقط؛ التخزين والمقارنات تظل 24 ساعة.
+  function formatTime12(value) {
+    const s = String(value || '').trim();
+    const m = s.match(/(\d{1,2}):(\d{2})/);
+    if (!m) return s;
+    let h = Number(m[1]); const suffix = h >= 12 ? 'PM' : 'AM';
+    h = h % 12; if (h === 0) h = 12;
+    return ('0' + h).slice(-2) + ':' + m[2] + ' ' + suffix;
+  }
+  // عرض تاريخ+وقت بصيغة 12 ساعة؛ خلية وقت فقط (1899-12-30) تظهر كوقت فقط.
+  function formatDateTime12(value) {
+    const s = String(value || '').trim();
+    const m = s.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{1,2}):(\d{2})/);
+    if (!m) return formatTime12(s);
+    if (m[1] === '1899' && m[2] === '12' && m[3] === '30') return formatTime12(m[4] + ':' + m[5]);
+    return m[1] + '-' + m[2] + '-' + m[3] + ' ' + formatTime12(m[4] + ':' + m[5]);
+  }
   let initData = '';
   let currentAttendance = null;
   let pendingUniform = false;
@@ -62,7 +79,6 @@
     ACCOUNT_INACTIVE: 'الحساب غير نشط أو غير مصرح له باستخدام النظام.',
     INVALID_GPS_COORDINATES: 'تعذر قراءة موقعك بشكل صحيح. فعّل خدمات الموقع وحاول مرة أخرى.',
     GPS_ACCURACY_NOT_ACCEPTED: 'دقة الموقع الحالية غير كافية. حاول من مكان مفتوح وأعد المحاولة.',
-    NO_ACTIVE_SHIFT_ASSIGNED: 'لا توجد وردية نشطة مسجلة لك اليوم. راجع المسؤول.',
     OPEN_ATTENDANCE_EXISTS: 'لديك حضور مفتوح بالفعل ولم يتم تسجيل الانصراف.',
     ALREADY_CHECKED_IN_TODAY: 'تم تسجيل حضورك اليوم بالفعل.',
     ALREADY_CHECKED_IN: 'تم تسجيل حضورك بالفعل. حدّث حالة الحضور.',
@@ -73,9 +89,9 @@
     FORBIDDEN: 'ليس لديك صلاحية لتنفيذ هذا الإجراء.', EMPLOYEE_ONLY: 'الخدمة متاحة لحسابات المهندسين فقط.',
     INVALID_REQUEST_DETAILS: 'اكتب تفاصيل الطلب (من 5 إلى 1500 حرف).', INVALID_LEAVE_REASON: 'اكتب سبب الإذن (من 5 إلى 1000 حرف).',
     INVALID_LEAVE_DATE: 'اختر تاريخ اليوم أو تاريخًا قادمًا صحيحًا.', DUPLICATE_LEAVE_OVERLAP: 'لديك طلب إذن معلق أو معتمد يتعارض مع هذه الفترة.',
-    NO_ACTIVE_SHIFT_ASSIGNED: 'لا توجد وردية نشطة لك في هذا التاريخ.', LEAVE_OUTSIDE_SHIFT: 'وقت أو مدة الإذن خارج حدود ورديتك.',
+    NO_ACTIVE_SHIFT_ASSIGNED: 'لا توجد وردية نشطة مسجلة لك في هذا التاريخ. راجع المسؤول.', LEAVE_OUTSIDE_SHIFT: 'وقت أو مدة الإذن خارج حدود ورديتك.',
     LEAVE_START_NOT_FUTURE: 'بداية الإذن يجب أن تكون في وقت قادم.', FULL_DAY_LEAVE_AFTER_SHIFT_START: 'لا يمكن طلب إذن يوم كامل بعد بداية الوردية.',
-    LEAVE_CONFLICT_CONFIRMED_ABSENCE: 'لا يمكن اعتماد الإذن بعد تأكيد الغياب لهذا التاريخ.', REQUEST_ALREADY_REVIEWED: 'تمت مراجعة الطلب بالفعل.', LEAVE_ALREADY_REVIEWED: 'تمت مراجعة الإذن بالفعل.', INVALID_REQUEST_TYPE: 'نوع الطلب غير صحيح.', INVALID_LEAVE_TYPE: 'نوع الإذن غير صحيح.', INVALID_LEAVE_DAYS: 'عدد الأيام غير متاح.', INVALID_LEAVE_HOURS: 'مدة الإذن غير متاحة.', INVALID_LEAVE_TIME: 'وقت الإذن غير صحيح.', REQUEST_NOT_FOUND: 'الطلب غير موجود.', LEAVE_NOT_FOUND: 'طلب الإذن غير موجود.', INVALID_DECISION: 'القرار أو رقم السجل غير صحيح.', INVALID_CASH_AMOUNT: '⚠️ المبلغ غير صحيح. اكتب مبلغًا موجبًا بالجنيه، مثال: 750.', INVALID_CASH_PURPOSE: 'اكتب الغرض بشكل أوضح، أو اضغط إلغاء.', CASH_ALREADY_REVIEWED: 'تمت مراجعة طلب السلفة بالفعل.', CASH_PAYOUT_NOT_ALLOWED: 'لا يمكن تسجيل الصرف قبل الموافقة أو تم تسجيل الصرف بالفعل.', CASH_REQUEST_NOT_FOUND: 'طلب السلفة غير موجود.', OPEN_CASH_CUSTODY: 'لا يمكن تسجيل الانصراف قبل إغلاق العهدة المفتوحة وتسوية المبلغ المتبقي.', SHEET_SCHEMA_MISMATCH: 'أعمدة الشيت لا تطابق النسخة المطلوبة. أوقف الاختبار وراجع الأعمدة.',
+    LEAVE_CONFLICT_CONFIRMED_ABSENCE: 'لا يمكن اعتماد الإذن بعد تأكيد الغياب لهذا التاريخ.', REQUEST_ALREADY_REVIEWED: 'تمت مراجعة الطلب بالفعل.', LEAVE_ALREADY_REVIEWED: 'تمت مراجعة الإذن بالفعل.', INVALID_REQUEST_TYPE: 'نوع الطلب غير صحيح.', INVALID_LEAVE_TYPE: 'نوع الإذن غير صحيح.', INVALID_LEAVE_DAYS: 'عدد الأيام غير متاح.', INVALID_LEAVE_HOURS: 'مدة الإذن غير متاحة.', INVALID_LEAVE_TIME: 'وقت الإذن غير صحيح.', REQUEST_NOT_FOUND: 'الطلب غير موجود.', LEAVE_NOT_FOUND: 'طلب الإذن غير موجود.', INVALID_CASH_AMOUNT: '⚠️ المبلغ غير صحيح. اكتب مبلغًا موجبًا بالجنيه، مثال: 750.', INVALID_CASH_PURPOSE: 'اكتب الغرض بشكل أوضح، أو اضغط إلغاء.', CASH_ALREADY_REVIEWED: 'تمت مراجعة طلب السلفة بالفعل.', CASH_PAYOUT_NOT_ALLOWED: 'لا يمكن تسجيل الصرف قبل الموافقة أو تم تسجيل الصرف بالفعل.', CASH_REQUEST_NOT_FOUND: 'طلب السلفة غير موجود.', OPEN_CASH_CUSTODY: 'لا يمكن تسجيل الانصراف قبل إغلاق العهدة المفتوحة وتسوية المبلغ المتبقي.', SHEET_SCHEMA_MISMATCH: 'أعمدة الشيت لا تطابق النسخة المطلوبة. أوقف الاختبار وراجع الأعمدة.',
     INVALID_COMPLAINT: 'راجع تصنيف الشكوى والتفاصيل؛ التفاصيل مطلوبة من 10 إلى 3000 حرف.',
     COMPLAINT_NOT_FOUND: 'الشكوى غير موجودة.',
     COMPLAINT_CLOSED: 'الشكوى مغلقة ولا يمكن إضافة رد جديد.',
@@ -90,13 +106,7 @@
     OVERTIME_UNAVAILABLE: 'خدمة الأوفر تايم غير جاهزة حاليًا. تم الحفاظ على تسجيل الحضور والانصراف.',
     EMPLOYEE_NOT_FOUND: 'المهندس غير موجود أو حسابه غير نشط.',
     INVALID_MONTH: 'صيغة الشهر غير صحيحة.',
-    INVALID_DEDUCTION: 'راجع نوع الخصم والسبب والمبلغ.',
     INVALID_DECISION: 'قرار المراجعة غير صحيح.',
-    DEDUCTION_NOT_FOUND: 'الخصم غير موجود.',
-    DEDUCTION_ALREADY_REVIEWED: 'تمت مراجعة الخصم بالفعل.',
-    INVALID_REWARD_REASON: 'اكتب سبب المكافأة من 3 إلى 250 حرفًا.',
-    INVALID_HYGIENE_RATING: 'بيانات تقييم النظافة غير صحيحة.',
-    HYGIENE_ALREADY_RATED: 'تم تسجيل تقييم النظافة لهذا المهندس في هذا اليوم بالفعل.',
     OVERTIME_WINDOW_NOT_OPEN: 'طلب الأوفر تايم متاح فقط من وقت نهاية الوردية.',
     OVERTIME_WINDOW_EXPIRED: 'انتهت مهلة طلب الأوفر تايم بعد مرور 30 دقيقة من نهاية الوردية.',
     OVERTIME_FIXED_SHIFT_ONLY: 'طلب الأوفر تايم متاح للورديات ذات موعد الانصراف المحدد فقط.',
@@ -155,7 +165,7 @@
     $('attendanceDate').textContent = data.date || 'اليوم';
     const open = !!data.hasOpenAttendance;
     $('attendanceStateTitle').textContent = open ? 'حضورك مسجل — لم تسجل الانصراف' : (data.checkedInToday ? 'تم تسجيل حضورك اليوم' : 'لم يتم تسجيل الحضور اليوم');
-    $('attendanceStateText').textContent = open ? `وقت الحضور: ${data.openAttendance?.time || '—'}` : 'تأكد من تفعيل الموقع قبل تسجيل الحضور أو الانصراف.';
+    $('attendanceStateText').textContent = open ? `وقت الحضور: ${formatTime12(data.openAttendance?.time) || '—'}` : 'تأكد من تفعيل الموقع قبل تسجيل الحضور أو الانصراف.';
     const shift = data.shift;
     $('shiftInfo').textContent = shift ? `الوردية: ${shift.name || shift.id}${shift.isFlexible ? ' · بدون موعد ثابت' : ` · ${shift.startTime || '--:--'} إلى ${shift.endTime || '--:--'} · سماح ${shift.graceMinutes} دقيقة`}` : 'لا توجد وردية محددة لليوم.';
     $('checkinBtn').disabled = open || !!data.checkedInToday || !data.assignment || !shift;
@@ -202,7 +212,7 @@
         const result = await api(action, { location });
         const ot=result.overtime;
         const otNote=ot&&Number(ot.amount)>0?` · أوفر تايم ${ot.minutes} دقيقة / ${ot.amount} جنيه`:ot?.status?` · ${ot.status}`:'';
-        showAttendanceMessage(`تم تسجيل الانصراف بنجاح · ${result.time || ''} · المسافة ${result.distanceMeters} متر.${otNote}`);
+        showAttendanceMessage(`تم تسجيل الانصراف بنجاح · ${formatTime12(result.time) || ''} · المسافة ${result.distanceMeters} متر.${otNote}`);
         $('uniformBox').classList.add('hidden');
         await refreshAttendance();
       }
@@ -592,18 +602,18 @@
     try {
       if(module==='daily') {
         const dash=managerDashboardCache||{}; const [rows,absences,overtimeRows]=await Promise.all([api('list',{entity:'attendance'}),api('list',{entity:'absences'}),api('list',{entity:'overtime'})]);
-        const day=dash.date; const today=rows.filter(r=>String(r['التاريخ']||'').slice(0,10)===day).reverse();
+        const day=dash.date; const today=rows.filter(r=>String(r['التاريخ']||'').slice(0,10)===day);
         const latest={}; today.forEach(r=>{const id=String(r['Chat ID']||'');if(id&&!latest[id])latest[id]=r;});
         const records=Object.values(latest);
         const canReviewAbsence=['super_admin','admin','supervisor'].includes(currentRole);
-        content.innerHTML=`<div class="manager-mini-kpis"><div><b>${records.filter(r=>String(r['النوع'])==='حضور').length}</b><small>حضور مفتوح حسب آخر حركة</small></div><div><b>${absences.filter(r=>/انتظار|مراجعة|معلق/.test(String(r['الحالة']||r['قرار المدير']||''))).length}</b><small>حالات غياب للمراجعة</small></div><div><b>${overtimeRows.filter(r=>String(r['الحالة']||'')==='بانتظار موافقة المدير').length}</b><small>طلبات أوفر تايم معلقة</small></div></div><h4>حركات اليوم</h4>${records.length?records.map(r=>`<article class="manager-row"><b>${escapeHtml(r['اسم الموظف']||'مهندس')}</b><span>${escapeHtml(r['النوع']||'')}</span><small>${escapeHtml(r['الوقت']||'')} · ${escapeHtml(r['حالة الحضور']||'')}</small></article>`).join(''):'<p class="muted">لا توجد حركات حضور مسجلة اليوم.</p>'}<h4>مراجعة الغياب</h4>${absences.slice(-20).reverse().map(r=>{const pending=String(r['الحالة']||'').trim()==='بانتظار مراجعة المدير';return `<article class="manager-row"><b>${escapeHtml(r['اسم الموظف']||'مهندس')}</b><span>${escapeHtml(r['الحالة']||r['قرار المدير']||'غير محدد')}</span><small>${escapeHtml(r['التاريخ']||'')} · موعد الحضور: ${escapeHtml(r['موعد الحضور']||'—')} · اكتشاف: ${escapeHtml(r['وقت اكتشاف الحالة']||'—')}</small>${pending&&canReviewAbsence?`<div class="manager-row-actions"><button type="button" class="primary-btn" data-absence-decision="confirm" data-absence-chat="${escapeHtml(r['Chat ID']||'')}" data-absence-date="${escapeHtml(String(r['التاريخ']||'').slice(0,10))}">تأكيد الغياب</button><button type="button" class="secondary-btn" data-absence-decision="excuse" data-absence-chat="${escapeHtml(r['Chat ID']||'')}" data-absence-date="${escapeHtml(String(r['التاريخ']||'').slice(0,10))}">ليس غائبًا</button></div>`:''}</article>`;}).join('')||'<p class="muted">لا توجد سجلات غياب.</p>'}<h4>آخر طلبات الأوفر تايم</h4>${overtimeRows.slice(-10).reverse().map(r=>`<article class="manager-row"><b>${escapeHtml(r['اسم المهندس']||'مهندس')}</b><span>${escapeHtml(r['الحالة']||'')}</span><small>${escapeHtml(r['تاريخ الوردية']||'')} · ${Number(r['دقائق الأوفر تايم'])||0} دقيقة · ${Number(r['المبلغ بالجنيه'])||0} جنيه</small></article>`).join('')||'<p class="muted">لا توجد طلبات أوفر تايم.</p>'}`;
+        content.innerHTML=`<div class="manager-mini-kpis"><div><b>${records.filter(r=>String(r['النوع'])==='حضور').length}</b><small>حضور مفتوح حسب آخر حركة</small></div><div><b>${absences.filter(r=>/انتظار|مراجعة|معلق/.test(String(r['الحالة']||r['قرار المدير']||''))).length}</b><small>حالات غياب للمراجعة</small></div><div><b>${overtimeRows.filter(r=>String(r['الحالة']||'')==='بانتظار موافقة المدير').length}</b><small>طلبات أوفر تايم معلقة</small></div></div><h4>حركات اليوم</h4>${records.length?records.map(r=>`<article class="manager-row"><b>${escapeHtml(r['اسم الموظف']||'مهندس')}</b><span>${escapeHtml(r['النوع']||'')}</span><small>${escapeHtml(formatTime12(r['الوقت'])||'')} · ${escapeHtml(r['حالة الحضور']||'')}</small></article>`).join(''):'<p class="muted">لا توجد حركات حضور مسجلة اليوم.</p>'}<h4>مراجعة الغياب</h4>${absences.slice(-20).reverse().map(r=>{const pending=String(r['الحالة']||'').trim()==='بانتظار مراجعة المدير';return `<article class="manager-row"><b>${escapeHtml(r['اسم الموظف']||'مهندس')}</b><span>${escapeHtml(r['الحالة']||r['قرار المدير']||'غير محدد')}</span><small>${escapeHtml(r['التاريخ']||'')} · موعد الحضور: ${escapeHtml(formatTime12(r['موعد الحضور'])||'—')} · اكتشاف: ${escapeHtml(formatTime12(r['وقت اكتشاف الحالة'])||'—')}</small>${pending&&canReviewAbsence?`<div class="manager-row-actions"><button type="button" class="primary-btn" data-absence-decision="confirm" data-absence-chat="${escapeHtml(r['Chat ID']||'')}" data-absence-date="${escapeHtml(String(r['التاريخ']||'').slice(0,10))}">تأكيد الغياب</button><button type="button" class="secondary-btn" data-absence-decision="excuse" data-absence-chat="${escapeHtml(r['Chat ID']||'')}" data-absence-date="${escapeHtml(String(r['التاريخ']||'').slice(0,10))}">ليس غائبًا</button></div>`:''}</article>`;}).join('')||'<p class="muted">لا توجد سجلات غياب.</p>'}<h4>آخر طلبات الأوفر تايم</h4>${overtimeRows.slice(-10).reverse().map(r=>`<article class="manager-row"><b>${escapeHtml(r['اسم المهندس']||'مهندس')}</b><span>${escapeHtml(r['الحالة']||'')}</span><small>${escapeHtml(r['تاريخ الوردية']||'')} · ${Number(r['دقائق الأوفر تايم'])||0} دقيقة · ${Number(r['المبلغ بالجنيه'])||0} جنيه</small></article>`).join('')||'<p class="muted">لا توجد طلبات أوفر تايم.</p>'}`;
         content.querySelectorAll('[data-absence-decision]').forEach(btn=>btn.addEventListener('click',async()=>{btn.disabled=true;try{await api('absence_decide',{chatId:btn.dataset.absenceChat,date:btn.dataset.absenceDate,decision:btn.dataset.absenceDecision});if(tg?.showAlert)tg.showAlert(btn.dataset.absenceDecision==='confirm'?'تم تأكيد الغياب وإبلاغ الموظف.':'تم تسجيل القرار: ليس غائبًا.');closeModal();await loadManagerDashboard();openManagerModule('daily');}catch(e){if(tg?.showAlert)tg.showAlert(e.message);btn.disabled=false;}}));
       } else if(module==='shifts') {
         const renderShifts = async () => {
           const [shifts,assignments] = await Promise.all([api('list',{entity:'shifts'}),api('list',{entity:'assignments'})]);
           const today = managerDashboardCache?.date || new Date().toISOString().slice(0,10);
           const activeCount = id => assignments.filter(a => String(a['Shift ID']||'').trim()===id && String(a['الحالة']||'نشط').trim()==='نشط' && (!String(a['تاريخ النهاية']||'').trim() || String(a['تاريخ النهاية']).slice(0,10)>=today)).length;
-          content.innerHTML = `<button type="button" class="primary-btn" id="managerAddShift">＋ إضافة وردية</button><p class="manager-note">إدارة الورديات الثابتة والمرنة. لا يمكن إيقاف وردية مرتبطة بتعيينات سارية أو مستقبلية.</p><div class="manager-list-head"><b>${shifts.length} وردية مسجلة</b></div>${shifts.map(r=>{const id=String(r['Shift ID']||'');const active=String(r['الحالة']||'نشط').trim()==='نشط';const flex=id==='FLEX_NO_FIXED_TIME'||(!String(r['موعد الحضور']||'').trim()&&!String(r['موعد الانصراف']||'').trim());return `<article class="manager-row"><div><b>${escapeHtml(r['اسم الوردية']||id)}</b><small>المعرّف: ${escapeHtml(id)}<br>${flex?'بدون موعد ثابت':`${escapeHtml(r['موعد الحضور']||'—')} إلى ${escapeHtml(r['موعد الانصراف']||'—')}`} · سماح ${Number(r['فترة السماح بالدقائق'])||0} دقيقة<br>التعيينات النشطة: ${activeCount(id)}</small></div><span class="status-pill">${active?'نشط':'غير نشط'}</span><div class="manager-row-actions"><button type="button" class="secondary-btn" data-shift-edit="${escapeHtml(id)}">تعديل</button><button type="button" class="secondary-btn" data-shift-toggle="${escapeHtml(id)}" data-next-status="${active?'غير نشط':'نشط'}">${active?'إيقاف':'تفعيل'}</button></div></article>`;}).join('')||'<p class="muted">لا توجد ورديات مسجلة بعد.</p>'}`;
+          content.innerHTML = `<button type="button" class="primary-btn" id="managerAddShift">＋ إضافة وردية</button><p class="manager-note">إدارة الورديات الثابتة والمرنة. لا يمكن إيقاف وردية مرتبطة بتعيينات سارية أو مستقبلية.</p><div class="manager-list-head"><b>${shifts.length} وردية مسجلة</b></div>${shifts.map(r=>{const id=String(r['Shift ID']||'');const active=String(r['الحالة']||'نشط').trim()==='نشط';const flex=id==='FLEX_NO_FIXED_TIME'||(!String(r['موعد الحضور']||'').trim()&&!String(r['موعد الانصراف']||'').trim());return `<article class="manager-row"><div><b>${escapeHtml(r['اسم الوردية']||id)}</b><small>المعرّف: ${escapeHtml(id)}<br>${flex?'بدون موعد ثابت':`${escapeHtml(formatTime12(r['موعد الحضور'])||'—')} إلى ${escapeHtml(formatTime12(r['موعد الانصراف'])||'—')}`} · سماح ${Number(r['فترة السماح بالدقائق'])||0} دقيقة<br>التعيينات النشطة: ${activeCount(id)}</small></div><span class="status-pill">${active?'نشط':'غير نشط'}</span><div class="manager-row-actions"><button type="button" class="secondary-btn" data-shift-edit="${escapeHtml(id)}">تعديل</button><button type="button" class="secondary-btn" data-shift-toggle="${escapeHtml(id)}" data-next-status="${active?'غير نشط':'نشط'}">${active?'إيقاف':'تفعيل'}</button></div></article>`;}).join('')||'<p class="muted">لا توجد ورديات مسجلة بعد.</p>'}`;
           const reopenShiftCenter = async () => { closeModal(); await loadManagerDashboard(); openManagerModule('shifts'); };
           content.querySelector('#managerAddShift').addEventListener('click',()=>openManagerShiftForm('create',null,reopenShiftCenter));
           content.querySelectorAll('[data-shift-edit]').forEach(btn=>btn.addEventListener('click',()=>openManagerShiftForm('edit',shifts.find(x=>String(x['Shift ID'])===btn.dataset.shiftEdit),reopenShiftCenter))); 
@@ -783,7 +793,7 @@
     if(mode==='assign') {
       const activeShifts=shifts.filter(x=>String(x['الحالة']||'نشط')==='نشط');
       const dayOptions=[['0','الأحد'],['1','الاثنين'],['2','الثلاثاء'],['3','الأربعاء'],['4','الخميس'],['5','الجمعة'],['6','السبت']];
-      html=`<form id="managerStaffForm" class="manager-staff-form"><label>الوردية<select name="shiftId" required>${activeShifts.map(x=>`<option value="${escapeHtml(x['Shift ID'])}">${escapeHtml(x['اسم الوردية']||x['Shift ID'])} · ${escapeHtml(x['موعد الحضور']||'مرن')} - ${escapeHtml(x['موعد الانصراف']||'')}</option>`).join('')}</select></label><label>تاريخ البداية<input name="startDate" type="date" value="${escapeHtml(managerDashboardCache?.date || new Date().toISOString().slice(0,10))}" required></label><label>تاريخ النهاية (اختياري)<input name="endDate" type="date"></label><fieldset class="manager-workdays"><legend>أيام العمل</legend><div>${dayOptions.map(([v,n])=>`<label><input type="checkbox" name="workDays" value="${v}" ${v!=='5'?'checked':''}> ${n}</label>`).join('')}</div><small>الوردية الثابتة لا تُسند يوم الجمعة. الوردية المرنة يمكن إسنادها لأي يوم.</small></fieldset><button class="primary-btn" type="submit">حفظ تعيين الوردية</button></form>`;
+      html=`<form id="managerStaffForm" class="manager-staff-form"><label>الوردية<select name="shiftId" required>${activeShifts.map(x=>`<option value="${escapeHtml(x['Shift ID'])}">${escapeHtml(x['اسم الوردية']||x['Shift ID'])} · ${escapeHtml(formatTime12(x['موعد الحضور'])||'مرن')} - ${escapeHtml(formatTime12(x['موعد الانصراف'])||'')}</option>`).join('')}</select></label><label>تاريخ البداية<input name="startDate" type="date" value="${escapeHtml(managerDashboardCache?.date || new Date().toISOString().slice(0,10))}" required></label><label>تاريخ النهاية (اختياري)<input name="endDate" type="date"></label><fieldset class="manager-workdays"><legend>أيام العمل</legend><div>${dayOptions.map(([v,n])=>`<label><input type="checkbox" name="workDays" value="${v}" ${v!=='5'?'checked':''}> ${n}</label>`).join('')}</div><small>الوردية الثابتة لا تُسند يوم الجمعة. الوردية المرنة يمكن إسنادها لأي يوم.</small></fieldset><button class="primary-btn" type="submit">حفظ تعيين الوردية</button></form>`;
     } else {
       html=`<form id="managerStaffForm" class="manager-staff-form">${mode==='create'?'<label>Telegram Chat ID<input name="chatId" inputmode="numeric" pattern="[0-9]{5,20}" required></label>':''}<label>اسم المهندس<input name="name" maxlength="80" value="${escapeHtml(e['اسم الموظف']||'')}" required></label><label>الوظيفة<input name="job" maxlength="80" value="${escapeHtml(e['الوظيفة']||'مهندس')}" required></label><label>رقم الهاتف<input name="phone" maxlength="30" value="${escapeHtml(e['رقم الهاتف']||'')}"></label><button class="primary-btn" type="submit">${mode==='create'?'إضافة الحساب':'حفظ التعديلات'}</button></form>`;
     }
@@ -867,14 +877,14 @@
       const rows = await api('list', { entity });
       if (!rows.length) { $('resultBody').textContent = 'لا توجد سجلات.'; return; }
       if(entity==='complaints'){
-        $('resultBody').innerHTML=rows.map(row=>`<article class="record complaint-card"><strong>${escapeHtml(row['رقم الشكوى']||'شكوى')} · ${escapeHtml(row['نوع الشكوى']||'')}</strong><small class="record-meta">${escapeHtml(row['الحالة']||'جديدة')} · ${escapeHtml(row['التاريخ والوقت']||'')}</small><p>${escapeHtml(row['تفاصيل الشكوى']||'')}</p><button class="secondary-btn" data-open-complaint="${escapeHtml(row['رقم الشكوى']||'')}">فتح المحادثة</button></article>`).join('');
+        $('resultBody').innerHTML=rows.map(row=>`<article class="record complaint-card"><strong>${escapeHtml(row['رقم الشكوى']||'شكوى')} · ${escapeHtml(row['نوع الشكوى']||'')}</strong><small class="record-meta">${escapeHtml(row['الحالة']||'جديدة')} · ${escapeHtml(formatDateTime12(row['التاريخ والوقت'])||'')}</small><p>${escapeHtml(row['تفاصيل الشكوى']||'')}</p><button class="secondary-btn" data-open-complaint="${escapeHtml(row['رقم الشكوى']||'')}">فتح المحادثة</button></article>`).join('');
         $('resultBody').querySelectorAll('[data-open-complaint]').forEach(b=>b.addEventListener('click',()=>openComplaint(b.dataset.openComplaint)));
         return;
       }
       $('resultBody').innerHTML = rows.map(row => {
         const title = row['رقم الطلب'] || row['رقم الخصم'] || row['رقم الشكوى'] || row['نوع الطلب'] || row['نوع الإذن'] || row['اسم الجهاز'] || 'سجل';
         const status = row['حالة العهدة'] || row['حالة التسوية'] || row['حالة الصرف'] || row['الحالة'] || row['القرار'] || 'قيد المراجعة';
-        const date = row['التاريخ والوقت'] || row['تاريخ الإرسال'] || row['تاريخ الواقعة'] || row['تاريخ الإذن'] || row['تاريخ الاستلام'] || '';
+        const date = formatDateTime12(row['التاريخ والوقت'] || row['تاريخ الإرسال'] || row['تاريخ الواقعة'] || row['تاريخ الإذن'] || row['تاريخ الاستلام'] || '');
         const amount = row['المبلغ المعتمد بالجنيه'] || row['المبلغ المطلوب بالجنيه'] || row['المبلغ بالجنيه'];
         const details = row['التفاصيل'] || row['السبب'] || row['الغرض'] || row['تفاصيل الشكوى'] || row['المشكلة المسجلة'] || '';
         const canSettle = entity === 'cash' && row['حالة الصرف'] === 'تم الصرف' && ['عهدة مفتوحة','مرفوضة - تحتاج مراجعة'].includes(String(row['حالة العهدة']||''));
@@ -1592,7 +1602,7 @@
         <article class="review-item">
           <strong>💵 طلب سلفة · ${escapeHtml(r['اسم الموظف']||'')}</strong>
           <p>المبلغ: ${escapeHtml(r['مبلغ السلفة بالجنيه']||r['التفاصيل']||'—')} جنيه<br>
-          التاريخ: ${escapeHtml(r['التاريخ والوقت']||'')}<br>الحالة: ${escapeHtml(r['القرار']||'قيد الانتظار')}</p>
+          التاريخ: ${escapeHtml(formatDateTime12(r['التاريخ والوقت'])||'')}<br>الحالة: ${escapeHtml(r['القرار']||'قيد الانتظار')}</p>
           <div class="review-actions">
             <button class="primary-btn" data-advance-row="${r.__row}" data-decision="مقبول">موافقة على السلفة</button>
             <button class="secondary-btn" data-advance-row="${r.__row}" data-decision="مرفوض">رفض السلفة</button>
@@ -1602,7 +1612,7 @@
       custodyRows.forEach(r=>{
         const status=String(r['الحالة']||''), payout=String(r['حالة الصرف']||'');
         const custody=String(r['حالة العهدة']||''), settlement=String(r['حالة التسوية']||'');
-        const base=`<p>${escapeHtml(r['اسم الموظف']||'')} · ${escapeHtml(r['المبلغ المطلوب بالجنيه']||'—')} جنيه<br>${escapeHtml(r['التاريخ والوقت']||'')}<br>الغرض: ${escapeHtml(r['الغرض']||'—')}</p>`;
+        const base=`<p>${escapeHtml(r['اسم الموظف']||'')} · ${escapeHtml(r['المبلغ المطلوب بالجنيه']||'—')} جنيه<br>${escapeHtml(formatDateTime12(r['التاريخ والوقت'])||'')}<br>الغرض: ${escapeHtml(r['الغرض']||'—')}</p>`;
         if(status==='قيد المراجعة') custodyCards.push(`<article class="review-item"><strong>🧾 طلب سحب / عهدة · ${escapeHtml(r['رقم الطلب']||'')}</strong>${base}<div class="review-actions"><button class="primary-btn" data-cash-row="${r.__row}" data-cash-decision="مقبول">موافقة</button><button class="secondary-btn" data-cash-row="${r.__row}" data-cash-decision="مرفوض">رفض</button></div></article>`);
         if(status==='تمت الموافقة'&&payout!=='تم الصرف') custodyCards.push(`<article class="review-item"><strong>🧾 عهدة بانتظار الصرف · ${escapeHtml(r['رقم الطلب']||'')}</strong>${base}<div class="review-actions"><button class="primary-btn" data-cash-row="${r.__row}" data-cash-decision="تم الصرف">تأكيد صرف العهدة</button></div></article>`);
         if(settlement==='بانتظار مراجعة التسوية') custodyCards.push(`<article class="review-item"><strong>🧾 مراجعة تسوية عهدة · ${escapeHtml(r['رقم الطلب']||'')}</strong><p>${escapeHtml(r['اسم الموظف']||'')}<br>المعتمد: ${escapeHtml(r['المبلغ المعتمد بالجنيه']||'—')} جنيه<br>المصروف: ${escapeHtml(r['المصروف الفعلي بالجنيه']||'—')} جنيه<br>المطلوب إرجاعه: ${escapeHtml(r['المبلغ المطلوب إرجاعه بالجنيه']||'—')} جنيه<br>ملاحظات: ${escapeHtml(r['ملاحظات التسوية']||'—')}</p><div class="review-actions"><button class="primary-btn" data-settle-review="${r.__row}" data-settle-decision="مقبول">اعتماد التسوية</button><button class="secondary-btn" data-settle-review="${r.__row}" data-settle-decision="مرفوض">إرجاع للتصحيح</button></div></article>`);
@@ -1673,8 +1683,8 @@
     try { const [requests,leaves]=await Promise.all([api('list',{entity:'requests'}),api('list',{entity:'leaves'})]);
       const pendingR=requests.filter(r=>(r['القرار']||'')==='قيد الانتظار'); const pendingL=leaves.filter(r=>(r['الحالة']||'')==='بانتظار مراجعة المدير');
       const cards=[];
-      pendingR.forEach(r=>cards.push(`<article class="review-item"><strong>طلب مهندس · ${escapeHtml(r['نوع الطلب']||'')}</strong><p>${escapeHtml(r['اسم الموظف']||'')}\n${escapeHtml(r['التفاصيل']||'')}\n${escapeHtml(r['التاريخ والوقت']||'')}</p><div class="review-actions"><button class="primary-btn" data-decide-request="${r.__row||''}" data-decision="مقبول">موافقة</button><button class="secondary-btn" data-decide-request="${r.__row||''}" data-decision="مرفوض">رفض</button></div></article>`));
-      pendingL.forEach(r=>cards.push(`<article class="review-item"><strong>إذن · ${escapeHtml(r['نوع الإذن']||'')}</strong><p>${escapeHtml(r['اسم الموظف']||'')} · ${escapeHtml(r['تاريخ الإذن']||'')} ${escapeHtml(r['تاريخ نهاية الإذن']||'')}\n${escapeHtml(r['من الساعة']||'')} إلى ${escapeHtml(r['إلى الساعة']||'')}\n${escapeHtml(r['السبب']||'')}\n${escapeHtml(r['رقم الطلب']||'')}</p><div class="review-actions"><button class="primary-btn" data-decide-leave="${r.__row||''}" data-decision="مقبول">موافقة</button><button class="secondary-btn" data-decide-leave="${r.__row||''}" data-decision="مرفوض">رفض</button></div></article>`));
+      pendingR.forEach(r=>cards.push(`<article class="review-item"><strong>طلب مهندس · ${escapeHtml(r['نوع الطلب']||'')}</strong><p>${escapeHtml(r['اسم الموظف']||'')}\n${escapeHtml(r['التفاصيل']||'')}\n${escapeHtml(formatDateTime12(r['التاريخ والوقت'])||'')}</p><div class="review-actions"><button class="primary-btn" data-decide-request="${r.__row||''}" data-decision="مقبول">موافقة</button><button class="secondary-btn" data-decide-request="${r.__row||''}" data-decision="مرفوض">رفض</button></div></article>`));
+      pendingL.forEach(r=>cards.push(`<article class="review-item"><strong>إذن · ${escapeHtml(r['نوع الإذن']||'')}</strong><p>${escapeHtml(r['اسم الموظف']||'')} · ${escapeHtml(r['تاريخ الإذن']||'')} ${escapeHtml(r['تاريخ نهاية الإذن']||'')}\n${escapeHtml(formatTime12(r['من الساعة'])||'')} إلى ${escapeHtml(formatTime12(r['إلى الساعة'])||'')}\n${escapeHtml(r['السبب']||'')}\n${escapeHtml(r['رقم الطلب']||'')}</p><div class="review-actions"><button class="primary-btn" data-decide-leave="${r.__row||''}" data-decision="مقبول">موافقة</button><button class="secondary-btn" data-decide-leave="${r.__row||''}" data-decision="مرفوض">رفض</button></div></article>`));
       box.innerHTML=cards.length?cards.join(''):'لا توجد طلبات أو أذونات معلقة.';
       box.querySelectorAll('[data-decide-request]').forEach(b=>b.addEventListener('click',()=>decide('request_decide',b.dataset.decideRequest,b.dataset.decision)));
       box.querySelectorAll('[data-decide-leave]').forEach(b=>b.addEventListener('click',()=>decide('leave_decide',b.dataset.decideLeave,b.dataset.decision)));
