@@ -128,19 +128,52 @@
 
   async function api(action, extra = {}) {
     const startedAt = performance.now();
-    const response = await fetch(API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ initData, workspaceRole, action, ...extra })
-    });
-    const result = await response.json();
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    let response;
+    let result;
+
+    try {
+      response = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        // Keep authentication and routing fields authoritative; caller data
+        // must never be able to replace initData, workspaceRole or action.
+        body: JSON.stringify({ ...extra, initData, workspaceRole, action }),
+        signal: controller.signal
+      });
+
+      const raw = await response.text();
+      try {
+        result = raw ? JSON.parse(raw) : null;
+      } catch (parseError) {
+        const elapsedMs = Math.round(performance.now() - startedAt);
+        const err = new Error('استجابة الخادم غير مفهومة. تحقق من اتصال الخدمة وحاول مرة أخرى.');
+        err.code = 'INVALID_SERVER_RESPONSE';
+        err.httpStatus = response.status;
+        err.elapsedMs = elapsedMs;
+        throw err;
+      }
+    } catch (networkError) {
+      if (networkError && networkError.name === 'AbortError') {
+        const err = new Error('استغرق الاتصال أكثر من 30 ثانية. تحقق من الإنترنت وحاول مرة أخرى.');
+        err.code = 'API_TIMEOUT';
+        throw err;
+      }
+      throw networkError;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
     const elapsedMs = Math.round(performance.now() - startedAt);
     if (elapsedMs >= 700) console.info(`[MobiHub API] ${action}: ${elapsedMs}ms`);
-    if (!response.ok || !result.ok) {
-      const code = result.error || 'تعذر تنفيذ الطلب';
-      const err = new Error(errorMessages[code] || code);
+
+    if (!response.ok || !result || result.ok !== true) {
+      const code = result && result.error ? String(result.error) : `HTTP_${response.status || 0}`;
+      const err = new Error(errorMessages[code] || (result && result.error) || 'تعذر تنفيذ الطلب. حاول مرة أخرى.');
       err.code = code;
-      err.requestId = result.requestId;
+      err.requestId = result && result.requestId;
+      err.httpStatus = response.status;
       err.elapsedMs = elapsedMs;
       throw err;
     }

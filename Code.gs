@@ -1,5 +1,5 @@
 /**
- * MobiHub Mini App API — V1.10.7 Overtime & Absence Review
+ * MobiHub Mini App API — V1.12.0
  * Separate Apps Script project for the TEST spreadsheet.
  *
  * Required Script Properties:
@@ -12,7 +12,7 @@
 const MH = Object.freeze({
   VERSION: '1.12.0',
   TZ: 'Africa/Cairo',
-  AUTH_MAX_AGE_SECONDS: 300,
+  AUTH_MAX_AGE_SECONDS: 86400, // 24h: Telegram's recommended max. 300s logged users out after 5 min open.
   SHEETS: {
     employees: 'الموظفين',
     managers: 'المديرين',
@@ -26,7 +26,6 @@ const MH = Object.freeze({
     shifts: 'الورديات',
     assignments: 'جدول الورديات',
     absences: 'مراجعة الغياب',
-    leaves: 'طلبات الأذونات',
     deductions: 'سجل الخصومات',
     deductionSettings: 'إعدادات الخصومات',
     rewardBonus: 'المكافآت الإضافية',
@@ -559,7 +558,10 @@ function validateTelegramInitData_(initData) {
   const authDate = Number(params.auth_date || 0);
   const now = Math.floor(Date.now() / 1000);
 
-  if (!authDate || Math.abs(now - authDate) > MH.AUTH_MAX_AGE_SECONDS) {
+  // Reject missing, malformed, materially future-dated, and expired payloads.
+  // A small clock-skew allowance avoids rejecting valid Telegram clients.
+  if (!Number.isSafeInteger(authDate) || authDate <= 0 ||
+      authDate > now + 30 || now - authDate > MH.AUTH_MAX_AGE_SECONDS) {
     return null;
   }
 
@@ -899,11 +901,11 @@ function managerDashboard_(profile) {
   const recentComplaints = modules.requests ? openComplaints.slice(-5).reverse().map(r => ({
     id:String(r['رقم الشكوى']||''), employee:String(r['اسم الموظف']||''),
     type:String(r['نوع الشكوى']||''), status:String(r['الحالة']||''),
-    date:String(r['التاريخ والوقت']||''), details:String(r['تفاصيل الشكوى']||'').slice(0,180)
+    date:mhDateTime12_(r['التاريخ والوقت']), details:String(r['تفاصيل الشكوى']||'').slice(0,180)
   })) : [];
   const todayRows = modules.daily ? Object.keys(latest).map(id => ({
     chatId:id, name:String(latest[id]['اسم الموظف']||''),
-    state:String(latest[id]['النوع']||''), time:String(latest[id]['الوقت']||''),
+    state:String(latest[id]['النوع']||''), time:mhTime12_(latest[id]['الوقت']),
     attendanceStatus:String(latest[id]['حالة الحضور']||'')
   })) : [];
   return {
@@ -936,12 +938,18 @@ function managerCreateEmployee_(profile, body) {
   const id=String(body.chatId||'').trim(), name=String(body.name||'').trim();
   const job=String(body.job||'مهندس').trim(), phone=String(body.phone||'').trim();
   if(!/^\d{5,20}$/.test(id)||name.length<2||name.length>80||job.length<2||job.length>80||phone.length>30) throw new Error('INVALID_EMPLOYEE_DATA');
-  const sh=mhSheet_(MH.SHEETS.employees); mhAssertHeaders_(sh,MH_MANAGER_STAFF.EMPLOYEE_HEADERS);
-  const rows=mhRowsObjects_(sh);
-  if(rows.some(r=>String(r['Chat ID']||'').trim()===id)) throw new Error('EMPLOYEE_ALREADY_EXISTS');
+
+  // Duplicate check and append must be one critical section. Checking before
+  // acquiring the lock allowed two simultaneous requests to create the same ID.
   const lock=LockService.getScriptLock();lock.waitLock(15000);
-  try { sh.appendRow([id,name,job,phone,'نشط','نشط']); return {created:true,chatId:id,name:name}; }
-  finally {lock.releaseLock();}
+  try {
+    const sh=mhSheet_(MH.SHEETS.employees);
+    mhAssertHeaders_(sh,MH_MANAGER_STAFF.EMPLOYEE_HEADERS);
+    const rows=mhRowsObjects_(sh);
+    if(rows.some(r=>String(r['Chat ID']||'').trim()===id)) throw new Error('EMPLOYEE_ALREADY_EXISTS');
+    sh.appendRow([id,name,job,phone,'نشط','نشط']);
+    return {created:true,chatId:id,name:name};
+  } finally {lock.releaseLock();}
 }
 function managerFindEmployeeRow_(chatId) {
   const sh=mhSheet_(MH.SHEETS.employees);mhAssertHeaders_(sh,MH_MANAGER_STAFF.EMPLOYEE_HEADERS);
@@ -1110,12 +1118,12 @@ function employeeMyShifts_(profile) {
     const endDate = mhIsoDate_(a['تاريخ النهاية']) || '';
     return {
       shiftId:id, name:String(shift['اسم الوردية'] || id),
-      startTime:flexible?'':mhTime_(shift['موعد الحضور']), endTime:flexible?'':mhTime_(shift['موعد الانصراف']),
+      startTime:flexible?'':mhTime12_(shift['موعد الحضور']), endTime:flexible?'':mhTime12_(shift['موعد الانصراف']),
       graceMinutes:flexible?0:Number(shift['فترة السماح بالدقائق'] || 15), flexible:flexible,
       startDate:startDate, endDate:endDate, days:days, dayNames:days.map(d=>dayNames[d]),
       current:(!startDate || startDate <= today) && (!endDate || endDate >= today) && days.includes(todayDay)
     };
-  }).filter(Boolean).sort((a,b)=>String(a.startDate).localeCompare(String(b.startDate)));
+  }).filter(Boolean).sort((a,b)=>String(b.startDate).localeCompare(String(a.startDate)));
   const current = items.filter(x => x.current);
   return {today:today, assignments:items, current:current, dayNames:dayNames};
 }
@@ -1593,6 +1601,15 @@ function mhValidateLocation_(location) {
   return { lat: lat, lon: lon, accuracy: accuracy, distance: distance };
 }
 
+// خلية وقت فقط في شيت جوجل تاريخها 1899-12-30؛ نعرضها كوقت فقط بدل 1899.
+function mhDateCell_(value, format) {
+  if (!(value instanceof Date)) return value;
+  if (Utilities.formatDate(value, MH.TZ, 'yyyy-MM-dd') === '1899-12-30') {
+    return Utilities.formatDate(value, MH.TZ, 'HH:mm');
+  }
+  return Utilities.formatDate(value, MH.TZ, format);
+}
+
 function mhRows_(ss, sheetName) {
   const sheet = ss.getSheetByName(sheetName);
   if (!sheet) throw new Error('MISSING_SHEET:' + sheetName);
@@ -1601,7 +1618,7 @@ function mhRows_(ss, sheetName) {
   const headers = values[0].map(v => String(v).trim());
   return values.slice(1).filter(row => row.some(v => v !== '' && v !== null)).map(row => {
     const obj = {};
-    headers.forEach((h, i) => obj[h] = row[i] instanceof Date ? Utilities.formatDate(row[i], MH.TZ, 'yyyy-MM-dd HH:mm:ss') : row[i]);
+    headers.forEach((h, i) => obj[h] = mhDateCell_(row[i], 'yyyy-MM-dd HH:mm:ss'));
     return obj;
   });
 }
@@ -1661,6 +1678,16 @@ function mhDate_(value) {
   return m ? m[3] + '-' + ('0'+m[2]).slice(-2) + '-' + ('0'+m[1]).slice(-2) : s;
 }
 function mhTime_(value) { const s = String(value || '').trim(); const m=s.match(/(\d{1,2}):(\d{2})/); return m ? ('0'+m[1]).slice(-2)+':'+m[2] : s; }
+// عرض 12 ساعة (AM/PM) — للعرض فقط؛ التخزين والمقارنات تظل 24 ساعة.
+function mhTime12_(value) { const t = mhTime_(value); const m = t.match(/^(\d{1,2}):(\d{2})$/); if (!m) return String(value || ''); let h = Number(m[1]); const suffix = h >= 12 ? 'PM' : 'AM'; h = h % 12; if (h === 0) h = 12; return ('0' + h).slice(-2) + ':' + m[2] + ' ' + suffix; }
+// عرض تاريخ+وقت بصيغة 12 ساعة؛ خلية وقت فقط (1899-12-30) تظهر كوقت فقط.
+function mhDateTime12_(value) {
+  const s = String(value || '').trim();
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{1,2}):(\d{2})/);
+  if (!m) return mhTime12_(value);
+  if (m[1] === '1899' && m[2] === '12' && m[3] === '30') return mhTime12_(m[4] + ':' + m[5]);
+  return m[1] + '-' + m[2] + '-' + m[3] + ' ' + mhTime12_(m[4] + ':' + m[5]);
+}
 function mhMinutes_(value) { const p=mhTime_(value).split(':'); return p.length<2 ? 0 : Number(p[0])*60+Number(p[1]); }
 function mhUniformKey_(chatId) { return 'MH_MINI_UNIFORM_' + String(chatId); }
 
@@ -1744,13 +1771,7 @@ function rowsAsObjects_(ss, sheetName) {
 
       headers.forEach(function(header, index) {
         const value = row[index];
-        object[header] = value instanceof Date
-          ? Utilities.formatDate(
-              value,
-              MH.TZ,
-              "yyyy-MM-dd'T'HH:mm:ss"
-            )
-          : value;
+        object[header] = mhDateCell_(value, "yyyy-MM-dd'T'HH:mm:ss");
       });
 
       return object;
@@ -1983,7 +2004,7 @@ function createCashRequest_(profile, body) {
     let employeeNotified = false;
     try { mhSendTelegramMini_(profile.chatId,employeeMessage,{remove_keyboard:true}); employeeNotified=true; }
     catch(e) { console.error('Advance employee confirmation failed: '+e); }
-    const adminMessage = '💵 طلب سلفة جديد\n━━━━━━━━━━━━━━━━━━\n🆔 رقم الطلب: '+requestId+'\n👤 الموظف: '+profile.name+'\n💰 المبلغ المطلوب: '+details+'\n📅 '+mhNow_()+'\n⏳ الحالة: قيد المراجعة\n\nافتح لوحة MobiHub لمراجعة الطلب.';
+    const adminMessage = '💵 طلب سلفة جديد\n━━━━━━━━━━━━━━━━━━\n🆔 رقم الطلب: '+requestId+'\n👤 الموظف: '+profile.name+'\n💰 المبلغ المطلوب: '+details+'\n📅 '+mhDateTime12_(mhNow_())+'\n⏳ الحالة: قيد المراجعة\n\nافتح لوحة MobiHub لمراجعة الطلب.';
     const notification = mhNotifyRequestAdminsMini_(adminMessage,requestId);
     return {submitted:true,requestId:requestId,row:rowNum,status:MH_REQUESTS.PENDING_REQUEST,message:'تم إرسال طلب السلفة إلى الإدارة للمراجعة.',employeeNotified:employeeNotified,adminNotificationsSent:notification.sent,adminNotificationsFailed:notification.failed};
   } finally { lock.releaseLock(); }
@@ -2882,10 +2903,18 @@ function managerCreateAdmin_(profile,body) {
   mhRequireRole_(profile,['super_admin']);
   const id=String(body.chatId||'').trim(), name=String(body.name||'').trim(), role=String(body.role||'Admin').trim();
   if(!/^\d{5,20}$/.test(id)||name.length<2||name.length>80||MH_ADMIN_ROLES.indexOf(role)<0) throw new Error('INVALID_MANAGER_DATA');
-  const sh=mhEnsureSheet_('المديرين',MH_MANAGER_HEADERS), rows=mhRowsObjects_(sh);
-  if(rows.some(r=>String(r['Chat ID']).trim()===id)) throw new Error('MANAGER_ALREADY_EXISTS');
-  sh.appendRow([id,name,role,'نشط',profile.chatId,mhStamp_(),mhStamp_()]);
-  try{mhTelegramSend_(id,'🛡️ تم تفعيل صلاحية '+role+' في نظام MobiHub. أرسل /start لفتح لوحة الإدارة.');}catch(e){}
+
+  // Serialize duplicate check + insert to prevent duplicate manager records.
+  const lock=LockService.getScriptLock();lock.waitLock(15000);
+  try {
+    const sh=mhEnsureSheet_('المديرين',MH_MANAGER_HEADERS);
+    const rows=mhRowsObjects_(sh);
+    if(rows.some(r=>String(r['Chat ID']||'').trim()===id)) throw new Error('MANAGER_ALREADY_EXISTS');
+    sh.appendRow([id,name,role,'نشط',profile.chatId,mhStamp_(),mhStamp_()]);
+  } finally {lock.releaseLock();}
+
+  // Notify only after the sheet transaction has completed and the lock released.
+  try{mhTelegramSend_(id,'🛡️ تم تفعيل صلاحية '+role+' في نظام MobiHub. أرسل /start لفتح لوحة الإدارة.');}catch(e){console.error('Manager welcome notification failed: '+e);}
   return {created:true,chatId:id,name:name,role:role};
 }
 function managerUpdateAdmin_(profile,body) {
