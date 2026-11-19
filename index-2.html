@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="ar" dir="rtl" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#080D12">
+  <title>MobiHub | مركز الصيانة</title>
+
+  <!-- أيقونة داخلية SVG (بديل خفيف للـ base64 الأصلي). -->
+  <link rel="icon" type="image/webp" href="logo.webp">
+  <link rel="apple-touch-icon" href="logo.webp">
+
+  <link rel="stylesheet" href="styles-2.css">
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand-lockup">
+        <img class="brand-logo" src="logo.webp" alt="MobiHub" width="44" height="44" decoding="async">
+        <div><strong>MobiHub</strong><small>مركز الصيانة</small></div>
+      </div>
+      <div class="topbar-meta">
+        <span id="connection" class="status"><i></i> جاري الاتصال</span>
+        <button id="workspaceSwitch" class="workspace-switch hidden" type="button">لوحة المدير</button>
+        <button id="themeToggle" class="theme-toggle" type="button" aria-label="التبديل إلى الوضع الفاتح" aria-pressed="false">☀</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="welcome">
+        <div>
+          <p class="eyebrow" id="welcomeEyebrow">إدارة وتشغيل مركز الصيانة</p>
+          <h1 id="userName">جاري تحميل حسابك...</h1>
+          <p id="userRole" class="muted">يتم التحقق من حساب Telegram</p>
+        </div>
+        <div class="welcome-mark" aria-hidden="true">MH</div>
+      </section>
+
+      <nav id="workspaceNav" class="workspace-nav hidden" aria-label="التنقل بين الأقسام"></nav>
+
+      <div id="employeeWorkspace" class="workspace-layout hidden"></div>
+
+      <div id="managerWorkspace" class="workspace-layout manager-workspace hidden">
+        <section id="managerDashboard" class="manager-dashboard">
+          <div class="manager-hero">
+            <div><small>MOBIHUB MANAGEMENT</small><h2>لوحة الإدارة والتشغيل</h2><p>متابعة المركز والمهندسين والطلبات من مكان واحد</p></div>
+            <span class="manager-hero-mark">MH</span>
+          </div>
+
+          <div class="manager-dashboard-head">
+            <div><h3>نظرة عامة</h3><p id="managerDashboardDate">جاري تحميل بيانات اليوم...</p></div>
+            <button id="refreshManagerDashboard" class="text-btn" type="button">تحديث</button>
+          </div>
+
+          <div id="managerMetrics" class="manager-metrics"><div class="manager-loading">جاري تحميل مؤشرات الإدارة...</div></div>
+
+          <div class="manager-section-head">
+            <div><h3>مركز الإدارة</h3><p>الأقسام المتاحة حسب صلاحيتك</p></div>
+          </div>
+
+          <div id="managerModules" class="manager-modules">
+            <div class="manager-module-group-label">التشغيل اليومي</div>
+            <button class="manager-module" data-manager-module="daily"><span>◷</span><b>المتابعة اليومية</b><small>الحضور والغياب والورديات</small></button>
+            <button class="manager-module" data-manager-module="shifts"><span>◷</span><b>إدارة الورديات</b><small>إنشاء الورديات وتعديلها وتفعيلها</small></button>
+            <button class="manager-module" data-manager-module="requests"><span>▤</span><b>طلبات المهندسين</b><small>الطلبات والأذونات والشكاوى</small></button>
+
+            <div class="manager-module-group-label">الفريق والمهام</div>
+            <button class="manager-module" data-manager-module="staff"><span>♙</span><b>شؤون المهندسين</b><small>دليل المهندسين والحسابات</small></button>
+            <button class="manager-module" data-manager-module="tasks"><span>📌</span><b>المهام والتسكات</b><small>إنشاء ومتابعة ومراجعة مهام الفنيين</small></button>
+            <button class="manager-module" data-manager-module="parts"><span>🔧</span><b>قطع الغيار</b><small>طلبات الفنيين واعتماد الصرف</small></button>
+            <button class="manager-module" data-manager-module="procurement"><span>📦</span><b>المشتريات والمخزون</b><small>اعتماد القطع ومتابعة الأرصدة</small></button>
+
+            <div class="manager-module-group-label">المالية</div>
+            <button class="manager-module" data-manager-module="finance"><span>ج.م</span><b>الإدارة المالية</b><small>السلف والعهد والخصومات</small></button>
+            <button class="manager-module" data-manager-module="overtime"><span>◷</span><b>الأوفر تايم</b><small>طلبات الموافقة والتسوية المالية</small></button>
+
+            <div class="manager-module-group-label">الأجهزة والتقارير</div>
+            <button class="manager-module" data-manager-module="devices"><span>▣</span><b>الأجهزة والصيانة</b><small>الأجهزة المسجلة وحركتها</small></button>
+            <button class="manager-module" data-manager-module="delivery"><span>✅</span><b>الجودة والتسليم</b><small>مراجعة الجودة وتسليم الأجهزة</small></button>
+            <button class="manager-module" data-manager-module="system"><span>▥</span><b>التقارير والنظام</b><small>التقارير الشهرية والإعدادات</small></button>
+
+            <div class="manager-module-group-label">الإشعارات والصلاحيات</div>
+            <button class="manager-module" data-manager-module="notifications"><span>♢</span><b>مركز الإشعارات</b><small>السجل وإرسال تنبيه جماعي</small></button>
+            <button class="manager-module" data-manager-module="notificationMatrix"><span>🎛</span><b>التحكم في الإشعارات</b><small>لكل فني: تطبيق / بوت</small></button>
+            <button class="manager-module" data-manager-module="buttonsMatrix"><span>🧩</span><b>التحكم في الأزرار</b><small>إظهار أو إخفاء أزرار كل فني</small></button>
+            <button class="manager-module" data-manager-module="managers"><span>♛</span><b>إدارة المديرين</b><small>الحسابات والصلاحيات — Super Admin</small></button>
+          </div>
+
+          <p id="managerDashboardMessage" class="inline-message hidden" aria-live="polite"></p>
+
+          <div id="managerComplaintSection">
+            <div class="manager-section-head">
+              <div><h3>تحتاج متابعة</h3><p>أحدث الشكاوى المفتوحة</p></div>
+              
+            </div>
+            <div id="managerRecentComplaints" class="manager-recent"><p class="muted">جاري تحميل آخر الشكاوى...</p></div>
+          </div>
+        </section>
+      </div>
+
+      <section id="attendance" class="attendance-panel hidden">
+        <div class="section-head"><h2>الحضور والانصراف</h2><span id="attendanceDate" class="muted">—</span></div>
+        <div class="attendance-state">
+          <strong id="attendanceStateTitle">جاري تحميل حالة الحضور...</strong>
+          <p id="attendanceStateText" class="muted">سيتم التحقق من الوردية والموقع عند التسجيل.</p>
+        </div>
+        <div class="shift-info" id="shiftInfo"></div>
+        <div class="attendance-actions">
+          <button id="checkinBtn" class="primary-btn" disabled>تسجيل حضور</button>
+          <button id="checkoutBtn" class="secondary-btn" disabled>تسجيل انصراف</button>
+          <button id="historyBtn" class="text-btn">سجل الحضور</button>
+        </div>
+        <div id="overtimePanel" class="uniform-box hidden">
+          <strong>الأوفر تايم</strong>
+          <p id="overtimeMessage" class="muted">طلب الموافقة متاح من نهاية الوردية وحتى مرور 30 دقيقة.</p>
+          <div class="attendance-actions"><button id="requestOvertimeBtn" class="primary-btn hidden" type="button">طلب موافقة أوفر تايم</button></div>
+        </div>
+        <div id="uniformBox" class="uniform-box hidden">
+          <strong>تأكيد حالة اليونيفورم</strong>
+          <p class="muted">أكد الحالة الفعلية لليونيفورم لإتمام تسجيل الحضور.</p>
+          <div class="attendance-actions">
+            <button class="primary-btn" data-uniform="ملتزم">ملتزم</button>
+            <button class="secondary-btn" data-uniform="غير ملتزم">غير ملتزم</button>
+          </div>
+        </div>
+        <p id="attendanceMessage" class="inline-message hidden" aria-live="polite"></p>
+      </section>
+
+      <section id="requestCenter" class="request-panel hidden">
+        <div class="section-head request-heading">
+          <div><h2>الخدمات والطلبات</h2><p class="muted">اختار الخدمة اللي محتاجها</p></div>
+          <span class="section-icon">✦</span>
+        </div>
+        <div class="request-tabs">
+          <button class="service-action" id="newLeaveTab" type="button"><span class="service-icon">◷</span><b>طلب إذن</b><small>بالساعات أو الأيام</small></button>
+          <button class="service-action" id="newCashTab" type="button"><span class="service-icon">ج.م</span><b>طلب سلفة</b><small>سلفة شخصية من الإدارة</small></button>
+          <button class="service-action" id="myRequestsTab" type="button"><span class="service-icon">▤</span><b>طلباتي</b><small>متابعة الحالة</small></button>
+        </div>
+        <div class="request-shortcuts">
+          <button class="service-action" id="complaintsTab" type="button"><span class="service-icon">✉</span><b>تقديم شكوى</b><small>إرسال شكوى جديدة</small></button>
+          <button class="service-action" id="complaintHistoryTab" type="button"><span class="service-icon">☷</span><b>شكاوي</b><small>متابعة الشكاوى والردود</small></button>
+        </div>
+        <div id="requestPicker" class="request-picker hidden">
+          <div class="picker-heading"><b>اختار نوع الطلب</b><small>اعرض سجلات القسم المطلوب</small></div>
+          <div class="picker-grid">
+            <button class="picker-card" data-request-entity="requests"><span>📋</span><b>الطلبات العامة</b><small>الطلبات الإدارية</small></button>
+            <button class="picker-card" data-request-entity="leaves"><span>🕒</span><b>الأذونات</b><small>طلبات الإذن وقراراتها</small></button>
+            <button class="picker-card" data-request-entity="cash"><span>ج.م</span><b>السلف والعهد</b><small>الصرف والتسويات</small></button>
+          </div>
+        </div>
+        <div class="form-divider"></div>
+        <div id="complaintForm" class="request-form hidden">
+          <div class="form-title"><span class="form-title-icon">✉</span><div><h3>تقديم شكوى</h3><p>اكتب تفاصيل الشكوى وسيتم إرسالها للإدارة بسرية</p></div></div>
+          <label>تصنيف الشكوى<select id="complaintType"><option value="شكوى إدارية">شكوى إدارية</option><option value="شكوى بخصوص موظف">شكوى بخصوص موظف</option><option value="شكوى بخصوص العمل">شكوى بخصوص العمل</option><option value="اقتراح">اقتراح</option><option value="أخرى">أخرى</option></select></label>
+          <label>الشخص المعني (اختياري)<input id="complaintPerson" type="text" maxlength="120" placeholder="اسم الشخص إن وجد"></label>
+          <label>تفاصيل الشكوى<textarea id="complaintDetails" rows="4" maxlength="3000" placeholder="اكتب تفاصيل الشكوى بوضوح..."></textarea></label>
+          <button id="submitComplaint" class="primary-btn submit-action">إرسال الشكوى</button>
+        </div>
+        <div id="complaintThread" class="request-form hidden"></div>
+        <div class="form-divider"></div>
+        <div id="leaveForm" class="request-form hidden">
+          <div class="form-title"><span class="form-title-icon">◷</span><div><h3>طلب إذن</h3><p>حدد نوع الإذن والتاريخ والسبب</p></div></div>
+          <label>نوع الإذن<select id="leaveType"><option value="يوم كامل">إذن يوم كامل</option><option value="بالساعات">إذن بالساعات</option></select></label>
+          <label>تاريخ الإذن<input id="leaveDate" type="date"></label>
+          <div id="leaveDaysWrap"><label>عدد الأيام<select id="leaveDays"><option value="1">يوم واحد</option><option value="2">يومان</option><option value="3">3 أيام</option></select></label></div>
+          <div id="leaveHoursWrap" class="hidden"><label>بداية الإذن<input id="leaveFrom" type="time"></label><label>المدة<select id="leaveHours"><option value="1">ساعة واحدة</option><option value="2">ساعتان</option><option value="3">3 ساعات</option></select></label></div>
+          <label>سبب الإذن<textarea id="leaveReason" rows="3" maxlength="1000" placeholder="اكتب سبب طلب الإذن باختصار..."></textarea></label>
+          <button id="submitLeave" class="primary-btn submit-action">إرسال طلب الإذن</button>
+        </div>
+        <div id="cashForm" class="request-form hidden">
+          <div class="form-title"><span class="form-title-icon">ج.م</span><div><h3>طلب سلفة شخصية</h3><p>يُسجل في سجل السلف ويرسل للإدارة للمراجعة</p></div></div>
+          <div class="notice-soft"><span>ⓘ</span> تقديم الطلب لا يعني الموافقة أو صرف المبلغ.</div>
+          <label>المبلغ بالجنيه<input id="cashAmount" type="number" min="1" max="1000000" step="0.01" inputmode="decimal" placeholder="مثال: 750"></label>
+          <button id="submitCash" class="primary-btn submit-action">إرسال طلب السلفة</button>
+        </div>
+        <p id="requestMessage" class="inline-message hidden" aria-live="polite"></p>
+      </section>
+
+      <section id="reviewCenter" class="management hidden">
+        <div class="section-head"><h2>مراجعة الطلبات والأذونات</h2><button id="refreshReviews" class="text-btn">تحديث</button></div>
+        <div id="reviewBody" class="review-list">اضغط تحديث لعرض الطلبات المعلقة.</div>
+      </section>
+
+      <section id="cashReviewCenter" class="management hidden">
+        <div class="section-head"><h2>مراجعة السلف والعهد</h2><button id="refreshCashReviews" class="text-btn">تحديث</button></div>
+        <div id="cashReviewBody" class="review-list">اضغط تحديث لعرض السلف والعهد في قائمتين منفصلتين.</div>
+      </section>
+
+      <section id="financeCenter" class="request-panel hidden">
+        <div class="section-head request-heading"><div><h2>الخصومات والمكافآت</h2><p class="muted">ملخصك المالي ومتابعة الاستحقاقات</p></div><span class="section-icon">ج.م</span></div>
+        <div class="request-tabs finance-tabs">
+          <button class="service-action" id="myFinanceTab" type="button"><span class="service-icon">▤</span><b>مكافآتي</b><small>تقرير النقاط والمكافآت</small></button>
+          <!-- إصلاح: خاصية class كانت مكررة، و hidden لم يكن يُطبَّق -->
+          <button class="service-action hidden" id="deductionAdminTab" type="button"><span class="service-icon">−</span><b>إدارة الخصومات</b><small>إضافة ومراجعة</small></button>
+          <!-- إصلاح: خاصية class كانت مكررة، و hidden لم يكن يُطبَّق -->
+          <button class="service-action hidden" id="rewardAdminTab" type="button"><span class="service-icon">★</span><b>إدارة المكافآت</b><small>نظافة ومكافآت إضافية</small></button>
+        </div>
+        <div id="financeEmployeeView" class="request-form hidden">
+          <div class="form-title"><span class="form-title-icon">★</span><div><h3>تقرير مكافآتي الشهري</h3><p id="rewardMonthLabel">الشهر الحالي</p></div></div>
+          <div id="financeSummary" class="finance-summary">اضغط مكافآتي لعرض تقريرك الشهري.</div>
+          <div id="myDeductionRows"></div>
+        </div>
+        <div id="deductionAdminView" class="request-form hidden">
+          <div class="form-title"><span class="form-title-icon">−</span><div><h3>إضافة خصم لمهندس</h3><p>الخصم اليدوي يبدأ بانتظار اعتماد المالية أو الإدارة</p></div></div>
+          <label>المهندس<select id="deductionEmployee"></select></label>
+          <label>نوع الخصم<select id="deductionType"><option>خصم آخر</option><option>التأخير</option><option>عدم الالتزام باليونيفورم</option><option>عدم التسجيل على السيستم</option><option>نظافة المكان</option></select></label>
+          <label>المبلغ بالجنيه<input id="deductionAmount" type="number" min="0.01" step="0.01" placeholder="مثال: 50"></label>
+          <label>السبب<textarea id="deductionReason" rows="2" maxlength="500" placeholder="سبب الخصم بالتفصيل"></textarea></label>
+          <button id="submitDeduction" class="primary-btn submit-action">تسجيل الخصم للمراجعة</button>
+          <div class="form-divider"></div><h3>الخصومات المعلقة</h3><div id="pendingDeductions">جاري التحميل...</div>
+        </div>
+        <div id="rewardAdminView" class="request-form hidden">
+          <div class="form-title"><span class="form-title-icon">★</span><div><h3>إدارة المكافآت</h3><p>تقييم النظافة وإضافة مكافأة مالية مستقلة</p></div></div>
+          <label>المهندس<select id="rewardEmployee"></select></label>
+          <label>تقييم نظافة المكان<select id="hygieneRating"><option value="نظيف">نظيف</option><option value="غير ملتزم">غير ملتزم</option></select></label>
+          <label>التاريخ<input id="hygieneDate" type="date"></label>
+          <label>ملاحظات التقييم (اختياري)<textarea id="hygieneNote" rows="2" maxlength="300"></textarea></label>
+          <button id="saveHygiene" class="secondary-btn">حفظ تقييم النظافة</button>
+          <div class="form-divider"></div>
+          <h3>إضافة مكافأة مالية</h3>
+          <label>المبلغ بالجنيه<input id="bonusAmount" type="number" min="0.01" step="0.01" placeholder="مثال: 200"></label>
+          <label>سبب المكافأة<input id="bonusReason" maxlength="250" placeholder="سبب منح المكافأة"></label>
+          <button id="submitBonus" class="primary-btn submit-action">إضافة المكافأة واعتمادها</button>
+        </div>
+        <p id="financeMessage" class="inline-message hidden" aria-live="polite"></p>
+      </section>
+
+      <section id="stats" class="stats"></section>
+
+      <section id="homeActions" class="home-actions legacy-home-actions">
+        <div class="section-head">
+          <div><h2>لوحة المهندس</h2><p class="muted">جميع خدمات MobiHub مرتبة حسب سير العمل</p></div>
+          <span class="section-icon">🛠️</span>
+        </div>
+
+        <div class="menu-section">
+          <div class="menu-section-title">🟢 الدوام اليومي <span>الحضور والورديات</span></div>
+          <div class="legacy-menu-grid">
+            <button class="home-card primary-card" data-home-action="attendance">
+              <span class="home-icon">✅</span>
+              <div class="home-card-text"><b>تسجيل حضور</b><small>بموقع المركز + اليونيفورم</small></div>
+            </button>
+            <button class="home-card checkout-card" data-home-action="checkout">
+              <span class="home-icon">🚪</span>
+              <div class="home-card-text"><b>تسجيل انصراف</b><small>بدون اشتراط GPS + النظافة</small></div>
+            </button>
+            <button class="home-card" data-home-action="my-shifts">
+              <span class="home-icon">🕒</span>
+              <div class="home-card-text"><b>ورديتي</b><small>مواعيد العمل والسماح</small></div>
+            </button>
+            <button class="home-card" data-home-action="history">
+              <span class="home-icon">📋</span>
+              <div class="home-card-text"><b>سجل الحضور</b><small>آخر 30 حركة مسجلة</small></div>
+            </button>
+          </div>
+        </div>
+
+        <div class="menu-section">
+          <div class="menu-section-title">📱 الصيانة والأجهزة <span>الفحص والأسعار والمتابعة</span></div>
+          <div class="legacy-menu-grid">
+            <button class="home-card" data-home-action="inspection">
+              <span class="home-icon">🔍</span>
+              <div class="home-card-text"><b>فحص الجهاز</b><small>قائمة الفحص المعتمدة</small></div>
+            </button>
+            <button class="home-card" data-home-action="repair-prices">
+              <span class="home-icon">💵</span>
+              <div class="home-card-text"><b>أسعار الإصلاح</b><small>بحث شامل في كل الأقسام</small></div>
+            </button>
+            <button class="home-card" data-home-action="devices">
+              <span class="home-icon">📱</span>
+              <div class="home-card-text"><b>حالة الجهاز</b><small>الأجهزة المسندة وتحديثها</small></div>
+            </button>
+            <button class="home-card" data-home-action="part-request">
+              <span class="home-icon">🔧</span>
+              <div class="home-card-text"><b>طلب قطعة غيار</b><small>اطلب القطعة قبل استخدامها</small></div>
+            </button>
+            <!-- إصلاح: hidden يمنع وميض الزر قبل التحقق من صلاحية الاستلام -->
+            <button class="home-card hidden" id="registerDeviceCard" data-home-action="device-register">
+              <span class="home-icon">📥</span>
+              <div class="home-card-text"><b>تسجيل جهاز</b><small>إسناد طلب لفني صيانة</small></div>
+            </button>
+          </div>
+        </div>
+
+        <div class="menu-section">
+          <div class="menu-section-title">💰 الطلبات والعهد المالية <span>الأذونات والسلف والمشتريات</span></div>
+          <div class="legacy-menu-grid">
+            <button class="home-card" data-home-action="leave">
+              <span class="home-icon">⏳</span>
+              <div class="home-card-text"><b>طلب إذن</b><small>بالساعات أو يوم كامل</small></div>
+            </button>
+            <button class="home-card" data-home-action="cash">
+              <span class="home-icon">💵</span>
+              <div class="home-card-text"><b>طلب سلفة</b><small>سلفة شخصية</small></div>
+            </button>
+            <button class="home-card" data-home-action="withdraw">
+              <span class="home-icon">💰</span>
+              <div class="home-card-text"><b>طلب سحب مبلغ</b><small>عهدة مشتريات المركز</small></div>
+            </button>
+            <button class="home-card" data-home-action="settlement">
+              <span class="home-icon">🧾</span>
+              <div class="home-card-text"><b>تسوية عهدة</b><small>تسجيل المصروف الفعلي</small></div>
+            </button>
+          </div>
+        </div>
+
+        <div class="menu-section">
+          <div class="menu-section-title">📌 المهام والأداء <span>تسكاتك ومكافآتك وملخصك</span></div>
+          <div class="legacy-menu-grid">
+            <button class="home-card task-card" data-home-action="tasks">
+              <span class="home-icon">📌</span>
+              <div class="home-card-text"><b>تسكاتي</b><small>مهامك المطلوبة من الإدارة</small></div>
+              <span id="tasksBadge" class="task-badge hidden">0</span>
+            </button>
+            <button class="home-card" data-home-action="rewards">
+              <span class="home-icon">🏆</span>
+              <div class="home-card-text"><b>مكافآتي</b><small>النقاط والمكافأة الشهرية</small></div>
+            </button>
+            <button class="home-card" data-home-action="deductions">
+              <span class="home-icon">💸</span>
+              <div class="home-card-text"><b>خصوماتي</b><small>التأخير والخصومات</small></div>
+            </button>
+            <button class="home-card" data-home-action="monthly">
+              <span class="home-icon">📊</span>
+              <div class="home-card-text"><b>ملخص الشهر</b><small>إحصائيات التزامك</small></div>
+            </button>
+          </div>
+        </div>
+
+        <div class="menu-section">
+          <div class="menu-section-title">📩 الطلبات والتواصل <span>متابعة الطلبات والشكاوى</span></div>
+          <div class="legacy-menu-grid">
+            <button class="home-card" data-home-action="requests">
+              <span class="home-icon">📩</span>
+              <div class="home-card-text"><b>طلباتي</b><small>متابعة قرارات الإدارة</small></div>
+            </button>
+            <button class="home-card" data-home-action="complaint-new">
+              <span class="home-icon">📝</span>
+              <div class="home-card-text"><b>تقديم شكوى</b><small>ترسل للإدارة بسرية</small></div>
+            </button>
+            <button class="home-card" data-home-action="complaint-list">
+              <span class="home-icon">📨</span>
+              <div class="home-card-text"><b>شكاويي</b><small>المحادثات والردود</small></div>
+            </button>
+            <button class="home-card" data-home-action="refresh">
+              <span class="home-icon">🔄</span>
+              <div class="home-card-text"><b>تحديث اللوحة</b><small>إعادة تحميل البيانات</small></div>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section id="withdrawForm" class="request-panel hidden">
+        <div class="form-title"><span class="form-title-icon">💰</span><div><h3>طلب سحب مبلغ</h3><p>اكتب المبلغ والغرض من مشتريات المركز</p></div></div>
+        <label>المبلغ المطلوب بالجنيه<input id="withdrawAmount" type="number" min="1" max="1000000" step="0.01" inputmode="decimal" placeholder="مثال: 750"></label>
+        <label>الغرض من المبلغ<textarea id="withdrawPurpose" rows="3" maxlength="1000" placeholder="اكتب الغرض وما تحتاج شراءه للمركز"></textarea></label>
+        <button id="submitWithdraw" class="primary-btn submit-action">إرسال طلب سحب المبلغ</button>
+        <p id="withdrawMessage" class="inline-message hidden" aria-live="polite"></p>
+      </section>
+
+      <section id="deviceRegisterPanel" class="request-panel hidden">
+        <div class="section-head request-heading"><div><h2>تسجيل جهاز جديد</h2><p class="muted">أدخل رقم الطلب الصادر من نظام الاستلام ثم اختر الفني المسؤول</p></div><span class="section-icon">＋</span></div>
+        <div class="request-form">
+          <div class="notice-soft"><span>ⓘ</span> يتم تسجيل رقم الطلب والإسناد وسجل الحركة. بيانات العميل والجهاز التفصيلية تظل في نظام الاستلام الخارجي.</div>
+          <label>رقم الطلب<input id="deviceOrderId" type="text" maxlength="60" placeholder="رقم الطلب كما يظهر في نظام الاستلام"></label>
+          <label>الفني المسؤول<select id="deviceTechnician"><option value="">اختر الفني المسؤول</option></select></label>
+          <button id="submitDeviceRegister" class="primary-btn submit-action">تسجيل الجهاز وإسناده</button>
+          <p id="deviceRegisterMessage" class="inline-message hidden" aria-live="polite"></p>
+        </div>
+      </section>
+
+      <section id="management" class="management hidden">
+        <div class="section-head"><h2>الإدارة</h2><span class="muted">حسب صلاحيتك</span></div>
+        <p class="muted">لوحات المراجعة والإجراءات الإدارية ستُنقل تدريجيًا بعد اعتماد كل وحدة.</p>
+      </section>
+
+      <section id="results" class="results hidden">
+        <div class="section-head"><h2 id="resultTitle">السجلات</h2><button id="backBtn" class="text-btn">رجوع</button></div>
+        <div id="resultBody"></div>
+      </section>
+
+      <p id="error" class="error hidden"></p>
+    </main>
+
+    <div id="appModal" class="app-modal hidden" aria-hidden="true">
+      <div class="modal-backdrop" data-modal-close></div>
+      <section class="modal-sheet" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+        <div class="modal-grabber"></div>
+        <header class="modal-header">
+          <div><small>MOBIHUB SERVICE CENTER</small><h2 id="modalTitle">التفاصيل</h2></div>
+          <button type="button" class="modal-close" id="modalClose" aria-label="إغلاق">×</button>
+        </header>
+        <div id="modalMessage" class="modal-message hidden" aria-live="polite"></div>
+        <div id="modalBody" class="modal-body"></div>
+      </section>
+    </div>
+
+    <footer>MobiHub · نظام إدارة مركز الصيانة</footer>
+  </div>
+
+  <script src="app-2.js"></script>
+</body>
+</html>
