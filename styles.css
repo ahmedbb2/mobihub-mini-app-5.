@@ -4705,3 +4705,33 @@ button:disabled{pointer-events:none}
 }
 [data-theme="light"] body.manager-enterprise .manager-module-group-grid > .manager-module:hover:not(:disabled){background:var(--brand-wash)}
 [data-theme="light"] body.manager-enterprise .status-pill{color:var(--text-2);background:var(--surface-2);border-color:var(--line)}
+
+
+/* V1.13.2 — Light theme must override the enterprise shell's fixed dark body fill. */
+[data-theme="light"] html,
+html[data-theme="light"] {
+  background: #F4F7FA !important;
+  color-scheme: light;
+}
+[data-theme="light"] body.manager-enterprise {
+  background:
+    radial-gradient(900px 520px at 90% -12%,rgba(224,124,16,.075),transparent 62%),
+    linear-gradient(160deg,#F7FAFC,#EDF3F8 58%,#F7FAFC) !important;
+  background-attachment: fixed;
+  color: var(--text);
+}
+[data-theme="light"] body.manager-enterprise .app-shell,
+[data-theme="light"] body.manager-enterprise main,
+[data-theme="light"] body.manager-enterprise .manager-workspace,
+[data-theme="light"] body.manager-enterprise .manager-workspace > .manager-dashboard,
+[data-theme="light"] body.manager-enterprise #managerDashboard,
+[data-theme="light"] body.manager-enterprise #consoleSlot {
+  background-color: transparent !important;
+  color: var(--text);
+}
+[data-theme="light"] body.manager-enterprise .topbar {
+  color: var(--text);
+  border-color: var(--line);
+  background: rgba(255,255,255,.94) !important;
+  box-shadow: 0 5px 18px rgba(15,35,55,.055);
+}

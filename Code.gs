@@ -1,5 +1,5 @@
 /**
- * MobiHub Mini App API — V1.13.1
+ * MobiHub Mini App API — V1.13.2
  * PRODUCTION deployment.
  *
  * Required Script Properties:
@@ -12,7 +12,7 @@
  */
 
 const MH = Object.freeze({
-  VERSION: '1.13.1',
+  VERSION: '1.13.2',
   TZ: 'Africa/Cairo',
   AUTH_MAX_AGE_SECONDS: 86400, // 24h: Telegram's recommended max. 300s logged users out after 5 min open.
   SHEETS: {
@@ -1465,10 +1465,14 @@ function attendanceStatus_(profile) {
   const completedShiftDates = Array.from(checkoutDates)
     .filter(d => d && checkinDates.has(d) && !ratedDates.has(d))
     .sort();
-  const pendingHygieneDate = completedShiftDates.length ? completedShiftDates[completedShiftDates.length - 1] : '';
+  // Return every completed-but-unrated day, oldest first, so the Mini App can
+  // walk the employee through the full queue instead of surfacing only the latest day.
+  const pendingHygieneDates = completedShiftDates;
+  const pendingHygieneDate = pendingHygieneDates.length ? pendingHygieneDates[0] : '';
   return {
     date: date,
     pendingHygieneDate: pendingHygieneDate,
+    pendingHygieneDates: pendingHygieneDates,
     hasOpenAttendance: !!open,
     openAttendance: open,
     checkedInToday: mine.some(r => mhDate_(r['التاريخ']) === date && String(r['النوع']) === 'حضور'),
@@ -1535,7 +1539,7 @@ function mhDeductionSetting_(ss, key, fallback) {
     amount} or null when nothing is owed (amount <= 0) or a row with the same
     reference already exists — the reference is what stops the same late
     arrival from being deducted twice, from either channel. */
-function mhCreateAutomaticDeduction_(ss, profile, date, type, reason, amount, reference) {
+function mhCreateAutomaticDeduction_(ss, profile, date, type, reason, amount, reference, notifyReviewers) {
   if (!(Number(amount) > 0) || !reference) return null;
   const sh = mhSheet_(MH.SHEETS.deductions);
   mhAssertHeaders_(sh, MH_FINANCE.DEDUCTION_HEADERS);
@@ -1544,7 +1548,38 @@ function mhCreateAutomaticDeduction_(ss, profile, date, type, reason, amount, re
   const id = 'DD-' + Utilities.getUuid().slice(0, 8).toUpperCase();
   const amt = Math.round(Number(amount) * 100) / 100;
   sh.appendRow([id, date, String(profile.chatId), profile.name, type, reason, amt, 'تلقائي', 'بانتظار اعتماد المدير', reference, mhNow_(), '', String(profile.chatId), 'من Mini App', '']);
+  // Hygiene assessments need the same explicit approval/employee notifications as the bot.
+  // Other callers retain their existing notification flow to avoid duplicate messages.
+  if (notifyReviewers === true) {
+    try {
+      const keyboard = {inline_keyboard:[[{text:'✅ اعتماد',callback_data:'ded|approve|' + id},{text:'❌ رفض',callback_data:'ded|reject|' + id}]]};
+      mhNotifyFinanceAdminsMini_('💸 خصم تلقائي بانتظار الاعتماد\n\nالموظف: ' + profile.name + '\nالنوع: ' + type + '\nالتاريخ: ' + date + '\nالسبب: ' + reason + '\nالمبلغ: ' + amt.toFixed(2) + ' جنيه', keyboard, id);
+    } catch (e) { console.error('Hygiene deduction admin notification failed [' + id + ']: ' + e); }
+    try {
+      mhSendTelegramMini_(String(profile.chatId), '⚠️ تم رصد خصم يحتاج مراجعة الإدارة\n\nالنوع: ' + type + '\nالتفاصيل: ' + reason + '\nالمبلغ المقترح: ' + amt.toFixed(2) + ' جنيه\n\nلن يُضاف إلى الخصومات المعتمدة إلا بعد مراجعة المدير.', {remove_keyboard:true});
+    } catch (e) { console.error('Hygiene deduction employee notification failed [' + id + ']: ' + e); }
+  }
   return { id: id, type: type, reason: reason, amount: amt };
+}
+
+/** Mirrors cancelPendingHygieneDeduction_ in Bot.gs when a manager confirms cleanliness. */
+function mhCancelPendingHygieneDeduction_(ss, employeeId, date, actorId) {
+  const sh = ss.getSheetByName(MH.SHEETS.deductions);
+  if (!sh || sh.getLastRow() < 2) return 0;
+  const reference = 'HYGIENE|' + date + '|' + String(employeeId);
+  const rows = mhRowsObjects_(sh);
+  let cancelled = 0;
+  rows.forEach(function(r) {
+    if (String(r['مرجع الواقعة'] || '') !== reference || String(r['الحالة'] || '') !== 'بانتظار اعتماد المدير') return;
+    sh.getRange(r.__row, 9).setValue('ملغي');
+    sh.getRange(r.__row, 13).setValue(String(actorId || ''));
+    sh.getRange(r.__row, 14).setValue('أُلغي بعد مراجعة المدير وتأكيد نظافة المكان');
+    sh.getRange(r.__row, 15).setValue('تقييم المدير من Mini App: نظيف');
+    try { mhSendTelegramMini_(String(employeeId), '✅ راجعت الإدارة تقييم نظافة المكان وأكدت الالتزام. تم إلغاء خصم النظافة المعلق لهذا اليوم.', {remove_keyboard:true}); }
+    catch (e) { console.error('Unable to notify employee about hygiene deduction cancellation: ' + e); }
+    cancelled++;
+  });
+  return cancelled;
 }
 
 function attendanceConfirmUniform_(profile, uniformStatus) {
@@ -1729,7 +1764,12 @@ function submitAttendanceHygiene_(profile, body) {
     );
     if (existing) throw new Error('HYGIENE_ALREADY_RATED');
     sh.appendRow([date, profile.chatId, profile.name, rating, 'إقرار الموظف من Mini App', 'إقرار الموظف', mhNow_()]);
-    return { saved: true, date: date, rating: rating };
+    let deduction = null;
+    if (rating === 'غير ملتزم') {
+      const reason = 'أقر الموظف عند تسجيل الانصراف بأنه لم يترك مكان العمل نظيفًا ومرتبًا';
+      deduction = mhCreateAutomaticDeduction_(ss, profile, date, 'نظافة المكان', reason, 50, 'HYGIENE|' + date + '|' + profile.chatId, true);
+    }
+    return { saved: true, date: date, rating: rating, deductionCreated: !!deduction, deductionAmount: deduction ? deduction.amount : 0 };
   } finally { lock.releaseLock(); }
 }
 
@@ -2905,16 +2945,29 @@ function setRewardHygiene_(profile, body) {
   const rating=String(body.rating||'').trim(), note=String(body.note||'').trim();
   if(date>mhToday_()||!['نظيف','غير ملتزم'].includes(rating)||note.length>300) throw new Error('INVALID_HYGIENE_RATING');
   const sh=mhSheet_(MH.SHEETS.rewardHygiene); mhAssertHeaders_(sh,MH_FINANCE.REWARD_HYGIENE_HEADERS);
-  // V1.13 (ح-16) — the duplicate check and the append must be atomic: two
-  // simultaneous ratings for the same employee/day created two rows.
+  // The manager can correct an employee self-rating or an earlier manager rating.
+  // Update the existing row in place, matching saveRewardHygiene_ in Bot.gs.
   const lock=LockService.getScriptLock(); lock.waitLock(15000);
+  let deduction = null, cancelled = 0, updated = false;
   try {
+    const ss = spreadsheet_();
     const rows=mhRowsObjects_(sh);
     const existing=rows.find(r=>String(r['Chat ID']).trim()===employee.chatId&&mhDate_(r['التاريخ'])===date);
-    if(existing) throw new Error('HYGIENE_ALREADY_RATED');
-    sh.appendRow([date,employee.chatId,employee.name,rating,note,profile.name,mhNow_()]);
+    const values=[date,employee.chatId,employee.name,rating,note,profile.name,mhNow_()];
+    if(existing) {
+      sh.getRange(existing.__row,1,1,MH_FINANCE.REWARD_HYGIENE_HEADERS.length).setValues([values]);
+      updated = true;
+    } else {
+      sh.appendRow(values);
+    }
+    if (rating === 'غير ملتزم') {
+      const reason = 'تقييم المدير: مكان العمل غير نظيف أو غير مرتب عند نهاية الوردية';
+      deduction = mhCreateAutomaticDeduction_(ss, {chatId:employee.chatId,name:employee.name}, date, 'نظافة المكان', reason, 50, 'HYGIENE|' + date + '|' + employee.chatId, true);
+    } else {
+      cancelled = mhCancelPendingHygieneDeduction_(ss, employee.chatId, date, profile.chatId);
+    }
   } finally { lock.releaseLock(); }
-  return {saved:true,rating:rating,date:date};
+  return {saved:true,updated:updated,rating:rating,date:date,deductionCreated:!!deduction,deductionAmount:deduction?deduction.amount:0,deductionsCancelled:cancelled};
 }
 function rewardIsApprovedLeaveMini_(chatId,date) {
   return mhRowsObjects_(mhSheet_(MH.SHEETS.leaves)).some(r=>{

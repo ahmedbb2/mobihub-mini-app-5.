@@ -25,6 +25,7 @@
   let currentAttendance = null;
   let pendingUniform = false;
   let pendingHygieneDate = '';
+  let pendingHygieneDates = [];
   let currentRole = 'employee';
   let workspaceRole = '';
   let availableWorkspaces = [];
@@ -82,7 +83,6 @@
     GPS_ACCURACY_NOT_ACCEPTED: 'دقة الموقع الحالية غير كافية. حاول من مكان مفتوح وأعد المحاولة.',
     OUTSIDE_ALLOWED_GEOFENCE: 'أنت خارج نطاق المركز المسموح (50 متر). تأكد أنك داخل المركز وأعد تسجيل الحضور.',
     HYGIENE_SHIFT_NOT_COMPLETED: 'لا يمكن تسجيل تقييم النظافة قبل اكتمال الحضور والانصراف.',
-    HYGIENE_ALREADY_RATED: 'تم تسجيل تقييم النظافة لهذه الوردية بالفعل.',
     OPEN_ATTENDANCE_EXISTS: 'لديك حضور مفتوح بالفعل ولم يتم تسجيل الانصراف.',
     ALREADY_CHECKED_IN_TODAY: 'تم تسجيل حضورك اليوم بالفعل.',
     ALREADY_CHECKED_IN: 'تم تسجيل حضورك بالفعل. حدّث حالة الحضور.',
@@ -106,7 +106,7 @@
     DEDUCTION_ALREADY_REVIEWED: 'تمت مراجعة الخصم بالفعل.',
     INVALID_REWARD_REASON: 'اكتب سبب المكافأة من 3 إلى 250 حرفًا.',
     INVALID_HYGIENE_RATING: 'بيانات تقييم النظافة غير صحيحة.',
-    HYGIENE_ALREADY_RATED: 'تم تسجيل تقييم النظافة لهذا المهندس في هذا اليوم بالفعل.',
+    HYGIENE_ALREADY_RATED: 'يوجد تقييم نظافة مسجل لهذا الموظف في هذا اليوم بالفعل.',
     OVERTIME_UNAVAILABLE: 'خدمة الأوفر تايم غير جاهزة حاليًا. تم الحفاظ على تسجيل الحضور والانصراف.',
     EMPLOYEE_NOT_FOUND: 'المهندس غير موجود أو حسابه غير نشط.',
     INVALID_MONTH: 'صيغة الشهر غير صحيحة.',
@@ -207,7 +207,14 @@
     $('shiftInfo').textContent = shift ? `الوردية: ${shift.name || shift.id}${shift.isFlexible ? ' · بدون موعد ثابت' : ` · ${shift.startTime || '--:--'} إلى ${shift.endTime || '--:--'} · سماح ${shift.graceMinutes} دقيقة`}` : 'لا توجد وردية محددة لليوم.';
     $('checkinBtn').disabled = open || !!data.checkedInToday || !data.assignment || !shift;
     $('checkoutBtn').disabled = !open;
-    pendingHygieneDate = String(data.pendingHygieneDate || pendingHygieneDate || '');
+    pendingHygieneDates = Array.isArray(data.pendingHygieneDates)
+      ? data.pendingHygieneDates.map(String).filter(Boolean)
+      : (data.pendingHygieneDate ? [String(data.pendingHygieneDate)] : []);
+    pendingHygieneDate = pendingHygieneDates[0] || '';
+    const hygieneDateLabel = $('hygieneDateLabel');
+    if (hygieneDateLabel) hygieneDateLabel.textContent = pendingHygieneDate
+      ? ('تقييم وردية بتاريخ ' + pendingHygieneDate + (pendingHygieneDates.length > 1 ? ' · متبقي ' + pendingHygieneDates.length + ' تقييمات' : ''))
+      : '';
     $('hygieneBox').classList.toggle('hidden', !pendingHygieneDate || !!open);
     const overtime=data.overtime||null;
     const overtimePanel=$('overtimePanel');
@@ -274,8 +281,9 @@
     buttons.forEach(b => b.disabled = true);
     try {
       const result = await api('attendance_hygiene_submit', { date: pendingHygieneDate, rating });
-      pendingHygieneDate = '';
-      $('hygieneBox').classList.add('hidden');
+      pendingHygieneDates = pendingHygieneDates.filter(d => d !== pendingHygieneDate);
+      pendingHygieneDate = pendingHygieneDates[0] || '';
+      $('hygieneBox').classList.toggle('hidden', !pendingHygieneDate);
       showAttendanceMessage(result.rating === 'نظيف'
         ? '🌟 شكرًا لالتزامك. تم تسجيل نقطة نظافة مكان العمل ضمن تقييم الوردية.'
         : 'تم تسجيل إجابتك. ستظهر في سجل تقييم النظافة للوردية.');
@@ -283,7 +291,8 @@
     } catch (e) {
       showAttendanceMessage(e.message, true);
       if (e.code === 'HYGIENE_ALREADY_RATED') {
-        pendingHygieneDate = '';
+        pendingHygieneDates = pendingHygieneDates.filter(d => d !== pendingHygieneDate);
+        pendingHygieneDate = pendingHygieneDates[0] || '';
         $('hygieneBox').classList.add('hidden');
         try { await refreshAttendance(); } catch (_) {}
       }
