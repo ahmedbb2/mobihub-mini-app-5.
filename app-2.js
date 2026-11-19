@@ -79,6 +79,7 @@
     ACCOUNT_INACTIVE: 'الحساب غير نشط أو غير مصرح له باستخدام النظام.',
     INVALID_GPS_COORDINATES: 'تعذر قراءة موقعك بشكل صحيح. فعّل خدمات الموقع وحاول مرة أخرى.',
     GPS_ACCURACY_NOT_ACCEPTED: 'دقة الموقع الحالية غير كافية. حاول من مكان مفتوح وأعد المحاولة.',
+    OUTSIDE_ALLOWED_GEOFENCE: 'أنت خارج نطاق المركز المسموح (50 متر). تأكد أنك داخل المركز وأعد تسجيل الحضور.',
     OPEN_ATTENDANCE_EXISTS: 'لديك حضور مفتوح بالفعل ولم يتم تسجيل الانصراف.',
     ALREADY_CHECKED_IN_TODAY: 'تم تسجيل حضورك اليوم بالفعل.',
     ALREADY_CHECKED_IN: 'تم تسجيل حضورك بالفعل. حدّث حالة الحضور.',
@@ -270,6 +271,17 @@
       await refreshAttendance();
     } catch (e) {
       showAttendanceMessage(e.message, true);
+      // Restart-required failures: the confirmation is gone (expired,
+      // out-of-range location, already recorded, shift gone). Clear the
+      // pending uniform state and refresh attendance so the employee can
+      // start check-in again instead of staying stuck with a disabled
+      // check-in button and a visible confirmation box.
+      if (e.code === 'CHECKIN_CONFIRMATION_EXPIRED' || e.code === 'OUTSIDE_ALLOWED_GEOFENCE' || e.code === 'ALREADY_CHECKED_IN' || e.code === 'SHIFT_NOT_AVAILABLE') {
+        pendingUniform = false;
+        $('uniformBox').classList.add('hidden');
+        $('checkinBtn').disabled = false;
+        try { await refreshAttendance(); } catch (_) { /* button is usable again; status refreshes on next load */ }
+      }
     } finally {
       buttons.forEach(b => b.disabled = false);
     }
