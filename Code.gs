@@ -1,5 +1,5 @@
 /**
- * MobiHub Mini App API — V1.13.0
+ * MobiHub Mini App API — V1.13.1
  * PRODUCTION deployment.
  *
  * Required Script Properties:
@@ -12,7 +12,7 @@
  */
 
 const MH = Object.freeze({
-  VERSION: '1.13.0',
+  VERSION: '1.13.1',
   TZ: 'Africa/Cairo',
   AUTH_MAX_AGE_SECONDS: 86400, // 24h: Telegram's recommended max. 300s logged users out after 5 min open.
   SHEETS: {
@@ -865,11 +865,9 @@ function managerDashboard_(profile) {
     notifications: ['super_admin','admin','supervisor'].includes(role),
     managers: role === 'super_admin'
   };
-  const dataWarnings = [];
   const safeRows = function(name, enabled) {
     if (!enabled) return [];
-    try { return rowsAsObjects_(ss, name); }
-    catch (e) { dataWarnings.push(name + ': ' + String(e.message||e)); return []; }
+    try { return rowsAsObjects_(ss, name); } catch (e) { return []; }
   };
   const employees = safeRows(MH.SHEETS.employees, modules.staff).filter(r =>
     String(r['Chat ID'] || '').trim() && String(r['الحالة'] || 'نشط').trim() === 'نشط' &&
@@ -930,8 +928,7 @@ function managerDashboard_(profile) {
       pendingAbsences:modules.daily?pendingAbsences.length:null,
       pendingOvertime:modules.overtime?overtimeRows.filter(r=>String(r['الحالة']||'').trim()==='بانتظار موافقة المدير').length:null
     },
-    todayAttendance:todayRows.slice(0,30), recentComplaints:recentComplaints, monthlyReport:monthlyReport,
-    dataWarnings:dataWarnings
+    todayAttendance:todayRows.slice(0,30), recentComplaints:recentComplaints, monthlyReport:monthlyReport
   };
 }
 
@@ -6016,9 +6013,15 @@ function consoleOverviewMini_(profile) {
     management: ['super_admin','admin'].includes(role)
   };
 
+  const dataWarnings = [];
   const read = function(name, enabled) {
     if (!enabled) return [];
-    try { return rowsAsObjects_(ss, name); } catch (e) { return []; }
+    try { return rowsAsObjects_(ss, name); }
+    catch (e) {
+      // Do not silently turn a missing/unreadable sheet into an empty list.
+      dataWarnings.push(name + ': ' + String(e && e.message || e));
+      return [];
+    }
   };
 
   /* ---------------- Staff ---------------- */
@@ -6067,6 +6070,18 @@ function consoleOverviewMini_(profile) {
     const s = String(r['الحالة'] || '').trim();
     return ['مغلقة','تم الحل'].indexOf(s) < 0;
   });
+  // Complaints are append-only: take the newest five open rows and return
+  // only the fields needed by the management dashboard.
+  const recentComplaints = modules.requests ? openComplaints.slice(-5).reverse().map(function(r) {
+    return {
+      id: String(r['رقم الشكوى'] || ''),
+      employee: String(r['اسم الموظف'] || ''),
+      type: String(r['نوع الشكوى'] || ''),
+      status: String(r['الحالة'] || 'جديدة'),
+      date: mhDateTime12_(r['التاريخ والوقت']),
+      details: String(r['تفاصيل الشكوى'] || '').slice(0, 180)
+    };
+  }) : [];
   const pendingAbsences = absences.filter(function(r) {
     return /انتظار|مراجعة|معلق/.test(String(r['الحالة'] || ''));
   });
@@ -6244,11 +6259,13 @@ function consoleOverviewMini_(profile) {
       pendingRequests: modules.requests ? pendingRequests.length : null,
       pendingLeaves: modules.requests ? pendingLeaves.length : null,
       openComplaints: modules.requests ? openComplaints.length : null,
+      recentComplaints: recentComplaints,
       pendingAbsences: modules.daily ? pendingAbsences.length : null,
       pendingOvertime: modules.finance ? pendingOvertime.length : null
     },
     alerts: alerts,
-    feed: feed.slice(0, 25)
+    feed: feed.slice(0, 25),
+    dataWarnings: dataWarnings
   };
 }
 

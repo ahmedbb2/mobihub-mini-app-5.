@@ -559,6 +559,7 @@
     };
 
     drawConsoleInto(slot);
+    renderManagerRecentComplaints(data);
     groupModuleGrid();
     applyModulePermissions();
     // Hide the legacy dashboard chrome: the hero, the "نظرة عامة" header and
@@ -574,6 +575,51 @@
     // Keep the legacy date line in sync (it is hidden but useful if shown later).
     const dateEl = $('managerDashboardDate');
     if (dateEl) dateEl.textContent = 'اليوم ' + (data.date || '') + ' · ' + (data.month || '');
+  }
+
+  // Render the recent complaints panel from the same live overview payload.
+  // The legacy dashboard renderer is no longer part of the active console path,
+  // so this panel must be painted explicitly on every overview refresh.
+  function renderManagerRecentComplaints(data) {
+    const section = $('managerComplaintSection');
+    const box = $('managerRecentComplaints');
+    if (!section || !box) return;
+
+    const canView = data && data.modules && data.modules.requests === true;
+    section.classList.toggle('hidden', !canView);
+    if (!canView) return;
+
+    const warnings = Array.isArray(data.dataWarnings) ? data.dataWarnings : [];
+    const complaintWarning = warnings.find(w => String(w).indexOf('شكاوى الموظفين') >= 0);
+    const complaints = data.requests && Array.isArray(data.requests.recentComplaints)
+      ? data.requests.recentComplaints : [];
+
+    if (complaintWarning) {
+      box.innerHTML = `<div class="manager-load-error">تعذر تحميل الشكاوى من Google Sheets. ${escapeHtml(complaintWarning)}</div>`;
+      return;
+    }
+
+    box.innerHTML = complaints.length ? complaints.map(c => `
+      <article class="manager-complaint">
+        <div>
+          <b>${escapeHtml(c.id || 'شكوى')} · ${escapeHtml(c.type || 'شكوى')}</b>
+          <small>${escapeHtml(c.employee || 'مهندس')} · ${escapeHtml(c.date || '')}</small>
+        </div>
+        <span class="status-pill">${escapeHtml(c.status || 'جديدة')}</span>
+        <p>${escapeHtml(c.details || '')}</p>
+        <button type="button" class="secondary-btn" data-manager-complaint="${escapeHtml(c.id || '')}" ${c.id ? '' : 'disabled'}>فتح الشكوى</button>
+      </article>`).join('') : '<div class="manager-empty-state"><b>لا توجد شكاوى مفتوحة حاليًا</b><p>ستظهر هنا أحدث الشكاوى بمجرد تسجيلها من الموظفين.</p></div>';
+
+    box.querySelectorAll('[data-manager-complaint]').forEach(button => {
+      button.addEventListener('click', () => {
+        const complaintId = button.dataset.managerComplaint;
+        if (!complaintId) return;
+        $('results').classList.remove('hidden');
+        $('resultTitle').textContent = 'محادثة الشكوى';
+        openModal('محادثة الشكوى', $('results'));
+        openComplaint(complaintId);
+      });
+    });
   }
 
   async function renderConsoleInto(host) {

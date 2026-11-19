@@ -4574,3 +4574,134 @@ button:disabled{pointer-events:none}
 [data-theme="light"] body.manager-enterprise .console-tab:hover{
   background:rgba(15,35,55,.05);
 }
+
+
+/* ===================================================================
+   MobiHub Admin — complete light palette correction
+   The enterprise console used several fixed dark fills with selectors
+   more specific than the original light-theme rules. These overrides
+   cover the full admin surface, including its alerts and complaint list.
+   =================================================================== */
+[data-theme="light"] body.manager-enterprise #managerDashboard,
+[data-theme="light"] body.manager-enterprise #managerWorkspace,
+[data-theme="light"] body.manager-enterprise #consoleSlot,
+[data-theme="light"] body.manager-enterprise .console{
+  color:var(--text);
+}
+[data-theme="light"] body.manager-enterprise .console-head{
+  color:var(--text);
+  border-color:var(--line-2);
+  background:radial-gradient(420px 190px at 0% 0%,rgba(224,124,16,.12),transparent 72%),linear-gradient(125deg,#FFFFFF,#EDF3F8) !important;
+  box-shadow:0 8px 24px rgba(15,35,55,.055);
+}
+[data-theme="light"] body.manager-enterprise .console-head h3,
+[data-theme="light"] body.manager-enterprise .console-head small{color:var(--text)}
+[data-theme="light"] body.manager-enterprise .console-refresh{
+  color:var(--text);
+  border-color:var(--line-2);
+  background:#FFFFFF;
+}
+[data-theme="light"] body.manager-enterprise .console-tabs{
+  border-color:var(--line);
+  background:rgba(255,255,255,.96) !important;
+  box-shadow:0 5px 18px rgba(15,35,55,.045);
+}
+[data-theme="light"] body.manager-enterprise .console-tab{color:var(--text-2)}
+[data-theme="light"] body.manager-enterprise .console-tab:hover{background:var(--surface-2);color:var(--text)}
+[data-theme="light"] body.manager-enterprise .console-tab.is-active{
+  color:var(--brand-2);
+  background:var(--brand-wash);
+  border-color:var(--brand-line);
+  box-shadow:none;
+}
+[data-theme="light"] body.manager-enterprise .console-kpi,
+[data-theme="light"] body.manager-enterprise .console-card{
+  color:var(--text);
+  border-color:var(--line);
+  background:linear-gradient(150deg,#FFFFFF,#F3F7FA) !important;
+  box-shadow:0 5px 18px rgba(15,35,55,.045);
+}
+[data-theme="light"] body.manager-enterprise .console-kpi b,
+[data-theme="light"] body.manager-enterprise .console-card h4{color:var(--text)}
+[data-theme="light"] body.manager-enterprise .console-kpi small,
+[data-theme="light"] body.manager-enterprise .console-kpi span{color:var(--text-3)}
+[data-theme="light"] body.manager-enterprise .console-critical{
+  color:var(--text);
+  border-color:var(--danger-line);
+  background:linear-gradient(145deg,#FFF8F7,#FFFFFF) !important;
+}
+[data-theme="light"] body.manager-enterprise .console-critical-row{
+  color:var(--text);
+  border-color:rgba(192,54,43,.20);
+  background:#FFFFFF;
+}
+[data-theme="light"] body.manager-enterprise .console-critical-row:hover{background:#FFF0EE}
+[data-theme="light"] body.manager-enterprise .console-alert,
+[data-theme="light"] body.manager-enterprise .console-action{
+  color:var(--text);
+  border-color:var(--line);
+  background:#FFFFFF;
+}
+[data-theme="light"] body.manager-enterprise .console-alert:hover,
+[data-theme="light"] body.manager-enterprise .console-action:hover{
+  border-color:var(--brand-line);
+  background:var(--brand-wash);
+}
+[data-theme="light"] body.manager-enterprise .console-alert.is-high{
+  border-color:var(--warn-line,var(--warn));
+  background:var(--warn-wash);
+}
+[data-theme="light"] body.manager-enterprise .console-alert b{background:var(--surface-2);color:var(--text)}
+[data-theme="light"] body.manager-enterprise .console-feed-row{border-color:var(--line)}
+[data-theme="light"] body.manager-enterprise .console-feed-row b{color:var(--text)}
+[data-theme="light"] body.manager-enterprise .console-feed-row small,
+[data-theme="light"] body.manager-enterprise .console-feed-row time{color:var(--text-3)}
+[data-theme="light"] body.manager-enterprise .console-feed-kind{background:var(--surface-2);color:var(--text-2)}
+[data-theme="light"] body.manager-enterprise #managerComplaintSection{
+  color:var(--text);
+  border:1px solid var(--line);
+  background:linear-gradient(150deg,#FFFFFF,#F4F7FA);
+  box-shadow:0 7px 22px rgba(15,35,55,.045);
+}
+[data-theme="light"] body.manager-enterprise #managerComplaintSection .manager-section-head h3{color:var(--text)}
+[data-theme="light"] body.manager-enterprise .manager-complaint{
+  color:var(--text);
+  border-color:var(--line);
+  background:#FFFFFF;
+  box-shadow:0 3px 12px rgba(15,35,55,.035);
+}
+[data-theme="light"] body.manager-enterprise .manager-complaint b{color:var(--text)}
+[data-theme="light"] body.manager-enterprise .manager-complaint p{color:var(--text-2)}
+[data-theme="light"] body.manager-enterprise .manager-complaint .secondary-btn{
+  color:var(--text);
+  border-color:var(--line-2);
+  background:var(--surface-2);
+}
+[data-theme="light"] body.manager-enterprise .manager-empty-state,
+[data-theme="light"] body.manager-enterprise .manager-loading{
+  color:var(--text-2);
+  border-color:var(--line-2);
+  background:#F7FAFC;
+}
+[data-theme="light"] body.manager-enterprise .manager-module-panel,
+[data-theme="light"] body.manager-enterprise .manager-module-content,
+[data-theme="light"] body.manager-enterprise .review-item,
+[data-theme="light"] body.manager-enterprise .record,
+[data-theme="light"] body.manager-enterprise .manager-row,
+[data-theme="light"] body.manager-enterprise .manager-action-card{
+  color:var(--text);
+  border-color:var(--line);
+  background:#FFFFFF;
+}
+[data-theme="light"] body.manager-enterprise .manager-module-panel h3,
+[data-theme="light"] body.manager-enterprise .manager-module-panel h4,
+[data-theme="light"] body.manager-enterprise .review-item strong,
+[data-theme="light"] body.manager-enterprise .record strong{color:var(--text)}
+[data-theme="light"] body.manager-enterprise .manager-module-group-label{color:var(--text-2)}
+[data-theme="light"] body.manager-enterprise .manager-module-group-grid > .manager-module{
+  color:var(--text);
+  border-color:var(--line);
+  background:linear-gradient(150deg,#FFFFFF,#F3F7FA);
+}
+[data-theme="light"] body.manager-enterprise .manager-module-group-grid > .manager-module:hover:not(:disabled){background:var(--brand-wash)}
+[data-theme="light"] body.manager-enterprise .status-pill{color:var(--text-2);background:var(--surface-2);border-color:var(--line)}
