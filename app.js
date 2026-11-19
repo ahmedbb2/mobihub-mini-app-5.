@@ -24,6 +24,7 @@
   let initData = '';
   let currentAttendance = null;
   let pendingUniform = false;
+  let pendingHygieneDate = '';
   let currentRole = 'employee';
   let workspaceRole = '';
   let availableWorkspaces = [];
@@ -79,6 +80,9 @@
     ACCOUNT_INACTIVE: 'الحساب غير نشط أو غير مصرح له باستخدام النظام.',
     INVALID_GPS_COORDINATES: 'تعذر قراءة موقعك بشكل صحيح. فعّل خدمات الموقع وحاول مرة أخرى.',
     GPS_ACCURACY_NOT_ACCEPTED: 'دقة الموقع الحالية غير كافية. حاول من مكان مفتوح وأعد المحاولة.',
+    OUTSIDE_ALLOWED_GEOFENCE: 'أنت خارج نطاق المركز المسموح (50 متر). تأكد أنك داخل المركز وأعد تسجيل الحضور.',
+    HYGIENE_SHIFT_NOT_COMPLETED: 'لا يمكن تسجيل تقييم النظافة قبل اكتمال الحضور والانصراف.',
+    HYGIENE_ALREADY_RATED: 'تم تسجيل تقييم النظافة لهذه الوردية بالفعل.',
     OPEN_ATTENDANCE_EXISTS: 'لديك حضور مفتوح بالفعل ولم يتم تسجيل الانصراف.',
     ALREADY_CHECKED_IN_TODAY: 'تم تسجيل حضورك اليوم بالفعل.',
     ALREADY_CHECKED_IN: 'تم تسجيل حضورك بالفعل. حدّث حالة الحضور.',
@@ -203,6 +207,8 @@
     $('shiftInfo').textContent = shift ? `الوردية: ${shift.name || shift.id}${shift.isFlexible ? ' · بدون موعد ثابت' : ` · ${shift.startTime || '--:--'} إلى ${shift.endTime || '--:--'} · سماح ${shift.graceMinutes} دقيقة`}` : 'لا توجد وردية محددة لليوم.';
     $('checkinBtn').disabled = open || !!data.checkedInToday || !data.assignment || !shift;
     $('checkoutBtn').disabled = !open;
+    pendingHygieneDate = String(data.pendingHygieneDate || pendingHygieneDate || '');
+    $('hygieneBox').classList.toggle('hidden', !pendingHygieneDate || !!open);
     const overtime=data.overtime||null;
     const overtimePanel=$('overtimePanel');
     const overtimeButton=$('requestOvertimeBtn');
@@ -247,7 +253,10 @@
         const otNote=ot&&Number(ot.amount)>0?` · أوفر تايم ${ot.minutes} دقيقة / ${ot.amount} جنيه`:ot?.status?` · ${ot.status}`:'';
         showAttendanceMessage(`تم تسجيل الانصراف بنجاح · ${formatTime12(result.time) || ''} · المسافة ${result.distanceMeters} متر.${otNote}`);
         $('uniformBox').classList.add('hidden');
+        pendingHygieneDate = result.hygieneRequired ? String(result.hygieneDate || result.date || '') : '';
+        $('hygieneBox').classList.toggle('hidden', !pendingHygieneDate);
         await refreshAttendance();
+        if (pendingHygieneDate) $('hygieneBox').classList.remove('hidden');
       }
     } catch (e) {
       showAttendanceMessage(e.message, true);
@@ -256,6 +265,30 @@
       button.textContent = oldText;
       if (currentAttendance) renderAttendance(currentAttendance);
       if (pendingUniform) $('checkinBtn').disabled = true;
+    }
+  }
+
+  async function submitAttendanceHygiene(rating) {
+    if (!pendingHygieneDate) return;
+    const buttons = [$('hygieneCleanBtn'), $('hygieneNotCleanBtn')];
+    buttons.forEach(b => b.disabled = true);
+    try {
+      const result = await api('attendance_hygiene_submit', { date: pendingHygieneDate, rating });
+      pendingHygieneDate = '';
+      $('hygieneBox').classList.add('hidden');
+      showAttendanceMessage(result.rating === 'نظيف'
+        ? '🌟 شكرًا لالتزامك. تم تسجيل نقطة نظافة مكان العمل ضمن تقييم الوردية.'
+        : 'تم تسجيل إجابتك. ستظهر في سجل تقييم النظافة للوردية.');
+      await refreshAttendance();
+    } catch (e) {
+      showAttendanceMessage(e.message, true);
+      if (e.code === 'HYGIENE_ALREADY_RATED') {
+        pendingHygieneDate = '';
+        $('hygieneBox').classList.add('hidden');
+        try { await refreshAttendance(); } catch (_) {}
+      }
+    } finally {
+      buttons.forEach(b => b.disabled = false);
     }
   }
 
@@ -270,6 +303,17 @@
       await refreshAttendance();
     } catch (e) {
       showAttendanceMessage(e.message, true);
+      // Restart-required failures: the confirmation is gone (expired,
+      // out-of-range location, already recorded, shift gone). Clear the
+      // pending uniform state and refresh attendance so the employee can
+      // start check-in again instead of staying stuck with a disabled
+      // check-in button and a visible confirmation box.
+      if (e.code === 'CHECKIN_CONFIRMATION_EXPIRED' || e.code === 'OUTSIDE_ALLOWED_GEOFENCE' || e.code === 'ALREADY_CHECKED_IN' || e.code === 'SHIFT_NOT_AVAILABLE') {
+        pendingUniform = false;
+        $('uniformBox').classList.add('hidden');
+        $('checkinBtn').disabled = false;
+        try { await refreshAttendance(); } catch (_) { /* button is usable again; status refreshes on next load */ }
+      }
     } finally {
       buttons.forEach(b => b.disabled = false);
     }
@@ -5009,6 +5053,8 @@
     finally { btn.disabled=false; btn.textContent='طلب موافقة أوفر تايم'; }
   });
   $('historyBtn').addEventListener('click', showAttendanceHistory);
+  $('hygieneCleanBtn').addEventListener('click', () => submitAttendanceHygiene('نظيف'));
+  $('hygieneNotCleanBtn').addEventListener('click', () => submitAttendanceHygiene('غير ملتزم'));
   document.querySelectorAll('[data-uniform]').forEach(btn => btn.addEventListener('click', () => confirmUniform(btn.dataset.uniform)));
   document.querySelectorAll('[data-entity]').forEach(btn => btn.addEventListener('click', () => showList(btn.dataset.entity)));
   $('backBtn').addEventListener('click', () => { const title=$('resultTitle').textContent; $('results').classList.add('hidden'); if(['الطلبات العامة','طلبات الأذونات','السلف والعهد'].includes(title)) showRequestPicker(); else closeModal(); });

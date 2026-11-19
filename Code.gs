@@ -1,16 +1,18 @@
 /**
- * MobiHub Mini App API — V1.12.0
- * Separate Apps Script project for the TEST spreadsheet.
+ * MobiHub Mini App API — V1.13.0
+ * PRODUCTION deployment.
  *
  * Required Script Properties:
- *   BOT_TOKEN       = Telegram bot token (never expose to browser)
- *   SPREADSHEET_ID  = ID of the TEST Google Spreadsheet
+ *   BOT_TOKEN       = same Telegram bot token used by the production bot
+ *   SPREADSHEET_ID  = exact ID of the production Google Spreadsheet used by Bot-2.gs
  *
- * This TEST API reads dashboard data and writes only approved Mini App actions.
+ * IMPORTANT: this is a separate Apps Script project. It will NOT inherit the
+ * bound spreadsheet from the bot project. Configure SPREADSHEET_ID explicitly
+ * to the production spreadsheet before deploying this version.
  */
 
 const MH = Object.freeze({
-  VERSION: '1.12.0',
+  VERSION: '1.13.0',
   TZ: 'Africa/Cairo',
   AUTH_MAX_AGE_SECONDS: 86400, // 24h: Telegram's recommended max. 300s logged users out after 5 min open.
   SHEETS: {
@@ -180,6 +182,10 @@ function doPost(e) {
 
       case 'attendance_checkout':
         data = attendanceCheckout_(profile, body.location || {});
+        break;
+
+      case 'attendance_hygiene_submit':
+        data = submitAttendanceHygiene_(profile, body);
         break;
 
       case 'overtime_status':
@@ -1455,8 +1461,17 @@ function attendanceStatus_(profile) {
   const open = mhFindOpenAttendance_(mine);
   const assignment = mhAssignmentForDate_(ss, profile.chatId, date);
   const shift = assignment ? mhShiftById_(ss, assignment.shiftId) : null;
+  const hygieneRows = mhRows_(ss, MH.SHEETS.rewardHygiene).filter(r => String(r['Chat ID'] || '').trim() === profile.chatId);
+  const ratedDates = new Set(hygieneRows.map(r => mhDate_(r['التاريخ'])));
+  const checkoutDates = new Set(mine.filter(r => String(r['النوع'] || '').trim() === 'انصراف').map(r => mhDate_(r['التاريخ'])));
+  const checkinDates = new Set(mine.filter(r => String(r['النوع'] || '').trim() === 'حضور').map(r => mhDate_(r['التاريخ'])));
+  const completedShiftDates = Array.from(checkoutDates)
+    .filter(d => d && checkinDates.has(d) && !ratedDates.has(d))
+    .sort();
+  const pendingHygieneDate = completedShiftDates.length ? completedShiftDates[completedShiftDates.length - 1] : '';
   return {
     date: date,
+    pendingHygieneDate: pendingHygieneDate,
     hasOpenAttendance: !!open,
     openAttendance: open,
     checkedInToday: mine.some(r => mhDate_(r['التاريخ']) === date && String(r['النوع']) === 'حضور'),
@@ -1483,6 +1498,11 @@ function attendanceCheckin_(profile, location) {
     const ss = spreadsheet_();
     const sheet = ss.getSheetByName(MH.SHEETS.attendance);
     const gps = mhValidateLocation_(location);
+    // V1.13 — check-in must happen INSIDE the centre (same as the bot's
+    // processAttendanceLocation_): an out-of-range location is rejected here,
+    // before any uniform confirmation is cached. Checkout is the only
+    // operation that records out-of-range, with a flag + management alert.
+    if (gps.outsideRange) throw new Error('OUTSIDE_ALLOWED_GEOFENCE');
     const date = mhToday_();
     const rows = mhRows_(ss, MH.SHEETS.attendance);
     const mine = rows.filter(r => String(r['Chat ID']).trim() === profile.chatId);
@@ -1554,8 +1574,18 @@ function attendanceConfirmUniform_(profile, uniformStatus) {
     // V1.13 — out of range is a flag (see mhValidateLocation_): the cached
     // pending may predate the flag, so recompute from the distance as well.
     const outsideRange = pending.outsideRange === true || Number(pending.distance || 0) > MH_ATTENDANCE.MAX_DISTANCE_METERS;
+    // V1.13 — a pending cached before the check-in rejection existed may
+    // carry an out-of-range location: never record a check-in from it.
+    // Clear the cache so the employee can restart cleanly from inside
+    // the centre (same rule as attendanceCheckin_ and the bot).
+    if (outsideRange) { cache.remove(key); throw new Error('OUTSIDE_ALLOWED_GEOFENCE'); }
     sheet.appendRow([pending.date, pending.time, profile.chatId, profile.name, 'حضور', Math.round(pending.distance), pending.accuracy, pending.lat, pending.lon, (lateMinutes > 0 ? 'متأخر' : 'في الموعد') + (outsideRange ? ' — خارج النطاق' : ''), lateMinutes, pending.shiftId, uniformStatus]);
     cache.remove(key);
+
+    // V1.13 — keep absence-review parity with the Telegram bot. A pending
+    // absence for this employee/date must close as soon as this check-in is
+    // committed, otherwise a manager could later approve a false absence.
+    mhClosePendingAbsenceAfterCheckin_(ss, profile.chatId, pending.date);
 
     // V1.13 — automatic deductions, same as the bot (Bot-2.gs:2099-2100).
     // Before this, the Mini App recorded lateness only: employees who checked
@@ -1668,8 +1698,61 @@ function attendanceCheckout_(profile, location) {
       (gps.outsideRange ? '\n⚠️ خارج النطاق المسموح — راجع موقع الموظف' : ''),
       'انصراف جديد');
 
-    return { recorded: true, type: 'انصراف', date: date, time: time, distanceMeters: Math.round(gps.distance), accuracyMeters: gps.accuracy, outsideRange: gps.outsideRange === true, checkinDate: open.date, checkinTime: open.time, overtime: overtime };
+    const hygieneAlreadyRated = mhRows_(ss, MH.SHEETS.rewardHygiene).some(r =>
+      String(r['Chat ID'] || '').trim() === profile.chatId && mhDate_(r['التاريخ']) === date
+    );
+    return { recorded: true, type: 'انصراف', date: date, time: time, distanceMeters: Math.round(gps.distance), accuracyMeters: gps.accuracy, outsideRange: gps.outsideRange === true, checkinDate: open.date, checkinTime: open.time, overtime: overtime, hygieneRequired: !hygieneAlreadyRated, hygieneDate: hygieneAlreadyRated ? '' : date };
   } finally { lock.releaseLock(); }
+}
+
+/**
+ * Employee self-attestation after Mini App checkout. The employee can only
+ * rate their own completed shift, and the write is atomic/idempotent.
+ */
+function submitAttendanceHygiene_(profile, body) {
+  if (profile.role !== 'employee') throw new Error('EMPLOYEE_ONLY');
+  const date = mhIsoDate_(body.date);
+  const rating = String(body.rating || '').trim();
+  if (!date || date > mhToday_() || !['نظيف', 'غير ملتزم'].includes(rating)) throw new Error('INVALID_HYGIENE_RATING');
+  const lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    const ss = spreadsheet_();
+    const attendance = mhRows_(ss, MH.SHEETS.attendance).filter(r =>
+      String(r['Chat ID'] || '').trim() === profile.chatId && mhDate_(r['التاريخ']) === date
+    );
+    const hasCheckin = attendance.some(r => String(r['النوع'] || '').trim() === 'حضور');
+    const hasCheckout = attendance.some(r => String(r['النوع'] || '').trim() === 'انصراف');
+    if (!hasCheckin || !hasCheckout) throw new Error('HYGIENE_SHIFT_NOT_COMPLETED');
+
+    const sh = mhSheet_(MH.SHEETS.rewardHygiene);
+    mhAssertHeaders_(sh, MH_FINANCE.REWARD_HYGIENE_HEADERS);
+    const existing = mhRowsObjects_(sh).find(r =>
+      String(r['Chat ID'] || '').trim() === profile.chatId && mhDate_(r['التاريخ']) === date
+    );
+    if (existing) throw new Error('HYGIENE_ALREADY_RATED');
+    sh.appendRow([date, profile.chatId, profile.name, rating, 'إقرار الموظف من Mini App', 'إقرار الموظف', mhNow_()]);
+    return { saved: true, date: date, rating: rating };
+  } finally { lock.releaseLock(); }
+}
+
+/** Same state transition as closePendingAbsenceIfCheckedInV15_ in Bot-2.gs. */
+function mhClosePendingAbsenceAfterCheckin_(ss, chatId, date) {
+  const sh = ss.getSheetByName(MH.SHEETS.absences);
+  if (!sh || sh.getLastRow() < 2) return 0;
+  const rows = mhRowsObjects_(sh);
+  let closed = 0;
+  rows.forEach(function(r) {
+    if (String(r['Chat ID'] || '').trim() !== String(chatId) ||
+        mhDate_(r['التاريخ']) !== date ||
+        String(r['الحالة'] || '').trim() !== 'بانتظار مراجعة المدير') return;
+    // Bot-2.gs stores the decision/status, note and timestamp in columns G:I.
+    sh.getRange(r.__row, 7, 1, 3).setValues([[
+      'مغلق - حضر بعد رصد الحالة', 'تم تسجيل الحضور', mhNow_()
+    ]]);
+    closed++;
+  });
+  return closed;
 }
 
 function mhValidateLocation_(location) {
@@ -1678,8 +1761,10 @@ function mhValidateLocation_(location) {
   if (!isFinite(lat) || !isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) throw new Error('INVALID_GPS_COORDINATES');
   if (accuracy === null || !isFinite(accuracy) || accuracy <= 0 || accuracy > MH_ATTENDANCE.MAX_ACCURACY_METERS) throw new Error('GPS_ACCURACY_NOT_ACCEPTED');
   const distance = mhDistance_(MH_ATTENDANCE.CENTER_LAT, MH_ATTENDANCE.CENTER_LONG, lat, lon);
-  // V1.13 — out of range is a flag, not a rejection (approved decision, same
-  // as the bot): the attendance is recorded and management is alerted.
+  // V1.13 — out of range is a FLAG here, not a rejection: the caller decides.
+  // Checkout records it with the flag + management alert (approved decision,
+  // same as the bot); check-in rejects it in attendanceCheckin_ /
+  // attendanceConfirmUniform_ (same as the bot's processAttendanceLocation_).
   return { lat: lat, lon: lon, accuracy: accuracy, distance: distance, outsideRange: distance > MH_ATTENDANCE.MAX_DISTANCE_METERS };
 }
 
@@ -2037,7 +2122,18 @@ function testMiniAppConfiguration() {
     throw new Error('One or more required Script Properties are missing.');
   }
 
-  Logger.log('SUCCESS: required Script Properties are configured.');
+  const ss = spreadsheet_();
+  const requiredSheets = Object.keys(MH.SHEETS).map(k => MH.SHEETS[k]);
+  const missingSheets = requiredSheets.filter(name => !ss.getSheetByName(name));
+  const reportDetails = {
+    spreadsheetName: ss.getName(),
+    spreadsheetIdConfigured: true,
+    requiredSheets: requiredSheets.length,
+    missingSheets: missingSheets
+  };
+  Logger.log(JSON.stringify(reportDetails, null, 2));
+  if (missingSheets.length) throw new Error('Production spreadsheet is missing required sheets: ' + missingSheets.join(', '));
+  Logger.log('SUCCESS: required Script Properties and production sheet structure are configured. Compare this spreadsheet with the one bound to Bot-2.gs.');
 }
 
 /**

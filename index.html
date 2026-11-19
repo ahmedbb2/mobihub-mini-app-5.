@@ -10,7 +10,7 @@
   <link rel="icon" type="image/webp" href="logo.webp">
   <link rel="apple-touch-icon" href="logo.webp">
 
-  <link rel="stylesheet" href="styles-2.css">
+  <link rel="stylesheet" href="styles.css">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
@@ -122,6 +122,14 @@
           <div class="attendance-actions">
             <button class="primary-btn" data-uniform="ملتزم">ملتزم</button>
             <button class="secondary-btn" data-uniform="غير ملتزم">غير ملتزم</button>
+          </div>
+        </div>
+        <div id="hygieneBox" class="uniform-box hidden">
+          <strong>🧹 تقييم نظافة مكان العمل</strong>
+          <p class="muted">هل تركت مكان العمل نظيفًا ومرتبًا؟ سيتم تسجيل إجابتك ضمن تقييم الوردية.</p>
+          <div class="attendance-actions">
+            <button id="hygieneCleanBtn" class="primary-btn" type="button">نعم، المكان نظيف</button>
+            <button id="hygieneNotCleanBtn" class="secondary-btn" type="button">لا، يحتاج إلى ترتيب</button>
           </div>
         </div>
         <p id="attendanceMessage" class="inline-message hidden" aria-live="polite"></p>
@@ -399,6 +407,6 @@
     <footer>MobiHub · نظام إدارة مركز الصيانة</footer>
   </div>
 
-  <script src="app-2.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>

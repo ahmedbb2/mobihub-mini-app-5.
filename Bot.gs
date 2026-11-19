@@ -1098,11 +1098,18 @@ function completeCheckoutWithGps_(chatId, employee, location, sheets) {
     return;
   }
   const shiftDate = openAttendance.date || checkoutDate;
+  // V1.13 — the checkout row belongs to the day the shift started
+  // (shiftDate), not to today: same rule as the Mini App (open.date).
+  // A shift's check-in + checkout stay under one date, so daily and
+  // monthly reports show complete shifts, and a forgotten checkout
+  // does not pollute the next day's statistics. The hygiene
+  // question/answer is keyed to the same shift date so reward
+  // points match the shift day.
   const now = new Date();
   const time = Utilities.formatDate(now, TIME_ZONE, "HH:mm:ss");
   const shift = getShiftForOpenAttendance_(sheets, chatId, openAttendance);
   sheets.att.appendRow([
-    checkoutDate, time, chatId, employee.name, "انصراف",
+    shiftDate, time, chatId, employee.name, "انصراف",
     Math.round(distance),
     accuracy === null ? "غير متاحة" : Math.round(accuracy),
     lat, lon, outOfRange ? "انصراف خارج النطاق" : "", 0,
@@ -1111,23 +1118,23 @@ function completeCheckoutWithGps_(chatId, employee, location, sheets) {
   const overtimeResult = finalizeOvertimeAtCheckout_(sheets, chatId, employee.name, shiftDate, now, shift);
   setEmployeeState_(sheets.emp, employee.row, STATE_ACTIVE);
   const hygienePendingKey = "MOBI_CHECKOUT_HYGIENE_PENDING_" + String(chatId);
-  const hygieneRowsToday = getSheetObjects_(sheets.rewardHygiene).filter(function(r) {
-    return String(r["Chat ID"] || "").trim() === String(chatId) && normalizeDate_(r["التاريخ"]) === checkoutDate;
+  const hygieneRowsForShift = getSheetObjects_(sheets.rewardHygiene).filter(function(r) {
+    return String(r["Chat ID"] || "").trim() === String(chatId) && normalizeDate_(r["التاريخ"]) === shiftDate;
   });
-  const hygieneAlreadyAnswered = hygieneRowsToday.length > 0;
+  const hygieneAlreadyAnswered = hygieneRowsForShift.length > 0;
   const pendingDate = PropertiesService.getScriptProperties().getProperty(hygienePendingKey);
-  const hygieneQuestionAlreadyPending = pendingDate === checkoutDate;
+  const hygieneQuestionAlreadyPending = pendingDate === shiftDate;
   sendMessage_(chatId,
     "✅ تم تسجيل الانصراف بنجاح.\n\n🕒 الوقت: " + formatTime12_(time) +
     "\n📍 المسافة من المركز: " + Math.round(distance) + " متر." +
     (outOfRange ? "\n⚠️ تم تسجيل الانصراف خارج نطاق المركز (المسموح " + ALLOWED_DISTANCE_METERS + " متر) وتم إشعار الإدارة." : "") +
     (overtimeResult && overtimeResult.minutes > 0 ? "\n\n⏱️ الأوفر تايم المعتمد: " + overtimeResult.minutes + " دقيقة\n💰 المستحق: " + overtimeResult.amount + " جنيه (بانتظار التسوية المالية)." + (overtimeResult.capped ? "\n⛔ تم تطبيق الحد الأقصى: ساعتان مدفوعتان." : "") : ""));
   if (!hygieneAlreadyAnswered && !hygieneQuestionAlreadyPending) {
-    PropertiesService.getScriptProperties().setProperty(hygienePendingKey, checkoutDate);
+    PropertiesService.getScriptProperties().setProperty(hygienePendingKey, shiftDate);
     sendMessage_(chatId,
       "🧹 سؤال سريع: هل تركت مكان العمل نظيفًا ومرتبًا؟\n" +
       "إجابتك تُسجل ضمن نقاط مكافأة الشهر. اختيار (لا) يرصد خصم 50 جنيهًا للمراجعة والاعتماد الإداري.",
-      {inline_keyboard:[[{text:"✅ أيوه، المكان نظيف",callback_data:"hyg|clean|"+checkoutDate},{text:"❌ لا، المكان غير نظيف",callback_data:"hyg|notclean|"+checkoutDate}]]});
+      {inline_keyboard:[[{text:"✅ أيوه، المكان نظيف",callback_data:"hyg|clean|"+shiftDate},{text:"❌ لا، المكان غير نظيف",callback_data:"hyg|notclean|"+shiftDate}]]});
   }
   notifyAdmin_(
     "🔴 تسجيل انصراف جديد" + (outOfRange ? " (خارج النطاق)" : "") + "\n\n👤 الموظف: " + employee.name +
@@ -1138,10 +1145,10 @@ function completeCheckoutWithGps_(chatId, employee, location, sheets) {
   if (outOfRange) {
     notifyAdmins_("انصراف خارج النطاق",
       "⚠️ انصراف خارج نطاق المركز\n\n👤 الموظف: " + employee.name +
-      "\n📅 التاريخ: " + checkoutDate + "\n🕒 الوقت: " + formatTime12_(time) +
+      "\n📅 التاريخ: " + shiftDate + "\n🕒 الوقت: " + formatTime12_(time) +
       "\n📍 المسافة من المركز: " + Math.round(distance) + " متر (المسموح: " + ALLOWED_DISTANCE_METERS + " متر)" +
       "\n🎯 دقة GPS: " + (accuracy === null ? "غير متاحة" : Math.round(accuracy) + " متر"),
-      "checkout_out_of_range_" + String(chatId) + "_" + checkoutDate, null, "Supervisor");
+      "checkout_out_of_range_" + String(chatId) + "_" + shiftDate, null, "Supervisor");
   }
 }
 
@@ -1155,13 +1162,20 @@ function completeCheckoutWithoutGps_(chatId, employee, sheets) {
     return;
   }
   const shiftDate = openAttendance.date || checkoutDate;
+  // V1.13 — the checkout row belongs to the day the shift started
+  // (shiftDate), not to today: same rule as the Mini App (open.date).
+  // A shift's check-in + checkout stay under one date, so daily and
+  // monthly reports show complete shifts, and a forgotten checkout
+  // does not pollute the next day's statistics. The hygiene
+  // question/answer is keyed to the same shift date so reward
+  // points match the shift day.
   const now = new Date();
   const time = Utilities.formatDate(now, TIME_ZONE, "HH:mm:ss");
   const shift = getShiftForOpenAttendance_(sheets, chatId, openAttendance);
 
   // أعمدة GPS تظل موجودة للتوافق مع التقارير القديمة، لكن الانصراف لا يجمع الموقع.
   sheets.att.appendRow([
-    checkoutDate, time, chatId, employee.name, "انصراف",
+    shiftDate, time, chatId, employee.name, "انصراف",
     "غير مطلوب", "غير مطلوب", "", "", "انصراف بدون GPS", 0,
     shift ? shift.id : "", ""
   ]);
@@ -1170,22 +1184,22 @@ function completeCheckoutWithoutGps_(chatId, employee, sheets) {
 
   setEmployeeState_(sheets.emp, employee.row, STATE_ACTIVE);
   const hygienePendingKey = "MOBI_CHECKOUT_HYGIENE_PENDING_" + String(chatId);
-  const hygieneRowsToday = getSheetObjects_(sheets.rewardHygiene).filter(function(r) {
-    return String(r["Chat ID"] || "").trim() === String(chatId) && normalizeDate_(r["التاريخ"]) === checkoutDate;
+  const hygieneRowsForShift = getSheetObjects_(sheets.rewardHygiene).filter(function(r) {
+    return String(r["Chat ID"] || "").trim() === String(chatId) && normalizeDate_(r["التاريخ"]) === shiftDate;
   });
-  const hygieneAlreadyAnswered = hygieneRowsToday.length > 0;
+  const hygieneAlreadyAnswered = hygieneRowsForShift.length > 0;
   const pendingDate = PropertiesService.getScriptProperties().getProperty(hygienePendingKey);
-  const hygieneQuestionAlreadyPending = pendingDate === checkoutDate;
+  const hygieneQuestionAlreadyPending = pendingDate === shiftDate;
   sendMessage_(chatId,
     "✅ تم تسجيل الانصراف بنجاح.\n\n🕒 الوقت: " + formatTime12_(time) +
     "\n📍 تم تسجيل الانصراف بدون طلب الموقع الجغرافي." +
     (overtimeResult && overtimeResult.minutes > 0 ? "\n\n⏱️ الأوفر تايم المعتمد: " + overtimeResult.minutes + " دقيقة\n💰 المستحق: " + overtimeResult.amount + " جنيه (بانتظار التسوية المالية)." + (overtimeResult.capped ? "\n⛔ تم تطبيق الحد الأقصى: ساعتان مدفوعتان." : "") : ""));
   if (!hygieneAlreadyAnswered && !hygieneQuestionAlreadyPending) {
-    PropertiesService.getScriptProperties().setProperty(hygienePendingKey, checkoutDate);
+    PropertiesService.getScriptProperties().setProperty(hygienePendingKey, shiftDate);
     sendMessage_(chatId,
       "🧹 سؤال سريع: هل تركت مكان العمل نظيفًا ومرتبًا؟\n" +
       "إجابتك تُسجل ضمن نقاط مكافأة الشهر. اختيار (لا) يرصد خصم 50 جنيهًا للمراجعة والاعتماد الإداري.",
-      {inline_keyboard:[[{text:"✅ أيوه، المكان نظيف",callback_data:"hyg|clean|"+checkoutDate},{text:"❌ لا، المكان غير نظيف",callback_data:"hyg|notclean|"+checkoutDate}]]});
+      {inline_keyboard:[[{text:"✅ أيوه، المكان نظيف",callback_data:"hyg|clean|"+shiftDate},{text:"❌ لا، المكان غير نظيف",callback_data:"hyg|notclean|"+shiftDate}]]});
   }
 
   notifyAdmin_(
