@@ -5330,7 +5330,7 @@ function startComplaintReply_(chatId, complaintId, sheets, isAdmin) {
   if (!c) { sendMessage_(chatId, "⚠️ الشكوى غير موجودة."); return false; }
   if (c.status === "مغلقة") { sendMessage_(chatId, "🔒 هذه الشكوى مغلقة ولا يمكن إضافة رد جديد."); return false; }
   sendMessage_(chatId, formatComplaintConversation_(sheets, c));
-  PropertiesService.getScriptProperties().setProperty(complaintReplyKey_(chatId), JSON.stringify({row:row, complaintId:c.id, role:isAdmin?"مدير":"موظف"}));
+  PropertiesService.getScriptProperties().setProperty(complaintReplyKey_(chatId), JSON.stringify({complaintId:c.id, role:isAdmin?"مدير":"موظف"}));
   sendMessage_(chatId, "💬 اكتب ردك على الشكوى " + c.id + " في رسالة واحدة.\nسيتم إضافته إلى نفس المحادثة وإخطار الطرف الآخر.\n\nللإلغاء أرسل: ❌ إلغاء");
   return true;
 }
@@ -6629,8 +6629,18 @@ function createAutomaticDeductionV15_(sheets, chatId, employeeName, date, type, 
   const id = "DD-" + Utilities.getUuid().substring(0, 8).toUpperCase();
   const now = Utilities.formatDate(new Date(), TIME_ZONE, "yyyy-MM-dd HH:mm:ss");
   sh.appendRow([id, date, String(chatId), employeeName, type, reason, Number(amount), "تلقائي", "بانتظار اعتماد المدير", reference, now, "", "", "", ""]);
-  sendMessage_(chatId, "⚠️ تم رصد خصم يحتاج مراجعة الإدارة\n\nالنوع: " + type + "\nالتفاصيل: " + reason + "\nالمبلغ المقترح: " + Number(amount).toFixed(2) + " جنيه\n\nلن يُضاف إلى الخصومات المعتمدة إلا بعد مراجعة المدير.");
-  notifyAdmins_("خصم تلقائي بانتظار الاعتماد", "💸 خصم تلقائي بانتظار الاعتماد\n\nالموظف: " + employeeName + "\nالنوع: " + type + "\nالتاريخ: " + date + "\nالسبب: " + reason + "\nالمبلغ: " + Number(amount).toFixed(2) + " جنيه", "deduction_pending_" + id, {inline_keyboard:[[{text:"✅ اعتماد",callback_data:"ded|approve|" + id},{text:"❌ رفض",callback_data:"ded|reject|" + id}]]}, "Finance");
+  // إشعار المديرين أولاً: فشل إرسال رسالة الموظف لا يجب أن يمنع طلب الاعتماد،
+  // وكل إرسال مغلف بـ try/catch مستقل فلا يرمي الإشعار أي استثناء — الصف سُجل أعلاه.
+  try {
+    notifyAdmins_("خصم تلقائي بانتظار الاعتماد", "💸 خصم تلقائي بانتظار الاعتماد\n\nالموظف: " + employeeName + "\nالنوع: " + type + "\nالتاريخ: " + date + "\nالسبب: " + reason + "\nالمبلغ: " + Number(amount).toFixed(2) + " جنيه", "deduction_pending_" + id, {inline_keyboard:[[{text:"✅ اعتماد",callback_data:"ded|approve|" + id},{text:"❌ رفض",callback_data:"ded|reject|" + id}]]}, "Finance");
+  } catch (e) {
+    console.error("Deduction admin notification failed [" + id + "]: " + e);
+  }
+  try {
+    sendMessage_(chatId, "⚠️ تم رصد خصم يحتاج مراجعة الإدارة\n\nالنوع: " + type + "\nالتفاصيل: " + reason + "\nالمبلغ المقترح: " + Number(amount).toFixed(2) + " جنيه\n\nلن يُضاف إلى الخصومات المعتمدة إلا بعد مراجعة المدير.");
+  } catch (e) {
+    console.error("Deduction employee notification failed [" + id + "]: " + e);
+  }
   return true;
 }
 function sendAdminDeductionsMenuV15_(chatId, messageId, sheets) {

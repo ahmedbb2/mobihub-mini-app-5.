@@ -799,7 +799,9 @@ function listData_(profile, entity) {
     canViewAll = canReviewGeneral;
   }
 
-  const rows = rowsAsObjects_(spreadsheet_(), definition.sheet).map(function(row, index) { row.__row = index + 2; return row; });
+  // V1.13 (ح-1) — __row now comes from rowsAsObjects_ (the physical row);
+  // recomputing index + 2 on the filtered array shifted rows below blanks.
+  const rows = rowsAsObjects_(spreadsheet_(), definition.sheet);
 
   // Finance role sees only personal-advance rows from the general requests sheet.
   if (entity === 'requests' && role === 'finance') {
@@ -1323,10 +1325,10 @@ function createOvertimeRequest_(profile) {
     const fmt = d => Utilities.formatDate(d, MH.TZ, 'yyyy-MM-dd HH:mm:ss');
     const id = 'OT-' + Utilities.getUuid().slice(0,8).toUpperCase();
     sh.appendRow([id,context.date,profile.chatId,profile.name,context.shiftId,fmt(shiftEnd),fmt(overtimeStart),fmt(overtimeStart),stamp,MH_OVERTIME.PENDING,'','','',0,0,'']);
-    const message = '⏱️ طلب موافقة على أوفر تايم\n\n👤 المهندس: ' + profile.name + '\n📅 تاريخ الوردية: ' + context.date + '\n🕒 نهاية الوردية: ' + fmt(shiftEnd) + '\n🟢 بداية احتساب الأوفر تايم: ' + fmt(overtimeStart) + '\n⏳ آخر موعد للموافقة: ' + fmt(overtimeStart) + '\n💵 السعر: 1 جنيه لكل دقيقة بعد أول 30 دقيقة.\n⛔ الحد الأقصى: ساعتان مدفوعتان (120 جنيهًا).\n\nيجب اعتماد الطلب قبل بداية احتساب الأوفر تايم.';
+    const message = '⏱️ طلب موافقة على أوفر تايم\n\n👤 المهندس: ' + profile.name + '\n📅 تاريخ الوردية: ' + context.date + '\n🕒 نهاية الوردية: ' + fmt(shiftEnd) + '\n🟢 بداية احتساب الأوفر تايم: ' + fmt(overtimeStart) + '\n💵 السعر: 1 جنيه لكل دقيقة بعد أول 30 دقيقة.\n⛔ الحد الأقصى: ساعتان مدفوعتان (120 جنيهًا).\n\nيمكن اعتماد الطلب في أي وقت ما دام معلقًا وقبل تسجيل الانصراف.';
     let notification = {sent:0,failed:0};
     try { notification = mhNotifyOvertimeAdminsMini_(message,id); } catch(e) { console.error('Overtime request notification failed: '+e); }
-    return {submitted:true,requestId:id,status:MH_OVERTIME.PENDING,message:'تم إرسال طلب الأوفر تايم إلى الإدارة. انتظر الموافقة قبل بداية الحساب.',adminNotificationsSent:notification.sent,adminNotificationsFailed:notification.failed};
+    return {submitted:true,requestId:id,status:MH_OVERTIME.PENDING,message:'تم إرسال طلب الأوفر تايم إلى الإدارة. يمكن اعتماده ما دام معلقًا وقبل تسجيل الانصراف.',adminNotificationsSent:notification.sent,adminNotificationsFailed:notification.failed};
   } finally { lock.releaseLock(); }
 }
 function mhNotifyOvertimeAdminsMini_(message, requestId) {
@@ -1361,13 +1363,14 @@ function decideOvertimeRequest_(profile, body) {
     const get=k=>values[headers.indexOf(k)];
     if (String(get('الحالة')||'').trim() !== MH_OVERTIME.PENDING) throw new Error('OVERTIME_ALREADY_REVIEWED');
     const now=new Date(), stamp=Utilities.formatDate(now,MH.TZ,'yyyy-MM-dd HH:mm:ss');
-    if (action === 'approve') {
-      const deadline=mhOvertimeParseDateTime_(get('آخر موعد للموافقة'));
-      if (!deadline || isNaN(deadline.getTime()) || now >= deadline) {
-        sh.getRange(rowNum,headers.indexOf('الحالة')+1).setValue('انتهت مهلة الموافقة');
-        throw new Error('OVERTIME_APPROVAL_EXPIRED');
-      }
-    }
+    // V1.13 — no approval deadline any more. The request itself must still be
+    // created inside the 30-minute window after shift end (mhOvertimeContext_),
+    // but once it exists and is still pending it can be approved at any time
+    // before checkout closes it (finalizeOvertimeAtCheckoutMini_ marks a
+    // still-pending request "لم تتم الموافقة قبل الانصراف"). Before this, the
+    // manager had to approve inside the same 30 minutes, which was
+    // practically impossible. The "آخر موعد للموافقة" column is kept as a
+    // record of the request window end; it is no longer enforced.
     const next=action==='approve'?'معتمد':'مرفوض';
     sh.getRange(rowNum,headers.indexOf('الحالة')+1).setValue(next);
     sh.getRange(rowNum,headers.indexOf('قرار المدير بواسطة')+1).setValue(profile.chatId);
@@ -1483,15 +1486,48 @@ function attendanceCheckin_(profile, location) {
     const date = mhToday_();
     const rows = mhRows_(ss, MH.SHEETS.attendance);
     const mine = rows.filter(r => String(r['Chat ID']).trim() === profile.chatId);
-    if (mhFindOpenAttendance_(mine)) throw new Error('OPEN_ATTENDANCE_EXISTS');
+    if (mhFindOpenAttendance_(mine, date)) throw new Error('OPEN_ATTENDANCE_EXISTS');
     if (mine.some(r => mhDate_(r['التاريخ']) === date && String(r['النوع']) === 'حضور')) throw new Error('ALREADY_CHECKED_IN_TODAY');
     const assignment = mhAssignmentForDate_(ss, profile.chatId, date);
     const shift = assignment ? mhShiftById_(ss, assignment.shiftId) : null;
     if (!assignment || !shift) throw new Error('NO_ACTIVE_SHIFT_ASSIGNED');
-    const pending = { date: date, time: mhNow_('HH:mm:ss'), lat: gps.lat, lon: gps.lon, accuracy: gps.accuracy, distance: gps.distance, shiftId: shift.id };
+    const pending = { date: date, time: mhNow_('HH:mm:ss'), lat: gps.lat, lon: gps.lon, accuracy: gps.accuracy, distance: gps.distance, outsideRange: gps.outsideRange, shiftId: shift.id };
     CacheService.getScriptCache().put(mhUniformKey_(profile.chatId), JSON.stringify(pending), MH_ATTENDANCE.UNIFORM_CACHE_SECONDS);
-    return { requiresUniformConfirmation: true, distanceMeters: Math.round(gps.distance), accuracyMeters: gps.accuracy, shift: shift, message: 'أكد حالة اليونيفورم لإتمام تسجيل الحضور.' };
+    return { requiresUniformConfirmation: true, distanceMeters: Math.round(gps.distance), accuracyMeters: gps.accuracy, outsideRange: gps.outsideRange, shift: shift, message: 'أكد حالة اليونيفورم لإتمام تسجيل الحضور.' };
   } finally { lock.releaseLock(); }
+}
+
+/** Reads one numeric deduction rate from «إعدادات الخصومات» — the same sheet
+    the bot reads (Bot-2.gs getDeductionSettingV15_). An empty or non-numeric
+    cell falls back to the default; the bot returns 0 for an empty cell, which
+    silently creates no deduction at all. */
+function mhDeductionSetting_(ss, key, fallback) {
+  try {
+    const rows = mhRows_(ss, MH.SHEETS.deductionSettings);
+    const row = rows.filter(function(r) { return String(r['الإعداد'] || '').trim() === key; })[0];
+    if (!row) return fallback;
+    const raw = String(row['القيمة'] == null ? '' : row['القيمة']).trim();
+    if (raw === '') return fallback;
+    const n = Number(raw);
+    return isFinite(n) ? n : fallback;
+  } catch (e) { return fallback; }
+}
+
+/** Creates one automatic deduction row in the exact shape the bot writes
+    (Bot-2.gs createAutomaticDeductionV15_). Returns {id, type, reason,
+    amount} or null when nothing is owed (amount <= 0) or a row with the same
+    reference already exists — the reference is what stops the same late
+    arrival from being deducted twice, from either channel. */
+function mhCreateAutomaticDeduction_(ss, profile, date, type, reason, amount, reference) {
+  if (!(Number(amount) > 0) || !reference) return null;
+  const sh = mhSheet_(MH.SHEETS.deductions);
+  mhAssertHeaders_(sh, MH_FINANCE.DEDUCTION_HEADERS);
+  const rows = mhRows_(ss, MH.SHEETS.deductions);
+  if (rows.some(function(r) { return String(r['مرجع الواقعة'] || '') === reference; })) return null;
+  const id = 'DD-' + Utilities.getUuid().slice(0, 8).toUpperCase();
+  const amt = Math.round(Number(amount) * 100) / 100;
+  sh.appendRow([id, date, String(profile.chatId), profile.name, type, reason, amt, 'تلقائي', 'بانتظار اعتماد المدير', reference, mhNow_(), '', String(profile.chatId), 'من Mini App', '']);
+  return { id: id, type: type, reason: reason, amount: amt };
 }
 
 function attendanceConfirmUniform_(profile, uniformStatus) {
@@ -1507,7 +1543,7 @@ function attendanceConfirmUniform_(profile, uniformStatus) {
     const ss = spreadsheet_();
     const sheet = ss.getSheetByName(MH.SHEETS.attendance);
     const mine = mhRows_(ss, MH.SHEETS.attendance).filter(r => String(r['Chat ID']).trim() === profile.chatId);
-    if (mhFindOpenAttendance_(mine) || mine.some(r => mhDate_(r['التاريخ']) === pending.date && String(r['النوع']) === 'حضور')) throw new Error('ALREADY_CHECKED_IN');
+    if (mhFindOpenAttendance_(mine, pending.date) || mine.some(r => mhDate_(r['التاريخ']) === pending.date && String(r['النوع']) === 'حضور')) throw new Error('ALREADY_CHECKED_IN');
     const shift = mhShiftById_(ss, pending.shiftId);
     if (!shift) throw new Error('SHIFT_NOT_AVAILABLE');
     let lateMinutes = 0;
@@ -1515,12 +1551,33 @@ function attendanceConfirmUniform_(profile, uniformStatus) {
       const rawLate = Math.max(0, mhMinutes_(pending.time) - mhMinutes_(shift.startTime) - shift.graceMinutes);
       lateMinutes = Math.max(0, rawLate - mhApprovedLeaveOverlap_(ss, profile.chatId, pending.date, shift.startTime, pending.time, shift.graceMinutes));
     }
-    sheet.appendRow([pending.date, pending.time, profile.chatId, profile.name, 'حضور', Math.round(pending.distance), pending.accuracy, pending.lat, pending.lon, lateMinutes > 0 ? 'متأخر' : 'في الموعد', lateMinutes, pending.shiftId, uniformStatus]);
+    // V1.13 — out of range is a flag (see mhValidateLocation_): the cached
+    // pending may predate the flag, so recompute from the distance as well.
+    const outsideRange = pending.outsideRange === true || Number(pending.distance || 0) > MH_ATTENDANCE.MAX_DISTANCE_METERS;
+    sheet.appendRow([pending.date, pending.time, profile.chatId, profile.name, 'حضور', Math.round(pending.distance), pending.accuracy, pending.lat, pending.lon, (lateMinutes > 0 ? 'متأخر' : 'في الموعد') + (outsideRange ? ' — خارج النطاق' : ''), lateMinutes, pending.shiftId, uniformStatus]);
     cache.remove(key);
+
+    // V1.13 — automatic deductions, same as the bot (Bot-2.gs:2099-2100).
+    // Before this, the Mini App recorded lateness only: employees who checked
+    // in from the app never got a deduction row and managers never got the
+    // approval message, while bot check-ins did both. The reference is
+    // identical to the bot's (ATT|date|chatId|LATE / ...|UNIFORM), so a bot
+    // and an app check-in for the same employee and day dedupe each other.
+    const autoDeductions = [];
+    if (lateMinutes > 0) {
+      const rate = mhDeductionSetting_(ss, 'التأخير_للدقيقة', 1.5);
+      const d = mhCreateAutomaticDeduction_(ss, profile, pending.date, 'التأخير', lateMinutes + ' دقيقة تأخير بعد فترة السماح', lateMinutes * rate, 'ATT|' + pending.date + '|' + profile.chatId + '|LATE');
+      if (d) autoDeductions.push(d);
+    }
+    if (uniformStatus === 'غير ملتزم') {
+      const uniformAmount = mhDeductionSetting_(ss, 'خصم_اليونيفورم', 30);
+      const d = mhCreateAutomaticDeduction_(ss, profile, pending.date, 'عدم الالتزام باليونيفورم', 'عدم الالتزام باليونيفورم', uniformAmount, 'ATT|' + pending.date + '|' + profile.chatId + '|UNIFORM');
+      if (d) autoDeductions.push(d);
+    }
 
     // The technician must get a Telegram confirmation, and management must know
     // the arrival immediately — the app alone was silent.
-    const statusText = lateMinutes > 0 ? 'متأخر ' + lateMinutes + ' دقيقة' : 'في الموعد';
+    const statusText = (lateMinutes > 0 ? 'متأخر ' + lateMinutes + ' دقيقة' : 'في الموعد') + (outsideRange ? ' — خارج النطاق' : '');
     mhNotifyEmployee_(profile.chatId,
       '✅ تم تسجيل حضورك بنجاح\n━━━━━━━━━━━━━━━━━━\n' +
       '🕒 الوقت: ' + pending.time + '\n' +
@@ -1528,6 +1585,8 @@ function attendanceConfirmUniform_(profile, uniformStatus) {
       '👕 اليونيفورم: ' + uniformStatus + '\n' +
       '📍 المسافة من المركز: ' + Math.round(pending.distance) + ' متر\n' +
       '⏱ الحالة: ' + statusText + '\n' +
+      (outsideRange ? '⚠️ أنت خارج نطاق المركز المسموح — تم تسجيل الحضور مع تنبيه الإدارة\n' : '') +
+      (autoDeductions.length ? '💸 خصم تلقائي مقترح: ' + autoDeductions.map(function(d) { return d.type + ' ' + d.amount.toFixed(2) + ' جنيه'; }).join('، ') + ' (بانتظار اعتماد الإدارة)\n' : '') +
       '━━━━━━━━━━━━━━━━━━\nنتمنى لك يوم عمل موفق.',
       'تسجيل حضور', 'attendance.reminder');
 
@@ -1537,10 +1596,27 @@ function attendanceConfirmUniform_(profile, uniformStatus) {
       '🕒 ' + pending.time + '\n' +
       '⏱ ' + statusText + '\n' +
       '👕 اليونيفورم: ' + uniformStatus + '\n' +
-      '📍 ' + Math.round(pending.distance) + ' متر من المركز',
+      '📍 ' + Math.round(pending.distance) + ' متر من المركز' +
+      (outsideRange ? '\n⚠️ خارج النطاق المسموح — راجع موقع الموظف' : ''),
       'حضور جديد');
 
-    return { recorded: true, type: 'حضور', date: pending.date, time: pending.time, distanceMeters: Math.round(pending.distance), accuracyMeters: pending.accuracy, uniformStatus: uniformStatus, lateMinutes: lateMinutes, attendanceStatus: lateMinutes > 0 ? 'متأخر' : 'في الموعد' };
+    // The approval message the bot sends (Bot-2.gs:6633) — plain text here,
+    // because the app has no callback buttons; the manager approves or
+    // rejects from the dashboard (المالية ← الخصومات المعلقة).
+    if (autoDeductions.length) {
+      const lines = autoDeductions.map(function(d) {
+        return '🏷 ' + d.type + ' — ' + d.reason + ' — ' + d.amount.toFixed(2) + ' جنيه';
+      }).join('\n');
+      mhNotifyManagement_(
+        '💸 خصم تلقائي بانتظار الاعتماد\n━━━━━━━━━━━━━━━━━━\n' +
+        '👤 ' + String(profile.name || '') + '\n' +
+        '📅 ' + pending.date + '\n' +
+        lines + '\n' +
+        '━━━━━━━━━━━━━━━━━━\nللاعتماد أو الرفض: لوحة المدير ← المالية ← الخصومات المعلقة',
+        'خصم تلقائي بانتظار الاعتماد');
+    }
+
+    return { recorded: true, type: 'حضور', date: pending.date, time: pending.time, distanceMeters: Math.round(pending.distance), accuracyMeters: pending.accuracy, outsideRange: outsideRange, uniformStatus: uniformStatus, lateMinutes: lateMinutes, attendanceStatus: lateMinutes > 0 ? 'متأخر' : 'في الموعد', autoDeductions: autoDeductions };
   } finally { lock.releaseLock(); }
 }
 
@@ -1561,9 +1637,12 @@ function attendanceCheckout_(profile, location) {
     );
     if (openCustody) throw new Error('OPEN_CASH_CUSTODY');
     const checkoutAt = new Date();
-    const date = Utilities.formatDate(checkoutAt, MH.TZ, 'yyyy-MM-dd');
+    // V1.13 — the checkout belongs to the day the shift started (open.date),
+    // not to today: an employee who forgot to check out yesterday must not
+    // corrupt today's statistics with a checkout row dated today.
+    const date = open.date || Utilities.formatDate(checkoutAt, MH.TZ, 'yyyy-MM-dd');
     const time = Utilities.formatDate(checkoutAt, MH.TZ, 'HH:mm:ss');
-    sheet.appendRow([date, time, profile.chatId, profile.name, 'انصراف', Math.round(gps.distance), gps.accuracy, gps.lat, gps.lon, 'تم تسجيل الانصراف', 0, open.shiftId || '', '']);
+    sheet.appendRow([date, time, profile.chatId, profile.name, 'انصراف', Math.round(gps.distance), gps.accuracy, gps.lat, gps.lon, 'تم تسجيل الانصراف' + (gps.outsideRange ? ' — خارج النطاق' : ''), 0, open.shiftId || '', '']);
     let overtime = null;
     try { overtime = finalizeOvertimeAtCheckoutMini_(profile, open, checkoutAt); }
     catch(overtimeError) { console.error('Overtime finalization failed after successful checkout: '+overtimeError); overtime = {status:'تعذر إغلاق سجل الأوفر تايم تلقائيًا',warning:true}; }
@@ -1578,16 +1657,18 @@ function attendanceCheckout_(profile, location) {
       '📅 التاريخ: ' + date + '\n' +
       '📍 ' + Math.round(gps.distance) + ' متر من المركز' +
       overtimeLine +
+      (gps.outsideRange ? '\n⚠️ أنت خارج نطاق المركز المسموح — تم تسجيل الانصراف مع تنبيه الإدارة' : '') +
       '\n━━━━━━━━━━━━━━━━━━\nشكرًا لمجهودك اليوم.',
       'تسجيل انصراف', 'attendance.reminder');
 
     mhNotifyManagement_(
       '🔴 تسجيل انصراف\n━━━━━━━━━━━━━━━━━━\n' +
       '👤 ' + String(profile.name || '') + '\n' +
-      '🕒 ' + time + overtimeLine,
+      '🕒 ' + time + overtimeLine +
+      (gps.outsideRange ? '\n⚠️ خارج النطاق المسموح — راجع موقع الموظف' : ''),
       'انصراف جديد');
 
-    return { recorded: true, type: 'انصراف', date: date, time: time, distanceMeters: Math.round(gps.distance), accuracyMeters: gps.accuracy, checkinDate: open.date, checkinTime: open.time, overtime: overtime };
+    return { recorded: true, type: 'انصراف', date: date, time: time, distanceMeters: Math.round(gps.distance), accuracyMeters: gps.accuracy, outsideRange: gps.outsideRange === true, checkinDate: open.date, checkinTime: open.time, overtime: overtime };
   } finally { lock.releaseLock(); }
 }
 
@@ -1597,8 +1678,9 @@ function mhValidateLocation_(location) {
   if (!isFinite(lat) || !isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) throw new Error('INVALID_GPS_COORDINATES');
   if (accuracy === null || !isFinite(accuracy) || accuracy <= 0 || accuracy > MH_ATTENDANCE.MAX_ACCURACY_METERS) throw new Error('GPS_ACCURACY_NOT_ACCEPTED');
   const distance = mhDistance_(MH_ATTENDANCE.CENTER_LAT, MH_ATTENDANCE.CENTER_LONG, lat, lon);
-  if (distance > MH_ATTENDANCE.MAX_DISTANCE_METERS) throw new Error('OUTSIDE_ALLOWED_GEOFENCE:' + Math.round(distance));
-  return { lat: lat, lon: lon, accuracy: accuracy, distance: distance };
+  // V1.13 — out of range is a flag, not a rejection (approved decision, same
+  // as the bot): the attendance is recorded and management is alerted.
+  return { lat: lat, lon: lon, accuracy: accuracy, distance: distance, outsideRange: distance > MH_ATTENDANCE.MAX_DISTANCE_METERS };
 }
 
 // خلية وقت فقط في شيت جوجل تاريخها 1899-12-30؛ نعرضها كوقت فقط بدل 1899.
@@ -1623,9 +1705,16 @@ function mhRows_(ss, sheetName) {
   });
 }
 
-function mhFindOpenAttendance_(rows) {
+function mhFindOpenAttendance_(rows, date) {
   for (let i = rows.length - 1; i >= 0; i--) {
-    if (String(rows[i]['النوع']).trim() === 'حضور') return { date: mhDate_(rows[i]['التاريخ']), time: mhTime_(rows[i]['الوقت']), shiftId: String(rows[i]['Shift ID'] || '') };
+    if (String(rows[i]['النوع']).trim() === 'حضور') {
+      // V1.13 — an open check-in only counts for its own date. When a date is
+      // given, a stale open check-in from a previous day must not block
+      // today's check-in (the check-in callers pass the date; checkout,
+      // overtime and status callers do not).
+      if (date && mhDate_(rows[i]['التاريخ']) !== date) return null;
+      return { date: mhDate_(rows[i]['التاريخ']), time: mhTime_(rows[i]['الوقت']), shiftId: String(rows[i]['Shift ID'] || '') };
+    }
     if (String(rows[i]['النوع']).trim() === 'انصراف') return null;
   }
   return null;
@@ -1760,17 +1849,22 @@ function rowsAsObjects_(ss, sheetName) {
     return String(header).trim();
   });
 
+  // V1.13 (ح-1) — attach the PHYSICAL sheet row (__row). Blank rows are
+  // filtered out, but the survivors keep their true row number, so decisions
+  // target the right line. Before this, callers recomputed __row = index + 2
+  // on the filtered array, which shifted every row below a blank row.
   return values.slice(1)
-    .filter(function(row) {
-      return row.some(function(value) {
+    .map(function(row, i) { return { values: row, rowNum: i + 2 }; })
+    .filter(function(item) {
+      return item.values.some(function(value) {
         return value !== '' && value !== null;
       });
     })
-    .map(function(row) {
-      const object = {};
+    .map(function(item) {
+      const object = { __row: item.rowNum };
 
       headers.forEach(function(header, index) {
-        const value = row[index];
+        const value = item.values[index];
         object[header] = mhDateCell_(value, "yyyy-MM-dd'T'HH:mm:ss");
       });
 
@@ -1795,16 +1889,19 @@ function rowsAsObjectsTail_(ss, sheetName, maxRows) {
   const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0]
     .map(function(header) { return String(header).trim(); });
   const values = sheet.getRange(startRow, 1, lastRow - startRow + 1, lastCol).getValues();
+  // V1.13 (ح-1) — same physical-__row rule as rowsAsObjects_: values here
+  // start at startRow (no header row), so a row keeps startRow + i.
   return values
-    .filter(function(row) {
-      return row.some(function(value) {
+    .map(function(row, i) { return { values: row, rowNum: startRow + i }; })
+    .filter(function(item) {
+      return item.values.some(function(value) {
         return value !== '' && value !== null;
       });
     })
-    .map(function(row) {
-      const object = {};
+    .map(function(item) {
+      const object = { __row: item.rowNum };
       headers.forEach(function(header, index) {
-        object[header] = mhDateCell_(row[index], "yyyy-MM-dd'T'HH:mm:ss");
+        object[header] = mhDateCell_(item.values[index], "yyyy-MM-dd'T'HH:mm:ss");
       });
       return object;
     });
@@ -2016,6 +2113,18 @@ const MH_CASH = Object.freeze({
   HEADERS: ['رقم الطلب','التاريخ والوقت','Chat ID','اسم الموظف','المبلغ المطلوب بالجنيه','الغرض','الحالة','المبلغ المعتمد بالجنيه','حالة الصرف','المسؤول عن الصرف','تاريخ الصرف','حالة العهدة','ملاحظات المدير','تاريخ آخر تحديث','المصروف الفعلي بالجنيه','المبلغ المطلوب إرجاعه بالجنيه','المبلغ الإضافي المستحق للموظف بالجنيه','حالة التسوية','تاريخ تقديم التسوية','تاريخ تأكيد استلام المتبقي','المسؤول عن استلام المتبقي','حالة التعويض','تاريخ اعتماد التعويض','تاريخ صرف التعويض','ملاحظات التسوية','Chat ID آخر مدير قرار','اسم آخر مدير قرار'],
   REVIEW_ROLES: ['super_admin','admin','finance']
 });
+/** V1.13 (ح-3) — adds the "رقم الطلب" column to the requests sheet if it is
+    missing, mirroring mhEnsureFinanceKeyColumn_. Advances need a stable
+    number stored in the sheet so the approval can link them to the cash
+    sheet and decisions can verify the record identity. */
+function mhEnsureRequestIdColumn_(sheet) {
+  const width = Math.max(sheet.getLastColumn(), 1);
+  const headers = sheet.getRange(1, 1, 1, width).getDisplayValues()[0]
+    .map(function(h) { return String(h).trim(); });
+  if (headers.indexOf('رقم الطلب') >= 0) return;
+  sheet.getRange(1, width + 1).setValue('رقم الطلب');
+}
+
 function createCashRequest_(profile, body) {
   if (profile.role !== 'employee') throw new Error('EMPLOYEE_ONLY');
   const amountRaw = String(body.amount ?? '').replace(/[٬,]/g, '').trim();
@@ -2025,13 +2134,31 @@ function createCashRequest_(profile, body) {
   // V40 schema: a personal advance is a request row of type "سلفة".
   // "طلبات السحب" remains exclusive to purchase cash/custody.
   const sh = mhSheet_(MH.SHEETS.requests);
-  const map = mhAssertHeaders_(sh, MH_REQUESTS.REQUEST_HEADERS);
+  mhAssertHeaders_(sh, MH_REQUESTS.REQUEST_HEADERS);
+  // V1.13 (ح-3) — store the advance number in the sheet (new "رقم الطلب"
+  // column, appended if missing) so the approval can link it to the cash
+  // sheet and decisions can verify the record identity.
+  mhEnsureRequestIdColumn_(sh);
   const lock = LockService.getScriptLock(); lock.waitLock(15000);
   try {
     const rowNum = sh.getLastRow() + 1;
     const details = amount.toLocaleString('en-US',{maximumFractionDigits:2}) + ' جنيه';
-    sh.appendRow([mhNow_(),profile.chatId,profile.name,'سلفة',details,MH_REQUESTS.PENDING_REQUEST,amount,'','','','','']);
     const requestId = 'ADV-' + Utilities.formatDate(new Date(),MH.TZ,'yyyyMMdd-HHmmss') + '-' + String(profile.chatId).slice(-4);
+    // Write by header name, not positionally: the sheet may gain columns
+    // (e.g. «رقم الطلب» appended at the end) and the order must not matter.
+    const width = Math.max(sh.getLastColumn(), 1);
+    const headers = sh.getRange(1, 1, 1, width).getDisplayValues()[0].map(function(h) { return String(h).trim(); });
+    const row = new Array(width).fill('');
+    const set = function(h, v) { const c = headers.indexOf(h); if (c >= 0) row[c] = v; };
+    set('التاريخ والوقت', mhNow_());
+    set('Chat ID', profile.chatId);
+    set('اسم الموظف', profile.name);
+    set('نوع الطلب', 'سلفة');
+    set('التفاصيل', details);
+    set('القرار', MH_REQUESTS.PENDING_REQUEST);
+    set('مبلغ السلفة بالجنيه', amount);
+    set('رقم الطلب', requestId);
+    sh.appendRow(row);
     const employeeMessage = '💵 تم تسجيل طلب السلفة بنجاح\n━━━━━━━━━━━━━━━━━━\n🆔 رقم الطلب: '+requestId+'\n👤 الموظف: '+profile.name+'\n💰 المبلغ المطلوب: '+details+'\n⏳ الحالة: قيد مراجعة الإدارة';
     let employeeNotified = false;
     try { mhSendTelegramMini_(profile.chatId,employeeMessage,{remove_keyboard:true}); employeeNotified=true; }
@@ -2052,6 +2179,11 @@ function decideCashRequest_(profile, body) {
   let notifyChatId = '', notifyAmount = '';
   const lock=LockService.getScriptLock(); lock.waitLock(15000);
   try {
+    // V1.13 (ح-1) — verify the record identity inside the lock: the UI
+    // sends recordId (رقم الطلب CASH-…); a mismatch means the row shifted.
+    const recordId = String(body.recordId || '').trim();
+    const storedId = String(sh.getRange(rowNum,map['رقم الطلب']).getDisplayValue()).trim();
+    if (recordId && storedId && storedId !== recordId) throw new Error('RECORD_MISMATCH');
     const current=String(sh.getRange(rowNum,map['الحالة']).getDisplayValue()).trim();
     const payout=String(sh.getRange(rowNum,map['حالة الصرف']).getDisplayValue()).trim();
     if(decision==='تم الصرف') {
@@ -2096,6 +2228,11 @@ function submitCashSettlement_(profile, body) {
   try {
     const values = sh.getRange(rowNum,1,1,sh.getLastColumn()).getValues()[0];
     const get = h => values[map[h]-1];
+    // V1.13 (ح-1) — the UI sends recordId (رقم الطلب CASH-…); verify when
+    // both the sent and the stored number exist.
+    const recordId = String(body.recordId || '').trim();
+    const storedId = String(get('رقم الطلب') || '').trim();
+    if (recordId && storedId && storedId !== recordId) throw new Error('RECORD_MISMATCH');
     if (String(get('Chat ID')).trim() !== profile.chatId) throw new Error('FORBIDDEN');
     if (String(get('حالة الصرف')).trim() !== 'تم الصرف') throw new Error('CASH_PAYOUT_NOT_ALLOWED');
     if (String(get('حالة التسوية') || '').trim() === 'بانتظار مراجعة التسوية' ||
@@ -2138,6 +2275,11 @@ function decideCashSettlement_(profile, body) {
   const lock = LockService.getScriptLock(); lock.waitLock(15000);
   try {
     const get = h => sh.getRange(rowNum,map[h]).getDisplayValue().trim();
+    // V1.13 (ح-1) — verify the record identity inside the lock: the UI
+    // sends recordId (رقم الطلب CASH-…); a mismatch means the row shifted.
+    const recordId = String(body.recordId || '').trim();
+    const storedId = get('رقم الطلب');
+    if (recordId && storedId && storedId !== recordId) throw new Error('RECORD_MISMATCH');
     if (get('حالة التسوية') !== 'بانتظار مراجعة التسوية') throw new Error('CASH_ALREADY_REVIEWED');
     notifyChatId = get('Chat ID');
     if (decision === 'مرفوض') {
@@ -2169,6 +2311,11 @@ function confirmCashReturn_(profile, body) {
   if (rowNum > sh.getLastRow()) throw new Error('CASH_REQUEST_NOT_FOUND');
   const lock = LockService.getScriptLock(); lock.waitLock(15000);
   try {
+    // V1.13 (ح-1) — verify the record identity inside the lock: the UI
+    // sends recordId (رقم الطلب CASH-…); a mismatch means the row shifted.
+    const recordId = String(body.recordId || '').trim();
+    const storedId = String(sh.getRange(rowNum,map['رقم الطلب']).getDisplayValue() || '').trim();
+    if (recordId && storedId && storedId !== recordId) throw new Error('RECORD_MISMATCH');
     if (sh.getRange(rowNum,map['حالة العهدة']).getDisplayValue().trim() !== 'بانتظار تأكيد استلام المتبقي') throw new Error('CASH_ALREADY_REVIEWED');
     sh.getRange(rowNum,map['تاريخ تأكيد استلام المتبقي']).setValue(mhNow_());
     sh.getRange(rowNum,map['المسؤول عن استلام المتبقي']).setValue(mhManagerName_(profile));
@@ -2255,6 +2402,48 @@ function createLeaveRequest_(profile, body) {
   );
   return {submitted:true, requestId:id, status:MH_REQUESTS.PENDING_LEAVE, message:'تم إرسال طلب الإذن. لا يعتبر معتمدًا قبل موافقة الإدارة.'};
 }
+/** V1.13 (ح-1) — canonicalizes a record key so the two sheet readers agree:
+    one returns "yyyy-MM-dd HH:mm:ss", the other "yyyy-MM-ddTHH:mm:ss". */
+function mhCanonicalRecordKey_(key) {
+  return String(key || '').trim().replace(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})/, '$1 $2');
+}
+
+/** V1.13 (ح-3) — creates the cash-sheet row for an approved Mini App advance
+    so payout (cash_decide "تم الصرف") and settlement work end-to-end.
+    Called from decideEmployeeRequest_ inside the decision lock. Idempotent:
+    a cash row with the same request number is never created twice. */
+function mhBridgeAdvanceToCash_(reqSheet, rowNum, reqMap, get) {
+  let requestId = reqMap['رقم الطلب'] ? String(get('رقم الطلب') || '').trim() : '';
+  if (!requestId) {
+    // Old rows (created before V1.13) never stored the number: generate one
+    // and write it back so the row has a stable identity from now on.
+    requestId = 'ADV-' + Utilities.formatDate(new Date(), MH.TZ, 'yyyyMMdd-HHmmss') + '-' + String(get('Chat ID') || '').slice(-4);
+    if (reqMap['رقم الطلب']) reqSheet.getRange(rowNum, reqMap['رقم الطلب']).setValue(requestId);
+  }
+  const cashSh = mhSheet_(MH.SHEETS.cash);
+  const cashMap = mhAssertHeaders_(cashSh, MH_CASH.HEADERS);
+  const already = mhRowsObjects_(cashSh).some(function(r) { return String(r['رقم الطلب'] || '').trim() === requestId; });
+  if (already) return null;
+  // Read the amount raw: the display value may carry thousands separators.
+  const amount = Number(reqSheet.getRange(rowNum, reqMap['مبلغ السلفة بالجنيه']).getValue()) || 0;
+  const width = Math.max(cashSh.getLastColumn(), MH_CASH.HEADERS.length);
+  const row = new Array(width).fill('');
+  const set = function(h, v) { if (cashMap[h]) row[cashMap[h] - 1] = v; };
+  set('رقم الطلب', requestId);
+  set('التاريخ والوقت', get('التاريخ والوقت'));
+  set('Chat ID', get('Chat ID'));
+  set('اسم الموظف', get('اسم الموظف'));
+  set('المبلغ المطلوب بالجنيه', amount);
+  set('الغرض', 'سلفة شخصية');
+  set('الحالة', 'تمت الموافقة');
+  set('المبلغ المعتمد بالجنيه', amount);
+  set('حالة الصرف', 'بانتظار الصرف');
+  set('حالة العهدة', 'بانتظار صرف العهدة');
+  set('تاريخ آخر تحديث', mhNow_());
+  cashSh.appendRow(row);
+  return requestId;
+}
+
 function decideEmployeeRequest_(profile, body) {
   mhRequireRole_(profile,['super_admin','admin','supervisor','finance']);
   const rowNum=Number(body.row), decision=String(body.decision || '');
@@ -2264,10 +2453,43 @@ function decideEmployeeRequest_(profile, body) {
   const values=sh.getRange(rowNum,1,1,sh.getLastColumn()).getDisplayValues()[0];
   const get=h=>values[map[h]-1] || '';
   if(profile.role==='finance' && String(get('نوع الطلب')).trim()!=='سلفة') throw new Error('FORBIDDEN');
-  const current=String(get('القرار')).trim();
-  if(current!==MH_REQUESTS.PENDING_REQUEST) throw new Error('REQUEST_ALREADY_REVIEWED');
+  // V1.13 (ح-1) — verify the record identity. The UI sends recordId: the
+  // stored «رقم الطلب» (ADV-…) when the row has one, otherwise the composite
+  // key «التاريخ والوقت|Chat ID|نوع الطلب» built from the same values the
+  // list endpoint returns. Old rows have no stored number, so the composite
+  // key is accepted for them.
+  const recordId = String(body.recordId || '').trim();
+  if (recordId) {
+    const storedId = map['رقم الطلب'] ? String(get('رقم الطلب') || '').trim() : '';
+    if (storedId) {
+      if (storedId !== recordId) throw new Error('RECORD_MISMATCH');
+    } else {
+      const rawStamp = sh.getRange(rowNum, map['التاريخ والوقت']).getValue();
+      const stamp = mhDateCell_(rawStamp, 'yyyy-MM-dd HH:mm:ss');
+      const localKey = [String(stamp || '').trim(), String(get('Chat ID') || '').trim(), String(get('نوع الطلب') || '').trim()].join('|');
+      const displayKey = [String(get('التاريخ والوقت') || '').trim(), String(get('Chat ID') || '').trim(), String(get('نوع الطلب') || '').trim()].join('|');
+      const wanted = mhCanonicalRecordKey_(recordId);
+      if (mhCanonicalRecordKey_(localKey) !== wanted && mhCanonicalRecordKey_(displayKey) !== wanted) throw new Error('RECORD_MISMATCH');
+    }
+  }
   const lock=LockService.getScriptLock(); lock.waitLock(15000);
-  try { sh.getRange(rowNum,map['القرار']).setValue(decision); } finally { lock.releaseLock(); }
+  try {
+    // V1.13 (ح-16) — the pending check must run inside the lock, on a fresh
+    // read: before this, two managers could approve the same request twice.
+    const liveDecision = String(sh.getRange(rowNum,map['القرار']).getDisplayValue() || '').trim();
+    if (liveDecision !== MH_REQUESTS.PENDING_REQUEST) throw new Error('REQUEST_ALREADY_REVIEWED');
+    // V1.13 (ح-1) — re-verify the stored number inside the lock as well.
+    if (recordId && map['رقم الطلب']) {
+      const liveId = String(sh.getRange(rowNum,map['رقم الطلب']).getDisplayValue() || '').trim();
+      if (liveId && liveId !== recordId) throw new Error('RECORD_MISMATCH');
+    }
+    sh.getRange(rowNum,map['القرار']).setValue(decision);
+    // V1.13 (ح-3) — an approved advance must reach the cash sheet, otherwise
+    // payout and settlement can never happen for it.
+    if (decision === 'مقبول' && String(get('نوع الطلب')).trim() === 'سلفة') {
+      mhBridgeAdvanceToCash_(sh, rowNum, map, get);
+    }
+  } finally { lock.releaseLock(); }
   let employeeNotified=false;
   try {
     const isAdvance=String(get('نوع الطلب')).trim()==='سلفة';
@@ -2288,15 +2510,29 @@ function decideLeaveRequest_(profile, body) {
   if(rowNum>sh.getLastRow()) throw new Error('LEAVE_NOT_FOUND');
   const vals=sh.getRange(rowNum,1,1,sh.getLastColumn()).getDisplayValues()[0];
   const get=h=>vals[map[h]-1] || '';
-  if(get('الحالة')!==MH_REQUESTS.PENDING_LEAVE) throw new Error('LEAVE_ALREADY_REVIEWED');
-  if(decision==='مقبول' && get('نوع الإذن')==='يوم كامل') {
-    const abs=mhRowsObjects_(mhSheet_(MH.SHEETS.absences));
-    const start=mhIsoDate_(get('تاريخ الإذن')), end=mhIsoDate_(get('تاريخ نهاية الإذن'))||start;
-    const confirmed=abs.some(a=>String(a['Chat ID']).trim()===String(get('Chat ID')).trim() && mhIsoDate_(a['التاريخ'])>=start && mhIsoDate_(a['التاريخ'])<=end && (String(a['الحالة'])==='غياب مؤكد'||String(a['قرار المدير'])==='تأكيد الغياب'));
-    if(confirmed) throw new Error('LEAVE_CONFLICT_CONFIRMED_ABSENCE');
-  }
+  // V1.13 (ح-1) — the UI sends recordId (رقم الطلب LV-…); verify when both
+  // the sent and the stored number exist.
+  const recordId = String(body.recordId || '').trim();
+  const storedId = String(get('رقم الطلب') || '').trim();
+  if (recordId && storedId && storedId !== recordId) throw new Error('RECORD_MISMATCH');
   const lock=LockService.getScriptLock(); lock.waitLock(15000);
   try {
+    // V1.13 (ح-16) — the pending check and the overlap check must run inside
+    // the lock, on fresh reads: before this, two managers could approve the
+    // same leave twice, and the absence check could race the approval.
+    const liveStatus = String(sh.getRange(rowNum,map['الحالة']).getDisplayValue() || '').trim();
+    if (liveStatus !== MH_REQUESTS.PENDING_LEAVE) throw new Error('LEAVE_ALREADY_REVIEWED');
+    // V1.13 (ح-1) — re-verify the stored number inside the lock as well.
+    if (recordId) {
+      const liveId = String(sh.getRange(rowNum,map['رقم الطلب']).getDisplayValue() || '').trim();
+      if (liveId && liveId !== recordId) throw new Error('RECORD_MISMATCH');
+    }
+    if(decision==='مقبول' && get('نوع الإذن')==='يوم كامل') {
+      const abs=mhRowsObjects_(mhSheet_(MH.SHEETS.absences));
+      const start=mhIsoDate_(get('تاريخ الإذن')), end=mhIsoDate_(get('تاريخ نهاية الإذن'))||start;
+      const confirmed=abs.some(a=>String(a['Chat ID']).trim()===String(get('Chat ID')).trim() && mhIsoDate_(a['التاريخ'])>=start && mhIsoDate_(a['التاريخ'])<=end && (String(a['الحالة'])==='غياب مؤكد'||String(a['قرار المدير'])==='تأكيد الغياب'));
+      if(confirmed) throw new Error('LEAVE_CONFLICT_CONFIRMED_ABSENCE');
+    }
     sh.getRange(rowNum,map['الحالة']).setValue(decision);
     sh.getRange(rowNum,map['قرار المدير']).setValue(decision==='مقبول'?'موافقة':'رفض');
     sh.getRange(rowNum,map['تاريخ القرار']).setValue(mhNow_());
@@ -2381,9 +2617,17 @@ function complaintMessage_(profile, body) {
   if(String(c.data['الحالة'])==='مغلقة') throw new Error('COMPLAINT_CLOSED');
   const sh=mhSheet_(MH.SHEETS.complaintMessages); mhAssertHeaders_(sh,MH_COMPLAINT.MESSAGE_HEADERS);
   const role=profile.role==='employee'?'موظف':'مدير', now=mhNow_();
-  sh.appendRow(['MSG-'+Utilities.getUuid(),id,profile.chatId,role,profile.name,message,now]);
-  c.sheet.getRange(c.row,10).setValue(now);
-  c.sheet.getRange(c.row,8).setValue(role==='موظف'?'بانتظار رد الإدارة':'بانتظار رد الموظف');
+  // V1.13 (ح-16) — the reply and the status flip must be atomic, and the
+  // closed check must be re-done inside the lock: a complaint closed between
+  // the check and the write would otherwise be silently reopened by the reply.
+  const lock=LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    const liveStatus=String(c.sheet.getRange(c.row,8).getDisplayValue()||'').trim();
+    if(liveStatus==='مغلقة') throw new Error('COMPLAINT_CLOSED');
+    sh.appendRow(['MSG-'+Utilities.getUuid(),id,profile.chatId,role,profile.name,message,now]);
+    c.sheet.getRange(c.row,10).setValue(now);
+    c.sheet.getRange(c.row,8).setValue(role==='موظف'?'بانتظار رد الإدارة':'بانتظار رد الموظف');
+  } finally { lock.releaseLock(); }
   // A manager reply must reach the employee on Telegram, not only in the app.
   if (role === 'مدير') {
     mhNotifyComplaintReply_(String(c.data['Chat ID'] || '').trim(), id, 'بانتظار رد الموظف');
@@ -2398,7 +2642,15 @@ function complaintStatus_(profile, body) {
   const current=String(c.data['الحالة']||'');
   const transitions={'جديدة':['قيد التحقيق','تم الحل','مغلقة'],'قيد التحقيق':['تم الحل','مغلقة'],'بانتظار رد الإدارة':['قيد التحقيق','تم الحل','مغلقة'],'بانتظار رد الموظف':['قيد التحقيق','تم الحل','مغلقة'],'تم الحل':['مغلقة']};
   if(!allowed.includes(next)||!(transitions[current]||[]).includes(next)) throw new Error('INVALID_COMPLAINT_STATUS');
-  const now=mhNow_();c.sheet.getRange(c.row,8).setValue(next);c.sheet.getRange(c.row,9).setValue(note);c.sheet.getRange(c.row,10).setValue(now);
+  const now=mhNow_();
+  // V1.13 (ح-16) — re-check the live status inside the lock: two managers
+  // could otherwise move the same complaint along two transitions at once.
+  const lock=LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    const liveStatus=String(c.sheet.getRange(c.row,8).getDisplayValue()||'').trim();
+    if(!allowed.includes(next)||!(transitions[liveStatus]||[]).includes(next)) throw new Error('INVALID_COMPLAINT_STATUS');
+    c.sheet.getRange(c.row,8).setValue(next);c.sheet.getRange(c.row,9).setValue(note);c.sheet.getRange(c.row,10).setValue(now);
+  } finally { lock.releaseLock(); }
   return {updated:true,status:next};
 }
 
@@ -2505,6 +2757,11 @@ function decideDeduction_(profile, body) {
     let notifyChatId='', notifyAmount='', notifyReason='';
     const lock=LockService.getScriptLock(); lock.waitLock(15000);
     try {
+      // V1.13 (ح-1) — verify the record identity inside the lock: the UI
+      // sends recordId (رقم الخصم); a mismatch means the row shifted.
+      const recordId = String(body.recordId || '').trim();
+      const storedId = String(sh.getRange(rowNum,map['رقم الخصم']).getDisplayValue() || '').trim();
+      if (recordId && storedId && storedId !== recordId) throw new Error('RECORD_MISMATCH');
       if(sh.getRange(rowNum,map['الحالة']).getDisplayValue().trim()!=='بانتظار اعتماد المدير') throw new Error('DEDUCTION_ALREADY_REVIEWED');
       const now=mhNow_();
       sh.getRange(rowNum,map['الحالة']).setValue(decision);
@@ -2555,10 +2812,15 @@ function setRewardHygiene_(profile, body) {
   const rating=String(body.rating||'').trim(), note=String(body.note||'').trim();
   if(date>mhToday_()||!['نظيف','غير ملتزم'].includes(rating)||note.length>300) throw new Error('INVALID_HYGIENE_RATING');
   const sh=mhSheet_(MH.SHEETS.rewardHygiene); mhAssertHeaders_(sh,MH_FINANCE.REWARD_HYGIENE_HEADERS);
-  const rows=mhRowsObjects_(sh);
-  const existing=rows.find(r=>String(r['Chat ID']).trim()===employee.chatId&&mhDate_(r['التاريخ'])===date);
-  if(existing) throw new Error('HYGIENE_ALREADY_RATED');
-  sh.appendRow([date,employee.chatId,employee.name,rating,note,profile.name,mhNow_()]);
+  // V1.13 (ح-16) — the duplicate check and the append must be atomic: two
+  // simultaneous ratings for the same employee/day created two rows.
+  const lock=LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    const rows=mhRowsObjects_(sh);
+    const existing=rows.find(r=>String(r['Chat ID']).trim()===employee.chatId&&mhDate_(r['التاريخ'])===date);
+    if(existing) throw new Error('HYGIENE_ALREADY_RATED');
+    sh.appendRow([date,employee.chatId,employee.name,rating,note,profile.name,mhNow_()]);
+  } finally { lock.releaseLock(); }
   return {saved:true,rating:rating,date:date};
 }
 function rewardIsApprovedLeaveMini_(chatId,date) {
@@ -2959,9 +3221,17 @@ function managerUpdateAdmin_(profile,body) {
   if(hasStatus && ['نشط','موقوف'].indexOf(status)<0) throw new Error('INVALID_MANAGER_STATUS');
   const sh=mhEnsureSheet_('المديرين',MH_MANAGER_HEADERS), map=mhHeaderMap_(sh), found=mhRowsObjects_(sh).find(r=>String(r['Chat ID']).trim()===id);
   if(!found) throw new Error('MANAGER_NOT_FOUND');
-  if(role) sh.getRange(found.__row,map['الصلاحية']).setValue(role);
-  if(hasStatus) sh.getRange(found.__row,map['الحالة']).setValue(status);
-  sh.getRange(found.__row,map['آخر تحديث']).setValue(mhStamp_());
+  // V1.13 (ح-16) — write inside a lock and verify the row still belongs to
+  // this manager: a row shift between the read and the write would otherwise
+  // change another manager's role or status.
+  const lock=LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    const liveId=String(sh.getRange(found.__row,map['Chat ID']).getDisplayValue()||'').trim();
+    if(liveId!==id) throw new Error('MANAGER_NOT_FOUND');
+    if(role) sh.getRange(found.__row,map['الصلاحية']).setValue(role);
+    if(hasStatus) sh.getRange(found.__row,map['الحالة']).setValue(status);
+    sh.getRange(found.__row,map['آخر تحديث']).setValue(mhStamp_());
+  } finally { lock.releaseLock(); }
   return {updated:true,chatId:id,role:role||String(found['الصلاحية']),status:hasStatus?status:String(found['الحالة'])};
 }
 
@@ -3850,8 +4120,12 @@ function tasksUpdateMini_(profile, body) {
   const nextStatus = String(body.status || currentStatus).trim();
   if (MH_TASK_STATUSES.indexOf(nextStatus) < 0) throw new Error('INVALID_TASK_STATUS');
   // Only a reviewer may close or cancel; the assignee may move work forward.
-  if (['مكتملة','ملغاة'].indexOf(nextStatus) >= 0 && !isStaff && nextStatus !== currentStatus) {
-    if (currentStatus !== 'بانتظار المراجعة') throw new Error('TASK_REVIEW_REQUIRED');
+  // V1.13 — completing a task must go through tasksReviewMini_. Before this,
+  // the assignee could submit ("بانتظار المراجعة") and then complete the task
+  // himself in a second call, which made the review optional.
+  if (!isStaff && nextStatus !== currentStatus) {
+    if (nextStatus === 'مكتملة') throw new Error('TASK_REVIEW_REQUIRED');
+    if (nextStatus === 'ملغاة' && currentStatus !== 'بانتظار المراجعة') throw new Error('TASK_REVIEW_REQUIRED');
   }
 
   let progress = body.progress === undefined ? Number(found['نسبة الإنجاز'] || 0) : Number(body.progress);
@@ -4030,6 +4304,10 @@ function tasksReviewMini_(profile, body) {
 
   const lock = LockService.getScriptLock(); lock.waitLock(15000);
   try {
+    // V1.13 (ح-16) — re-check the status inside the lock, on a fresh read:
+    // two reviewers could otherwise approve the same task twice.
+    const liveStatus = String(sh.getRange(found.__row, map['الحالة']).getDisplayValue() || '').trim();
+    if (liveStatus !== 'بانتظار المراجعة') throw new Error('TASK_NOT_SUBMITTED');
     sh.getRange(found.__row, map['الحالة']).setValue(decision === 'اعتماد' ? 'مكتملة' : 'قيد التنفيذ');
     if (decision === 'اعتماد') sh.getRange(found.__row, map['نسبة الإنجاز']).setValue(100);
     sh.getRange(found.__row, map['تاريخ آخر تحديث']).setValue(mhStamp_());
@@ -4312,14 +4590,54 @@ function mhNotificationFlags_() {
 /** Manager action: turn every notification on. */
 function notificationsEnableAllMini_(profile) {
   mhRequireRole_(profile, ['super_admin','admin']);
-  const sh = mhEnsureNotificationSettings_();
+  // V1.13 (ح-11) — the old implementation wrote 'TRUE' into the
+  // «إعدادات الإشعارات» sheet, which nothing reads: mhNotificationFlags_()
+  // is never called, and its keys ('tasks.assign', 'cash.decide', …) do not
+  // match the event keys mhNotifyEmployee_ actually checks ('task.assigned',
+  // 'cash.decided', …). The live gate is the per-employee matrix
+  // «إعدادات إشعارات الفنيين» (mhNotifyRules_/mhNotifyAllowed_), so
+  // "enable all" now sets both channels to TRUE for every event of every
+  // active employee, creating matrix rows that do not exist yet.
+  const employees = rowsAsObjects_(spreadsheet_(), MH.SHEETS.employees)
+    .filter(function(r) {
+      return String(r['Chat ID'] || '').trim() &&
+        String(r['الحالة'] || 'نشط').trim() === 'نشط' &&
+        String(r['حالة الحساب'] || 'نشط').trim() === 'نشط';
+    })
+    .map(function(r) {
+      return { id: String(r['Chat ID']).trim(), name: String(r['اسم الموظف'] || '') };
+    });
+  const sh = mhNotifyMatrixSheet_();
+  mhAssertHeaders_(sh, MH_NOTIFY_MATRIX_HEADERS);
   const map = mhHeaderMap_(sh);
-  mhRowsObjects_(sh).forEach(function(r) {
-    const key = String(r['الإعداد'] || '').trim();
-    if (MH_NOTIFICATION_KEYS_.indexOf(key) < 0) return;
-    sh.getRange(r.__row, map['القيمة']).setValue('TRUE');
-  });
-  return { enabled: MH_NOTIFICATION_KEYS_.length, keys: MH_NOTIFICATION_KEYS_ };
+  const lock = LockService.getScriptLock(); lock.waitLock(20000);
+  let enabled = 0;
+  try {
+    // Re-read inside the lock: a second manager clicking at the same time
+    // must see the rows the first one just created, not append duplicates.
+    const byKey = {};
+    mhRowsObjects_(sh).forEach(function(r) {
+      byKey[String(r['Chat ID'] || '').trim() + '|' + String(r['نوع الإشعار'] || '').trim()] = r.__row;
+    });
+    employees.forEach(function(emp) {
+      MH_EMPLOYEE_EVENTS_.forEach(function(ev) {
+        let row = byKey[emp.id + '|' + ev.key];
+        if (!row) {
+          sh.appendRow([emp.id, emp.name, ev.key, 'TRUE', 'TRUE', mhStamp_(), String(profile.name || '')]);
+          row = sh.getLastRow();
+          byKey[emp.id + '|' + ev.key] = row;
+        }
+        sh.getRange(row, map['داخل التطبيق']).setValue('TRUE');
+        sh.getRange(row, map['على البوت']).setValue('TRUE');
+        sh.getRange(row, map['آخر تحديث']).setValue(mhStamp_());
+        sh.getRange(row, map['بواسطة']).setValue(String(profile.name || profile.chatId));
+        enabled++;
+      });
+    });
+  } finally { lock.releaseLock(); }
+  // enabled keeps the old meaning (number of event types) so the UI message
+  // "تم تفعيل N نوع إشعار" stays sensible; rows is the matrix rows touched.
+  return { enabled: MH_EMPLOYEE_EVENTS_.length, employees: employees.length, rows: enabled, keys: MH_EMPLOYEE_EVENTS_.map(function(e) { return e.key; }) };
 }
 
 /**
@@ -4551,12 +4869,16 @@ function partRequestCreateMini_(profile, body) {
   const sh = mhPartSheet_();
   mhAssertHeaders_(sh, MH_PART_HEADERS);
 
-  const id = 'PRT-' + Utilities.formatDate(new Date(), MH.TZ, 'yyyyMMdd') + '-' +
-    String(sh.getLastRow()).padStart(3, '0');
+  // V1.13 (ح-16) — the number is built from getLastRow(), so it must be
+  // computed inside the lock: two simultaneous requests got the same PRT-…
+  // number before this.
+  let id = '';
   const now = mhStamp_();
 
   const lock = LockService.getScriptLock(); lock.waitLock(15000);
   try {
+    id = 'PRT-' + Utilities.formatDate(new Date(), MH.TZ, 'yyyyMMdd') + '-' +
+      String(sh.getLastRow()).padStart(3, '0');
     sh.appendRow([
       id, now, String(profile.chatId), String(profile.name || ''),
       partName, purpose, reason, deviceRef, quantity,
@@ -4613,9 +4935,10 @@ function partRequestsMineMini_(profile) {
     // mhTaskLikePartRows_ maps the owner column to employeeId.
     return String(r.employeeId || '').trim() === String(profile.chatId);
   });
-  // Respect "داخل التطبيق" toggles: a muted event stays hidden from the app.
-  const allowed = mhNotifyAllowed_(profile.chatId, 'part.decided');
-  return { requests: allowed === false || allowed.inApp === false ? [] : rows };
+  // V1.13 — notification muting hides the notification only, never the
+  // employee's own data. Before this, muting "داخل التطبيق" for part.decided
+  // returned an empty list and the employee lost sight of all his requests.
+  return { requests: rows };
 }
 
 /** Manager view of all part requests. */
@@ -4676,7 +4999,23 @@ function partRequestDecideMini_(profile, body) {
   if (note.length > 500) throw new Error('INVALID_PART_REASON');
 
   const lock = LockService.getScriptLock(); lock.waitLock(15000);
+  let adjustment = null;
   try {
+    // V1.13 — re-check the status inside the lock (two managers deciding at
+    // once both passed the pre-lock check), and issue the part inside the
+    // SAME lock: the decision and the stock movement must be atomic, and
+    // mhAdjustStockLocked_ refuses an issue that exceeds stock, so the
+    // decision must not be recorded when the issue cannot happen.
+    const liveStatus = String(sh.getRange(found.__row, map['الحالة']).getValue() || '').trim();
+    if (decision === 'تم الصرف' && liveStatus !== 'معتمد') throw new Error('PART_NOT_APPROVED');
+    if (decision !== 'تم الصرف' && liveStatus !== 'بانتظار الموافقة') throw new Error('PART_ALREADY_REVIEWED');
+    if (decision === 'تم الصرف') {
+      adjustment = mhAdjustStockLocked_(
+        String(found['القطعة المطلوبة'] || ''),
+        -Number(found['الكمية'] || 1),
+        String(profile.name || profile.chatId)
+      );
+    }
     sh.getRange(found.__row, map['الحالة']).setValue(decision);
     sh.getRange(found.__row, map['ملاحظات المدير']).setValue(note);
     sh.getRange(found.__row, map['تاريخ القرار']).setValue(mhStamp_());
@@ -4689,22 +5028,15 @@ function partRequestDecideMini_(profile, body) {
     : '❌ تم رفض طلب القطعة';
 
   // Issuing a part moves stock. Keep the inventory honest automatically.
-  if (decision === 'تم الصرف') {
-    const adjustment = mhAdjustStock_(
-      String(found['القطعة المطلوبة'] || ''),
-      -Number(found['الكمية'] || 1),
-      String(profile.name || profile.chatId)
-    );
-    if (adjustment) {
-      found.__stock = adjustment;
-      if (adjustment.low) {
-        mhNotifyProcurement_(
-          '📉 المخزون وصل للحد الأدنى\n━━━━━━━━━━━━━━━━━━\n' +
-          '⚙️ ' + adjustment.name + '\n' +
-          '📦 المتاح الآن: ' + adjustment.current + ' · الحد الأدنى: ' + adjustment.minimum + '\n' +
-          '━━━━━━━━━━━━━━━━━━\nأعد التوريد قبل نفاد القطعة.',
-          'نقص مخزون');
-      }
+  if (adjustment) {
+    found.__stock = adjustment;
+    if (adjustment.low) {
+      mhNotifyProcurement_(
+        '📉 المخزون وصل للحد الأدنى\n━━━━━━━━━━━━━━━━━━\n' +
+        '⚙️ ' + adjustment.name + '\n' +
+        '📦 المتاح الآن: ' + adjustment.current + ' · الحد الأدنى: ' + adjustment.minimum + '\n' +
+        '━━━━━━━━━━━━━━━━━━\nأعد التوريد قبل نفاد القطعة.',
+        'نقص مخزون');
     }
   }
 
@@ -5015,7 +5347,11 @@ function mhUpsertCustomer_(data) {
     return mhCustomerRow_(existing);
   }
 
-  const id = 'CUS-' + Utilities.formatDate(new Date(), MH.TZ, 'yyyyMMdd') + '-' + String(rows.length + 1).padStart(4, '0');
+  // V1.13 (ح-16) — the old number came from rows.length + 1, which collides
+  // after a row deletion (and races if a future caller is not locked). The
+  // number is only ever used as an opaque identifier, so use a UUID suffix
+  // like the DD-/RB- numbers elsewhere.
+  const id = 'CUS-' + Utilities.getUuid().slice(0, 8).toUpperCase();
   const now = mhStamp_();
   sh.appendRow([id, data.name || '', phone, mhNormalizePhone_(data.phone2 || ''), data.address || '', data.notes || '', now, now, 1]);
   return { id: id, name: data.name || '', phone: phone, phone2: mhNormalizePhone_(data.phone2 || ''), address: data.address || '', visits: 1 };
@@ -5531,8 +5867,16 @@ function readAttendanceRecent_(ss, month, enabled) {
   try {
     const rows = rowsAsObjectsTail_(ss, MH.SHEETS.attendance, 2500);
     if (!rows.length) return rows;
-    const earliest = mhDate_(rows[0]['التاريخ']);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(earliest) || earliest > month + '-01') {
+    // V1.13 (ح-15) — the tail is not guaranteed to be chronological, so
+    // rows[0] is not necessarily the oldest: take the minimum date across
+    // the whole tail. When the tail does not reach the 1st of the month,
+    // fall back to the full read so the month is never undercounted.
+    let earliest = '';
+    rows.forEach(function(r) {
+      const d = mhDate_(r['التاريخ']);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(d) && (!earliest || d < earliest)) earliest = d;
+    });
+    if (!earliest || earliest > month + '-01') {
       return rowsAsObjects_(ss, MH.SHEETS.attendance);
     }
     return rows;
@@ -5686,7 +6030,7 @@ function consoleOverviewMini_(profile) {
 
   /* ---------------- Parts ---------------- */
   let partsPending = 0;
-  if (modules.devices) {
+  if (modules.parts) {
     try {
       partsPending = mhRowsObjects_(mhPartSheet_()).filter(function(r) {
         return String(r['الحالة'] || '').trim() === 'بانتظار الموافقة';
@@ -5719,8 +6063,10 @@ function consoleOverviewMini_(profile) {
     pushAlert('tasks', 'مهام بانتظار مراجعتك', reviewTasks.length, 'tasks', 'normal');
     pushAlert('overdue', 'مهام متأخرة', overdueTasks.length, 'tasks', 'high');
   }
-  if (modules.devices) {
+  if (modules.parts) {
     pushAlert('parts', 'قطع غيار بانتظار الموافقة', partsPending, 'parts', 'normal');
+  }
+  if (modules.devices) {
     pushAlert('ready', 'أجهزة جاهزة للتسليم', readyDevices.length, 'devices', 'normal');
   }
 
@@ -5793,7 +6139,7 @@ function consoleOverviewMini_(profile) {
     operations: {
       activeDevices: modules.devices ? activeDevices.length : null,
       readyDevices: modules.devices ? readyDevices.length : null,
-      partsPending: modules.devices ? partsPending : null,
+      partsPending: modules.parts ? partsPending : null,
       openTasks: modules.tasks ? openTasks.length : null,
       tasksInReview: modules.tasks ? reviewTasks.length : null,
       tasksOverdue: modules.tasks ? overdueTasks.length : null
@@ -5850,7 +6196,10 @@ function consoleReportMini_(profile, body) {
       if (!id) return;
       if (!perEmployee[id]) perEmployee[id] = { id: id, name: nameOf[id] || id, advances: 0, deductions: 0, overtime: 0, total: 0 };
       perEmployee[id][key] += mhMoney_(amount);
-      if (key !== 'total') perEmployee[id].total += mhMoney_(amount);
+      // V1.13 — deductions SUBTRACT from the total (advances + overtime − deductions).
+      // Before this they were added, so an employee with a 1000 advance and a
+      // 500 deduction showed a total of 1500 instead of 500.
+      if (key !== 'total') perEmployee[id].total += (key === 'deductions' ? -1 : 1) * mhMoney_(amount);
     };
     paidCash.forEach(function(r) { add(String(r['Chat ID'] || '').trim(), 'advances', r['المبلغ المعتمد بالجنيه'] || r['المبلغ المطلوب بالجنيه']); });
     approvedDed.forEach(function(r) { add(String(r['Chat ID'] || '').trim(), 'deductions', r['المبلغ بالجنيه']); });
@@ -6218,27 +6567,28 @@ function inventorySaveMini_(profile, body) {
   const sh = mhInventorySheet_();
   mhAssertHeaders_(sh, MH_INVENTORY_HEADERS);
   const map = mhHeaderMap_(sh);
-  const rows = mhRowsObjects_(sh);
-
-  const found = rows.find(function(r) {
-    if (code) return String(r['كود القطعة'] || '').trim() === code;
-    return String(r['اسم القطعة'] || '').trim().toLowerCase() === name.toLowerCase();
-  });
 
   const lock = LockService.getScriptLock(); lock.waitLock(15000);
   try {
-    if (found) {
-      if (map['اسم القطعة']) sh.getRange(found.__row, map['اسم القطعة']).setValue(name);
-      if (map['الكمية المتاحة']) sh.getRange(found.__row, map['الكمية المتاحة']).setValue(quantity);
-      if (map['الحد الأدنى']) sh.getRange(found.__row, map['الحد الأدنى']).setValue(minimum);
-      if (map['سعر الشراء']) sh.getRange(found.__row, map['سعر الشراء']).setValue(price);
-      if (body.category !== undefined && map['الفئة']) sh.getRange(found.__row, map['الفئة']).setValue(String(body.category || ''));
-      if (body.supplier !== undefined && map['المورد']) sh.getRange(found.__row, map['المورد']).setValue(String(body.supplier || ''));
-      if (body.location !== undefined && map['الموقع']) sh.getRange(found.__row, map['الموقع']).setValue(String(body.location || ''));
-      if (body.note !== undefined && map['ملاحظات']) sh.getRange(found.__row, map['ملاحظات']).setValue(String(body.note || '').slice(0, 300));
-      sh.getRange(found.__row, map['آخر تحديث']).setValue(mhStamp_());
-      if (map['آخر تحديث بواسطة']) sh.getRange(found.__row, map['آخر تحديث بواسطة']).setValue(String(profile.name || profile.chatId));
-      return { saved: true, updated: true, code: code || String(found['كود القطعة'] || ''), name: name, quantity: quantity };
+    // V1.13 (ح-16) — re-run the lookup inside the lock: the pre-lock
+    // `found` can be stale, and two concurrent saves for the same new item
+    // would otherwise both append a row.
+    const liveFound = mhRowsObjects_(sh).find(function(r) {
+      if (code) return String(r['كود القطعة'] || '').trim() === code;
+      return String(r['اسم القطعة'] || '').trim().toLowerCase() === name.toLowerCase();
+    });
+    if (liveFound) {
+      if (map['اسم القطعة']) sh.getRange(liveFound.__row, map['اسم القطعة']).setValue(name);
+      if (map['الكمية المتاحة']) sh.getRange(liveFound.__row, map['الكمية المتاحة']).setValue(quantity);
+      if (map['الحد الأدنى']) sh.getRange(liveFound.__row, map['الحد الأدنى']).setValue(minimum);
+      if (map['سعر الشراء']) sh.getRange(liveFound.__row, map['سعر الشراء']).setValue(price);
+      if (body.category !== undefined && map['الفئة']) sh.getRange(liveFound.__row, map['الفئة']).setValue(String(body.category || ''));
+      if (body.supplier !== undefined && map['المورد']) sh.getRange(liveFound.__row, map['المورد']).setValue(String(body.supplier || ''));
+      if (body.location !== undefined && map['الموقع']) sh.getRange(liveFound.__row, map['الموقع']).setValue(String(body.location || ''));
+      if (body.note !== undefined && map['ملاحظات']) sh.getRange(liveFound.__row, map['ملاحظات']).setValue(String(body.note || '').slice(0, 300));
+      sh.getRange(liveFound.__row, map['آخر تحديث']).setValue(mhStamp_());
+      if (map['آخر تحديث بواسطة']) sh.getRange(liveFound.__row, map['آخر تحديث بواسطة']).setValue(String(profile.name || profile.chatId));
+      return { saved: true, updated: true, code: code || String(liveFound['كود القطعة'] || ''), name: name, quantity: quantity };
     }
 
     const newCode = code || ('ITM-' + Utilities.getUuid().slice(0, 6).toUpperCase());
@@ -6253,9 +6603,22 @@ function inventorySaveMini_(profile, body) {
 
 /**
  * Adjusts stock by a delta (issue on approval, restock on delivery).
- * Negative delta is clamped so stock never goes below zero.
+ * V1.13 — the live stock is re-read inside the lock and an issue that
+ * exceeds stock is refused with INSUFFICIENT_STOCK instead of silently
+ * clamping to zero (issuing 5 when only 2 are in stock used to zero the
+ * stock and record the full issue).
  */
 function mhAdjustStock_(partName, delta, actorName) {
+  if (!partName || !delta) return null;
+  const lock = LockService.getScriptLock(); lock.waitLock(15000);
+  try { return mhAdjustStockLocked_(partName, delta, actorName); }
+  finally { lock.releaseLock(); }
+}
+
+/** Stock adjustment that assumes the caller already holds the ScriptLock
+    (lets partRequestDecideMini_ issue the part inside the same lock as the
+    decision, so the two are atomic). */
+function mhAdjustStockLocked_(partName, delta, actorName) {
   const name = String(partName || '').trim();
   if (!name || !delta) return null;
   let sh;
@@ -6266,17 +6629,16 @@ function mhAdjustStock_(partName, delta, actorName) {
   });
   if (!row) return null;
 
-  const current = Number(row['الكمية المتاحة'] || 0);
-  const next = Math.max(0, current + Number(delta));
-  const lock = LockService.getScriptLock(); lock.waitLock(15000);
-  try {
-    sh.getRange(row.__row, map['الكمية المتاحة']).setValue(next);
-    sh.getRange(row.__row, map['آخر تحديث']).setValue(mhStamp_());
-    if (map['آخر تحديث بواسطة']) sh.getRange(row.__row, map['آخر تحديث بواسطة']).setValue(String(actorName || ''));
-  } finally { lock.releaseLock(); }
+  const live = Number(sh.getRange(row.__row, map['الكمية المتاحة']).getValue() || 0);
+  const wanted = Number(delta);
+  if (wanted < 0 && live + wanted < 0) throw new Error('INSUFFICIENT_STOCK');
+  const next = Math.max(0, live + wanted);
+  sh.getRange(row.__row, map['الكمية المتاحة']).setValue(next);
+  sh.getRange(row.__row, map['آخر تحديث']).setValue(mhStamp_());
+  if (map['آخر تحديث بواسطة']) sh.getRange(row.__row, map['آخر تحديث بواسطة']).setValue(String(actorName || ''));
 
   const minimum = Number(row['الحد الأدنى'] || 0);
-  return { code: String(row['كود القطعة'] || ''), name: name, previous: current, current: next, minimum: minimum, low: next <= minimum };
+  return { code: String(row['كود القطعة'] || ''), name: name, previous: live, current: next, minimum: minimum, low: next <= minimum };
 }
 
 /* =========================================================
@@ -6351,8 +6713,16 @@ function tasksRepairSheet_(profile) {
   }
 
   const lock = LockService.getScriptLock(); lock.waitLock(20000);
+  let repaired = 0, skipped = 0;
   try {
     repairs.forEach(function(item) {
+      // V1.13 (ح-16) — re-read the live row inside the lock: the detection
+      // ran before the lock, and writing the rebuilt row over a row someone
+      // edited meanwhile would silently discard their edit. A changed row is
+      // skipped and reported so the repair can be re-run.
+      const live = sh.getRange(item.rowNum, 1, 1, lastCol).getDisplayValues()[0];
+      const same = live.length === item.raw.length && live.every(function(v, i) { return String(v || '') === String(item.raw[i] || ''); });
+      if (!same) { skipped++; return; }
       // Recover what we can from the shifted row and rebuild it by name.
       const raw = item.raw;
       const findId = function() {
@@ -6378,13 +6748,14 @@ function tasksRepairSheet_(profile) {
         fixed[pivot] = '';
       }
       sh.getRange(item.rowNum, 1, 1, fixed.length).setValues([fixed]);
+      repaired++;
     });
   } finally { lock.releaseLock(); }
 
   return {
-    repaired: repairs.length,
+    repaired: repaired,
     checked: values.length,
-    message: 'تم إصلاح ' + repairs.length + ' صفًا من ' + values.length + '.'
+    message: 'تم إصلاح ' + repaired + ' صفًا من ' + values.length + (skipped ? ' (تم تخطي ' + skipped + ' صفًا تغيّر أثناء الفحص — أعد التشغيل).' : '.')
   };
 }
 
@@ -6417,7 +6788,8 @@ function financeCenterMini_(profile, body) {
   });
 
   // Attach the physical row number so decisions can target the right line.
-  const deductions = read(MH.SHEETS.deductions).map(function(r, i) { r.__row = i + 2; return r; });
+  // V1.13 (ح-1) — __row comes from the reader (the physical row); see rowsAsObjects_.
+  const deductions = read(MH.SHEETS.deductions);
   const bonuses = read(MH.SHEETS.rewardBonus);
   const hygiene = read(MH.SHEETS.rewardHygiene);
 
@@ -6701,7 +7073,10 @@ function deviceQualityReviewMini_(profile, body) {
   if (!found) throw new Error('DEVICE_NOT_FOUND');
 
   const current = String(found['حالة الجهاز'] || '').trim();
-  if (passed && ['جاهز للتسليم','تم التسليم'].indexOf(current) >= 0) {
+  // V1.13 — a delivered device is out of the quality loop entirely: a failed
+  // review used to send a delivered device back to "يحتاج إعادة فحص".
+  if (current === 'تم التسليم') throw new Error('DEVICE_ALREADY_DELIVERED');
+  if (passed && current === 'جاهز للتسليم') {
     return { updated: false, status: current, message: 'الجهاز جاهز للتسليم بالفعل.' };
   }
 
@@ -6712,6 +7087,11 @@ function deviceQualityReviewMini_(profile, body) {
   const lock = LockService.getScriptLock(); lock.waitLock(15000);
   try {
     const map = mhHeaderMap_(sh);
+    // V1.13 — re-check the status inside the lock: a concurrent delivery or
+    // review may have changed it after our first read.
+    const liveStatus = String(sh.getRange(found.__row, map['حالة الجهاز']).getValue() || '').trim();
+    if (liveStatus === 'تم التسليم') throw new Error('DEVICE_ALREADY_DELIVERED');
+    if (passed && liveStatus === 'جاهز للتسليم') return { updated: false, status: liveStatus, message: 'الجهاز جاهز للتسليم بالفعل.' };
     sh.getRange(found.__row, map['حالة الجهاز']).setValue(nextStatus);
     sh.getRange(found.__row, map['مكان الجهاز']).setValue(nextLocation);
     sh.getRange(found.__row, map['آخر تحديث']).setValue(now);
@@ -6782,6 +7162,11 @@ function deviceDeliverMini_(profile, body) {
   const lock = LockService.getScriptLock(); lock.waitLock(15000);
   try {
     const map = mhHeaderMap_(sh);
+    // V1.13 — re-check the status inside the lock: two simultaneous deliveries
+    // both saw "جاهز للتسليم" before the lock and wrote two delivery rows.
+    const liveStatus = String(sh.getRange(found.__row, map['حالة الجهاز']).getValue() || '').trim();
+    if (liveStatus === 'تم التسليم') throw new Error('DEVICE_ALREADY_DELIVERED');
+    if (liveStatus !== 'جاهز للتسليم') throw new Error('DEVICE_NOT_READY_FOR_DELIVERY');
     sh.getRange(found.__row, map['حالة الجهاز']).setValue('تم التسليم');
     sh.getRange(found.__row, map['مكان الجهاز']).setValue('مكان آخر');
     sh.getRange(found.__row, map['آخر تحديث']).setValue(now);

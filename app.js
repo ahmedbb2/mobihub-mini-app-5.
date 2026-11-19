@@ -610,7 +610,7 @@
       try {
         const rows=await api('list',{entity:'overtime'});
         const canDecide=['super_admin','admin'].includes(currentRole);
-        content.innerHTML=`<div class="manager-mini-kpis"><div><b>${rows.filter(r=>String(r['الحالة']||'')==='بانتظار موافقة المدير').length}</b><small>طلبات بانتظار الموافقة</small></div><div><b>${rows.reduce((sum,r)=>sum+(Number(r['المبلغ بالجنيه'])||0),0)}</b><small>إجمالي المبالغ المسجلة بالجنيه</small></div></div><p class="manager-note">حسب قواعد V46: أول 30 دقيقة بعد نهاية الوردية غير مدفوعة، ثم 1 جنيه لكل دقيقة، بحد أقصى 120 دقيقة. الاعتماد يجب أن يتم قبل بداية احتساب الوقت الإضافي.</p><h4>سجل الأوفر تايم</h4>${rows.slice().reverse().map(r=>{const pending=String(r['الحالة']||'')==='بانتظار موافقة المدير';return `<article class="manager-row"><div><b>${escapeHtml(r['اسم المهندس']||'مهندس')} · ${escapeHtml(r['رقم الطلب']||'')}</b><small>${escapeHtml(r['تاريخ الوردية']||'')} · نهاية الوردية ${escapeHtml(r['موعد نهاية الوردية']||'—')}</small></div><span class="status-pill">${escapeHtml(r['الحالة']||'غير محدد')}</span><small>الدقائق: ${Number(r['دقائق الأوفر تايم'])||0} · المبلغ: ${Number(r['المبلغ بالجنيه'])||0} جنيه</small>${pending&&canDecide?`<div class="manager-row-actions"><button type="button" class="primary-btn" data-overtime-decision="approve" data-overtime-id="${escapeHtml(r['رقم الطلب']||'')}">موافقة</button><button type="button" class="secondary-btn" data-overtime-decision="reject" data-overtime-id="${escapeHtml(r['رقم الطلب']||'')}">رفض</button></div>`:''}</article>`;}).join('')||'<p class="muted">لا توجد طلبات أوفر تايم مسجلة.</p>'}`;
+        content.innerHTML=`<div class="manager-mini-kpis"><div><b>${rows.filter(r=>String(r['الحالة']||'')==='بانتظار موافقة المدير').length}</b><small>طلبات بانتظار الموافقة</small></div><div><b>${rows.reduce((sum,r)=>sum+(Number(r['المبلغ بالجنيه'])||0),0)}</b><small>إجمالي المبالغ المسجلة بالجنيه</small></div></div><p class="manager-note">حسب قواعد V46: أول 30 دقيقة بعد نهاية الوردية غير مدفوعة، ثم 1 جنيه لكل دقيقة، بحد أقصى 120 دقيقة. الطلب يُنشأ خلال أول 30 دقيقة بعد نهاية الوردية، والاعتماد مسموح ما دام الطلب معلقاً وقبل الانصراف.</p><h4>سجل الأوفر تايم</h4>${rows.map(r=>{const pending=String(r['الحالة']||'')==='بانتظار موافقة المدير';return `<article class="manager-row"><div><b>${escapeHtml(r['اسم المهندس']||'مهندس')} · ${escapeHtml(r['رقم الطلب']||'')}</b><small>${escapeHtml(r['تاريخ الوردية']||'')} · نهاية الوردية ${escapeHtml(r['موعد نهاية الوردية']||'—')}</small></div><span class="status-pill">${escapeHtml(r['الحالة']||'غير محدد')}</span><small>الدقائق: ${Number(r['دقائق الأوفر تايم'])||0} · المبلغ: ${Number(r['المبلغ بالجنيه'])||0} جنيه</small>${pending&&canDecide?`<div class="manager-row-actions"><button type="button" class="primary-btn" data-overtime-decision="approve" data-overtime-id="${escapeHtml(r['رقم الطلب']||'')}">موافقة</button><button type="button" class="secondary-btn" data-overtime-decision="reject" data-overtime-id="${escapeHtml(r['رقم الطلب']||'')}">رفض</button></div>`:''}</article>`;}).join('')||'<p class="muted">لا توجد طلبات أوفر تايم مسجلة.</p>'}`;
         content.querySelectorAll('[data-overtime-decision]').forEach(btn=>btn.addEventListener('click',async()=>{
           btn.disabled=true;
           try { await api('overtime_decide',{requestId:btn.dataset.overtimeId,decision:btn.dataset.overtimeDecision}); if(tg?.showAlert)tg.showAlert(btn.dataset.overtimeDecision==='approve'?'تم اعتماد طلب الأوفر تايم.':'تم رفض طلب الأوفر تايم.'); closeModal(); await loadManagerDashboard(); openManagerModule('overtime'); }
@@ -623,9 +623,9 @@
       const canManageNotifications=['super_admin','admin'].includes(currentRole);
       const panel=managerPanel(title,'<p class="muted">جاري تحميل سجل الإشعارات والإعدادات...</p>'); const content=panel.querySelector('.manager-module-content');
       try {
-        const [logs,settings,employees]=await Promise.all([api('list',{entity:'notifications'}),api('list',{entity:'notificationSettings'}),canManageNotifications?api('list',{entity:'employees'}):Promise.resolve([])]);
+        const [logs,employees]=await Promise.all([api('list',{entity:'notifications'}),canManageNotifications?api('list',{entity:'employees'}):Promise.resolve([])]);
         const sendForm=canManageNotifications?`<form id="managerNoticeForm" class="manager-staff-form"><h4>إرسال إشعار للمهندسين</h4><label>المستلم<select name="recipient"><option value="all">جميع المهندسين النشطين</option>${employees.filter(e=>String(e['حالة الحساب']||'نشط')==='نشط'&&String(e['الحالة']||'نشط')==='نشط').map(e=>`<option value="${escapeHtml(e['Chat ID'])}">${escapeHtml(e['اسم الموظف']||e['Chat ID'])}</option>`).join('')}</select></label><label>نص الإشعار<textarea name="message" rows="4" maxlength="3900" required placeholder="اكتب التنبيه الذي تريد إرساله..."></textarea></label><button class="primary-btn" type="submit">إرسال الإشعار</button><p class="manager-form-error hidden" id="managerNoticeResult"></p></form>`:'<p class="manager-note">صلاحية المشرف تتيح الاطلاع على السجل والإعدادات فقط. إرسال الإشعارات وتغيير الإعدادات متاحان للمدير وSuper Admin.</p>';
-        content.innerHTML=`${sendForm}${canManageNotifications?`<div class="notification-tools"><button type="button" class="primary-btn" id="notificationsEnableAll">تفعيل كل الإشعارات</button><button type="button" class="secondary-btn" id="notificationsTest">إرسال رسالة اختبار</button></div>`:''}<h4>إعدادات التنبيه</h4>${settings.map(r=>{const enabled=String(r['القيمة']||'').toUpperCase()==='TRUE';return `<article class="manager-row"><div><b>${escapeHtml(r['الإعداد']||'')}</b><small>${escapeHtml(r['الوصف']||'')}</small></div>${canManageNotifications?`<label class="manager-switch"><input type="checkbox" data-notification-setting="${escapeHtml(r['الإعداد'])}" ${enabled?'checked':''}><span>${enabled?'مفعل':'متوقف'}</span></label>`:`<span class="status-pill">${enabled?'مفعل':'متوقف'}</span>`}</article>`;}).join('')||'<p class="muted">لا توجد إعدادات مسجلة.</p>'}<h4>سجل الإشعارات — آخر 30</h4>${logs.slice(-30).reverse().map(r=>`<article class="manager-row"><b>${escapeHtml(r['نوع الإشعار']||'إشعار')}</b><span class="status-pill">${escapeHtml(r['الحالة']||'')}</span><small>${escapeHtml(r['المستلم']||'')} · ${escapeHtml(r['التاريخ والوقت']||'')}</small></article>`).join('')||'<p class="muted">لا توجد سجلات إشعارات.</p>'}`;
+        content.innerHTML=`${sendForm}${canManageNotifications?`<div class="notification-tools"><button type="button" class="primary-btn" id="notificationsEnableAll">تفعيل كل الإشعارات</button><button type="button" class="secondary-btn" id="notificationsTest">إرسال رسالة اختبار</button></div>`:''}<h4>إعدادات التنبيه</h4><p class="manager-note">التحكم في إشعارات كل فني (داخل التطبيق / على البوت) من وحدة «التحكم في الإشعارات» في لوحة المدير.</p>${canManageNotifications?`<button type="button" class="secondary-btn" id="openNotifyMatrixBtn">فتح التحكم في الإشعارات</button>`:``}<h4>سجل الإشعارات — آخر 30</h4>${logs.slice(0,30).map(r=>`<article class="manager-row"><b>${escapeHtml(r['نوع الإشعار']||'إشعار')}</b><span class="status-pill">${escapeHtml(r['الحالة']||'')}</span><small>${escapeHtml(r['المستلم']||'')} · ${escapeHtml(r['التاريخ والوقت']||'')}</small></article>`).join('')||'<p class="muted">لا توجد سجلات إشعارات.</p>'}`;
         if(canManageNotifications) {
           content.querySelector('#managerNoticeForm').addEventListener('submit',async ev=>{ev.preventDefault();const form=ev.currentTarget,btn=form.querySelector('button[type=submit]'),result=form.querySelector('#managerNoticeResult');btn.disabled=true;result.classList.add('hidden');try{const fd=new FormData(form);const res=await api('notification_send',{recipient:fd.get('recipient'),message:fd.get('message')});result.textContent=`تم الإرسال إلى ${res.sent} مهندس، وتعذر الإرسال إلى ${res.failed}.`;result.classList.remove('hidden');form.elements.message.value='';}catch(e){result.textContent=e.message;result.classList.remove('hidden');}finally{btn.disabled=false;}});
           content.querySelectorAll('[data-notification-setting]').forEach(input=>input.addEventListener('change',async()=>{input.disabled=true;try{await api('notification_setting',{key:input.dataset.notificationSetting,enabled:input.checked});input.nextElementSibling.textContent=input.checked?'مفعل':'متوقف';}catch(e){input.checked=!input.checked;if(tg?.showAlert)tg.showAlert(e.message);}finally{input.disabled=false;}}));
@@ -639,6 +639,7 @@
             }catch(e){if(tg?.showAlert)tg.showAlert(e.message);}
             finally{enableAll.disabled=false;}
           });
+          const matrixBtn=content.querySelector('#openNotifyMatrixBtn');if(matrixBtn) matrixBtn.addEventListener('click',async()=>{closeModal(); await openNotificationMatrix();});
           const testBtn=content.querySelector('#notificationsTest');
           if(testBtn) testBtn.addEventListener('click',async()=>{
             testBtn.disabled=true;
@@ -670,7 +671,7 @@
         const latest={}; today.forEach(r=>{const id=String(r['Chat ID']||'');if(id&&!latest[id])latest[id]=r;});
         const records=Object.values(latest);
         const canReviewAbsence=['super_admin','admin','supervisor'].includes(currentRole);
-        content.innerHTML=`<div class="manager-mini-kpis"><div><b>${records.filter(r=>String(r['النوع'])==='حضور').length}</b><small>حضور مفتوح حسب آخر حركة</small></div><div><b>${absences.filter(r=>/انتظار|مراجعة|معلق/.test(String(r['الحالة']||r['قرار المدير']||''))).length}</b><small>حالات غياب للمراجعة</small></div><div><b>${overtimeRows.filter(r=>String(r['الحالة']||'')==='بانتظار موافقة المدير').length}</b><small>طلبات أوفر تايم معلقة</small></div></div><h4>حركات اليوم</h4>${records.length?records.map(r=>`<article class="manager-row"><b>${escapeHtml(r['اسم الموظف']||'مهندس')}</b><span>${escapeHtml(r['النوع']||'')}</span><small>${escapeHtml(formatTime12(r['الوقت'])||'')} · ${escapeHtml(r['حالة الحضور']||'')}</small></article>`).join(''):'<p class="muted">لا توجد حركات حضور مسجلة اليوم.</p>'}<h4>مراجعة الغياب</h4>${absences.slice(-20).reverse().map(r=>{const pending=String(r['الحالة']||'').trim()==='بانتظار مراجعة المدير';return `<article class="manager-row"><b>${escapeHtml(r['اسم الموظف']||'مهندس')}</b><span>${escapeHtml(r['الحالة']||r['قرار المدير']||'غير محدد')}</span><small>${escapeHtml(r['التاريخ']||'')} · موعد الحضور: ${escapeHtml(formatTime12(r['موعد الحضور'])||'—')} · اكتشاف: ${escapeHtml(formatTime12(r['وقت اكتشاف الحالة'])||'—')}</small>${pending&&canReviewAbsence?`<div class="manager-row-actions"><button type="button" class="primary-btn" data-absence-decision="confirm" data-absence-chat="${escapeHtml(r['Chat ID']||'')}" data-absence-date="${escapeHtml(String(r['التاريخ']||'').slice(0,10))}">تأكيد الغياب</button><button type="button" class="secondary-btn" data-absence-decision="excuse" data-absence-chat="${escapeHtml(r['Chat ID']||'')}" data-absence-date="${escapeHtml(String(r['التاريخ']||'').slice(0,10))}">ليس غائبًا</button></div>`:''}</article>`;}).join('')||'<p class="muted">لا توجد سجلات غياب.</p>'}<h4>آخر طلبات الأوفر تايم</h4>${overtimeRows.slice(-10).reverse().map(r=>`<article class="manager-row"><b>${escapeHtml(r['اسم المهندس']||'مهندس')}</b><span>${escapeHtml(r['الحالة']||'')}</span><small>${escapeHtml(r['تاريخ الوردية']||'')} · ${Number(r['دقائق الأوفر تايم'])||0} دقيقة · ${Number(r['المبلغ بالجنيه'])||0} جنيه</small></article>`).join('')||'<p class="muted">لا توجد طلبات أوفر تايم.</p>'}`;
+        content.innerHTML=`<div class="manager-mini-kpis"><div><b>${records.filter(r=>String(r['النوع'])==='حضور').length}</b><small>حضور مفتوح حسب آخر حركة</small></div><div><b>${absences.filter(r=>/انتظار|مراجعة|معلق/.test(String(r['الحالة']||r['قرار المدير']||''))).length}</b><small>حالات غياب للمراجعة</small></div><div><b>${overtimeRows.filter(r=>String(r['الحالة']||'')==='بانتظار موافقة المدير').length}</b><small>طلبات أوفر تايم معلقة</small></div></div><h4>حركات اليوم</h4>${records.length?records.map(r=>`<article class="manager-row"><b>${escapeHtml(r['اسم الموظف']||'مهندس')}</b><span>${escapeHtml(r['النوع']||'')}</span><small>${escapeHtml(formatTime12(r['الوقت'])||'')} · ${escapeHtml(r['حالة الحضور']||'')}</small></article>`).join(''):'<p class="muted">لا توجد حركات حضور مسجلة اليوم.</p>'}<h4>مراجعة الغياب</h4>${absences.slice(0,20).map(r=>{const pending=String(r['الحالة']||'').trim()==='بانتظار مراجعة المدير';return `<article class="manager-row"><b>${escapeHtml(r['اسم الموظف']||'مهندس')}</b><span>${escapeHtml(r['الحالة']||r['قرار المدير']||'غير محدد')}</span><small>${escapeHtml(r['التاريخ']||'')} · موعد الحضور: ${escapeHtml(formatTime12(r['موعد الحضور'])||'—')} · اكتشاف: ${escapeHtml(formatTime12(r['وقت اكتشاف الحالة'])||'—')}</small>${pending&&canReviewAbsence?`<div class="manager-row-actions"><button type="button" class="primary-btn" data-absence-decision="confirm" data-absence-chat="${escapeHtml(r['Chat ID']||'')}" data-absence-date="${escapeHtml(String(r['التاريخ']||'').slice(0,10))}">تأكيد الغياب</button><button type="button" class="secondary-btn" data-absence-decision="excuse" data-absence-chat="${escapeHtml(r['Chat ID']||'')}" data-absence-date="${escapeHtml(String(r['التاريخ']||'').slice(0,10))}">ليس غائبًا</button></div>`:''}</article>`;}).join('')||'<p class="muted">لا توجد سجلات غياب.</p>'}<h4>آخر طلبات الأوفر تايم</h4>${overtimeRows.slice(0,10).map(r=>`<article class="manager-row"><b>${escapeHtml(r['اسم المهندس']||'مهندس')}</b><span>${escapeHtml(r['الحالة']||'')}</span><small>${escapeHtml(r['تاريخ الوردية']||'')} · ${Number(r['دقائق الأوفر تايم'])||0} دقيقة · ${Number(r['المبلغ بالجنيه'])||0} جنيه</small></article>`).join('')||'<p class="muted">لا توجد طلبات أوفر تايم.</p>'}`;
         content.querySelectorAll('[data-absence-decision]').forEach(btn=>btn.addEventListener('click',async()=>{btn.disabled=true;try{await api('absence_decide',{chatId:btn.dataset.absenceChat,date:btn.dataset.absenceDate,decision:btn.dataset.absenceDecision});if(tg?.showAlert)tg.showAlert(btn.dataset.absenceDecision==='confirm'?'تم تأكيد الغياب وإبلاغ الموظف.':'تم تسجيل القرار: ليس غائبًا.');closeModal();await loadManagerDashboard();openManagerModule('daily');}catch(e){if(tg?.showAlert)tg.showAlert(e.message);btn.disabled=false;}}));
       } else if(module==='shifts') {
         const renderShifts = async () => {
@@ -952,7 +953,7 @@
         const amount = row['المبلغ المعتمد بالجنيه'] || row['المبلغ المطلوب بالجنيه'] || row['المبلغ بالجنيه'];
         const details = row['التفاصيل'] || row['السبب'] || row['الغرض'] || row['تفاصيل الشكوى'] || row['المشكلة المسجلة'] || '';
         const canSettle = entity === 'cash' && row['حالة الصرف'] === 'تم الصرف' && ['عهدة مفتوحة','مرفوضة - تحتاج مراجعة'].includes(String(row['حالة العهدة']||''));
-        const settlement = canSettle ? `<div class="cash-settlement"><strong>تسوية العهدة</strong><label>إجمالي المصروف الفعلي بالجنيه<input type="number" min="0" step="0.01" id="spent-${Number(row.__row)}" placeholder="مثال: 650"></label><label>تفاصيل المصروفات<textarea id="settle-note-${Number(row.__row)}" rows="2" maxlength="1500" placeholder="اكتب تفاصيل المصروفات"></textarea></label><button class="primary-btn" data-settle-row="${Number(row.__row)}">إرسال التسوية</button></div>` : '';
+        const settlement = canSettle ? `<div class="cash-settlement"><strong>تسوية العهدة</strong><label>إجمالي المصروف الفعلي بالجنيه<input type="number" min="0" step="0.01" id="spent-${Number(row.__row)}" placeholder="مثال: 650"></label><label>تفاصيل المصروفات<textarea id="settle-note-${Number(row.__row)}" rows="2" maxlength="1500" placeholder="اكتب تفاصيل المصروفات"></textarea></label><button class="primary-btn" data-settle-row="${Number(row.__row)}" data-settle-id="${escapeHtml(row['رقم الطلب']||'')}">إرسال التسوية</button></div>` : '';
         const fields = [];
         if(date) fields.push(['التاريخ',date]);
         if(amount!==undefined && amount!=='') fields.push(['المبلغ',`${amount} جنيه`]);
@@ -966,7 +967,7 @@
       $('resultBody').querySelectorAll('[data-settle-row]').forEach(b => b.addEventListener('click', async () => {
         const row=Number(b.dataset.settleRow), spent=$(`spent-${row}`).value, notes=$(`settle-note-${row}`).value;
         b.disabled=true;
-        try { const r=await api('cash_settlement_submit',{row,actualSpent:spent,notes}); messageRequest(`تم إرسال التسوية. المتبقي المطلوب إرجاعه: ${r.amountToReturn} جنيه.`); await showList('cash'); }
+        try { const r=await api('cash_settlement_submit',{row,recordId:b.dataset.settleId,actualSpent:spent,notes}); messageRequest(`تم إرسال التسوية. المتبقي المطلوب إرجاعه: ${r.amountToReturn} جنيه.`); await showList('cash'); }
         catch(e){messageRequest(e.message,true);b.disabled=false;}
       }));
     } catch (e) { $('resultBody').textContent = e.message; }
@@ -1668,8 +1669,8 @@
           <p>المبلغ: ${escapeHtml(r['مبلغ السلفة بالجنيه']||r['التفاصيل']||'—')} جنيه<br>
           التاريخ: ${escapeHtml(formatDateTime12(r['التاريخ والوقت'])||'')}<br>الحالة: ${escapeHtml(r['القرار']||'قيد الانتظار')}</p>
           <div class="review-actions">
-            <button class="primary-btn" data-advance-row="${r.__row}" data-decision="مقبول">موافقة على السلفة</button>
-            <button class="secondary-btn" data-advance-row="${r.__row}" data-decision="مرفوض">رفض السلفة</button>
+            <button class="primary-btn" data-advance-row="${r.__row}" data-advance-id="${escapeHtml([r['التاريخ والوقت']||'',r['Chat ID']||'',r['نوع الطلب']||''].join('|'))}" data-decision="مقبول">موافقة على السلفة</button>
+            <button class="secondary-btn" data-advance-row="${r.__row}" data-advance-id="${escapeHtml([r['التاريخ والوقت']||'',r['Chat ID']||'',r['نوع الطلب']||''].join('|'))}" data-decision="مرفوض">رفض السلفة</button>
           </div>
         </article>`).join('');
       const custodyCards=[];
@@ -1677,36 +1678,36 @@
         const status=String(r['الحالة']||''), payout=String(r['حالة الصرف']||'');
         const custody=String(r['حالة العهدة']||''), settlement=String(r['حالة التسوية']||'');
         const base=`<p>${escapeHtml(r['اسم الموظف']||'')} · ${escapeHtml(r['المبلغ المطلوب بالجنيه']||'—')} جنيه<br>${escapeHtml(formatDateTime12(r['التاريخ والوقت'])||'')}<br>الغرض: ${escapeHtml(r['الغرض']||'—')}</p>`;
-        if(status==='قيد المراجعة') custodyCards.push(`<article class="review-item"><strong>🧾 طلب سحب / عهدة · ${escapeHtml(r['رقم الطلب']||'')}</strong>${base}<div class="review-actions"><button class="primary-btn" data-cash-row="${r.__row}" data-cash-decision="مقبول">موافقة</button><button class="secondary-btn" data-cash-row="${r.__row}" data-cash-decision="مرفوض">رفض</button></div></article>`);
-        if(status==='تمت الموافقة'&&payout!=='تم الصرف') custodyCards.push(`<article class="review-item"><strong>🧾 عهدة بانتظار الصرف · ${escapeHtml(r['رقم الطلب']||'')}</strong>${base}<div class="review-actions"><button class="primary-btn" data-cash-row="${r.__row}" data-cash-decision="تم الصرف">تأكيد صرف العهدة</button></div></article>`);
-        if(settlement==='بانتظار مراجعة التسوية') custodyCards.push(`<article class="review-item"><strong>🧾 مراجعة تسوية عهدة · ${escapeHtml(r['رقم الطلب']||'')}</strong><p>${escapeHtml(r['اسم الموظف']||'')}<br>المعتمد: ${escapeHtml(r['المبلغ المعتمد بالجنيه']||'—')} جنيه<br>المصروف: ${escapeHtml(r['المصروف الفعلي بالجنيه']||'—')} جنيه<br>المطلوب إرجاعه: ${escapeHtml(r['المبلغ المطلوب إرجاعه بالجنيه']||'—')} جنيه<br>ملاحظات: ${escapeHtml(r['ملاحظات التسوية']||'—')}</p><div class="review-actions"><button class="primary-btn" data-settle-review="${r.__row}" data-settle-decision="مقبول">اعتماد التسوية</button><button class="secondary-btn" data-settle-review="${r.__row}" data-settle-decision="مرفوض">إرجاع للتصحيح</button></div></article>`);
-        if(custody==='بانتظار تأكيد استلام المتبقي') custodyCards.push(`<article class="review-item"><strong>🧾 تأكيد استلام المتبقي · ${escapeHtml(r['رقم الطلب']||'')}</strong><p>${escapeHtml(r['اسم الموظف']||'')}<br>المبلغ المطلوب استلامه: ${escapeHtml(r['المبلغ المطلوب إرجاعه بالجنيه']||'—')} جنيه</p><div class="review-actions"><button class="primary-btn" data-return-confirm="${r.__row}">تأكيد استلام المبلغ</button></div></article>`);
+        if(status==='قيد المراجعة') custodyCards.push(`<article class="review-item"><strong>🧾 طلب سحب / عهدة · ${escapeHtml(r['رقم الطلب']||'')}</strong>${base}<div class="review-actions"><button class="primary-btn" data-cash-row="${r.__row}" data-cash-id="${escapeHtml(r['رقم الطلب']||'')}" data-cash-decision="مقبول">موافقة</button><button class="secondary-btn" data-cash-row="${r.__row}" data-cash-id="${escapeHtml(r['رقم الطلب']||'')}" data-cash-decision="مرفوض">رفض</button></div></article>`);
+        if(status==='تمت الموافقة'&&payout!=='تم الصرف') custodyCards.push(`<article class="review-item"><strong>🧾 عهدة بانتظار الصرف · ${escapeHtml(r['رقم الطلب']||'')}</strong>${base}<div class="review-actions"><button class="primary-btn" data-cash-row="${r.__row}" data-cash-id="${escapeHtml(r['رقم الطلب']||'')}" data-cash-decision="تم الصرف">تأكيد صرف العهدة</button></div></article>`);
+        if(settlement==='بانتظار مراجعة التسوية') custodyCards.push(`<article class="review-item"><strong>🧾 مراجعة تسوية عهدة · ${escapeHtml(r['رقم الطلب']||'')}</strong><p>${escapeHtml(r['اسم الموظف']||'')}<br>المعتمد: ${escapeHtml(r['المبلغ المعتمد بالجنيه']||'—')} جنيه<br>المصروف: ${escapeHtml(r['المصروف الفعلي بالجنيه']||'—')} جنيه<br>المطلوب إرجاعه: ${escapeHtml(r['المبلغ المطلوب إرجاعه بالجنيه']||'—')} جنيه<br>ملاحظات: ${escapeHtml(r['ملاحظات التسوية']||'—')}</p><div class="review-actions"><button class="primary-btn" data-settle-review="${r.__row}" data-settle-review-id="${escapeHtml(r['رقم الطلب']||'')}" data-settle-decision="مقبول">اعتماد التسوية</button><button class="secondary-btn" data-settle-review="${r.__row}" data-settle-review-id="${escapeHtml(r['رقم الطلب']||'')}" data-settle-decision="مرفوض">إرجاع للتصحيح</button></div></article>`);
+        if(custody==='بانتظار تأكيد استلام المتبقي') custodyCards.push(`<article class="review-item"><strong>🧾 تأكيد استلام المتبقي · ${escapeHtml(r['رقم الطلب']||'')}</strong><p>${escapeHtml(r['اسم الموظف']||'')}<br>المبلغ المطلوب استلامه: ${escapeHtml(r['المبلغ المطلوب إرجاعه بالجنيه']||'—')} جنيه</p><div class="review-actions"><button class="primary-btn" data-return-confirm="${r.__row}" data-return-confirm-id="${escapeHtml(r['رقم الطلب']||'')}">تأكيد استلام المبلغ</button></div></article>`);
       });
       box.innerHTML=`
         <section class="finance-queue"><h3>💵 طلبات السلف (${pendingAdvances.length} معلّق)</h3>
           ${advanceCards||'<p class="muted">لا توجد طلبات سلف معلقة.</p>'}</section>
         <section class="finance-queue"><h3>🧾 طلبات السحب والعهد والتسويات (${custodyCards.length} إجراء معلق)</h3>
           ${custodyCards.join('')||'<p class="muted">لا توجد طلبات سحب أو تسويات معلقة.</p>'}</section>`;
-      box.querySelectorAll('[data-advance-row]').forEach(b=>b.addEventListener('click',()=>decide('request_decide',b.dataset.advanceRow,b.dataset.decision)));
-      box.querySelectorAll('[data-cash-row]').forEach(b=>b.addEventListener('click',()=>decideCash(b.dataset.cashRow,b.dataset.cashDecision)));
-      box.querySelectorAll('[data-settle-review]').forEach(b=>b.addEventListener('click',()=>reviewCashSettlement(b.dataset.settleReview,b.dataset.settleDecision)));
-      box.querySelectorAll('[data-return-confirm]').forEach(b=>b.addEventListener('click',()=>confirmCashReturn(b.dataset.returnConfirm)));
+      box.querySelectorAll('[data-advance-row]').forEach(b=>b.addEventListener('click',()=>decide('request_decide',b.dataset.advanceRow,b.dataset.decision,b.dataset.advanceId)));
+      box.querySelectorAll('[data-cash-row]').forEach(b=>b.addEventListener('click',()=>decideCash(b.dataset.cashRow,b.dataset.cashDecision,b.dataset.cashId)));
+      box.querySelectorAll('[data-settle-review]').forEach(b=>b.addEventListener('click',()=>reviewCashSettlement(b.dataset.settleReview,b.dataset.settleDecision,b.dataset.settleReviewId)));
+      box.querySelectorAll('[data-return-confirm]').forEach(b=>b.addEventListener('click',()=>confirmCashReturn(b.dataset.returnConfirm,b.dataset.returnConfirmId)));
     } catch(e){box.textContent=e.message;}
   }
 
-  async function reviewCashSettlement(row,decision){
+  async function reviewCashSettlement(row,decision,recordId){
     const note=prompt(decision==='مقبول'?'ملاحظات اعتماد التسوية (اختياري):':'سبب إرجاع التسوية للتصحيح:')||'';
     if(decision==='مرفوض'&&!note.trim()){messageRequest('اكتب سبب إرجاع التسوية للتصحيح.',true);return;}
     if(!confirm(`تأكيد ${decision==='مقبول'?'اعتماد':'إرجاع'} التسوية؟`))return;
-    try{await api('cash_settlement_decide',{row:Number(row),decision,note});await loadCashReviews();messageRequest('تم تحديث التسوية.');}
+    try{await api('cash_settlement_decide',{row:Number(row),recordId:recordId,decision,note});await loadCashReviews();messageRequest('تم تحديث التسوية.');}
     catch(e){messageRequest(e.message,true);}
   }
-  async function confirmCashReturn(row){
+  async function confirmCashReturn(row,recordId){
     if(!confirm('هل تم استلام المبلغ المتبقي فعليًا؟'))return;
-    try{await api('cash_return_confirm',{row:Number(row)});await loadCashReviews();messageRequest('تم إغلاق العهدة.');}
+    try{await api('cash_return_confirm',{row:Number(row),recordId:recordId});await loadCashReviews();messageRequest('تم إغلاق العهدة.');}
     catch(e){messageRequest(e.message,true);}
   }
-  async function decideCash(row,decision){ const note=decision==='مرفوض'?prompt('سبب الرفض (اختياري):')||'':''; if(!confirm(`تأكيد إجراء «${decision}»؟`))return; try{await api('cash_decide',{row:Number(row),decision,note});await loadCashReviews();messageRequest('تم تحديث طلب السلفة.');}catch(e){messageRequest(e.message,true);} }
+  async function decideCash(row,decision,recordId){ const note=decision==='مرفوض'?prompt('سبب الرفض (اختياري):')||'':''; if(!confirm(`تأكيد إجراء «${decision}»؟`))return; try{await api('cash_decide',{row:Number(row),recordId:recordId,decision,note});await loadCashReviews();messageRequest('تم تحديث طلب السلفة.');}catch(e){messageRequest(e.message,true);} }
 
 
   async function submitComplaint(){
@@ -1747,14 +1748,14 @@
     try { const [requests,leaves]=await Promise.all([api('list',{entity:'requests'}),api('list',{entity:'leaves'})]);
       const pendingR=requests.filter(r=>(r['القرار']||'')==='قيد الانتظار'); const pendingL=leaves.filter(r=>(r['الحالة']||'')==='بانتظار مراجعة المدير');
       const cards=[];
-      pendingR.forEach(r=>cards.push(`<article class="review-item"><strong>طلب مهندس · ${escapeHtml(r['نوع الطلب']||'')}</strong><p>${escapeHtml(r['اسم الموظف']||'')}\n${escapeHtml(r['التفاصيل']||'')}\n${escapeHtml(formatDateTime12(r['التاريخ والوقت'])||'')}</p><div class="review-actions"><button class="primary-btn" data-decide-request="${r.__row||''}" data-decision="مقبول">موافقة</button><button class="secondary-btn" data-decide-request="${r.__row||''}" data-decision="مرفوض">رفض</button></div></article>`));
-      pendingL.forEach(r=>cards.push(`<article class="review-item"><strong>إذن · ${escapeHtml(r['نوع الإذن']||'')}</strong><p>${escapeHtml(r['اسم الموظف']||'')} · ${escapeHtml(r['تاريخ الإذن']||'')} ${escapeHtml(r['تاريخ نهاية الإذن']||'')}\n${escapeHtml(formatTime12(r['من الساعة'])||'')} إلى ${escapeHtml(formatTime12(r['إلى الساعة'])||'')}\n${escapeHtml(r['السبب']||'')}\n${escapeHtml(r['رقم الطلب']||'')}</p><div class="review-actions"><button class="primary-btn" data-decide-leave="${r.__row||''}" data-decision="مقبول">موافقة</button><button class="secondary-btn" data-decide-leave="${r.__row||''}" data-decision="مرفوض">رفض</button></div></article>`));
+      pendingR.forEach(r=>cards.push(`<article class="review-item"><strong>طلب مهندس · ${escapeHtml(r['نوع الطلب']||'')}</strong><p>${escapeHtml(r['اسم الموظف']||'')}\n${escapeHtml(r['التفاصيل']||'')}\n${escapeHtml(formatDateTime12(r['التاريخ والوقت'])||'')}</p><div class="review-actions"><button class="primary-btn" data-decide-request="${r.__row||''}" data-decide-request-id="${escapeHtml([r['التاريخ والوقت']||'',r['Chat ID']||'',r['نوع الطلب']||''].join('|'))}" data-decision="مقبول">موافقة</button><button class="secondary-btn" data-decide-request="${r.__row||''}" data-decide-request-id="${escapeHtml([r['التاريخ والوقت']||'',r['Chat ID']||'',r['نوع الطلب']||''].join('|'))}" data-decision="مرفوض">رفض</button></div></article>`));
+      pendingL.forEach(r=>cards.push(`<article class="review-item"><strong>إذن · ${escapeHtml(r['نوع الإذن']||'')}</strong><p>${escapeHtml(r['اسم الموظف']||'')} · ${escapeHtml(r['تاريخ الإذن']||'')} ${escapeHtml(r['تاريخ نهاية الإذن']||'')}\n${escapeHtml(formatTime12(r['من الساعة'])||'')} إلى ${escapeHtml(formatTime12(r['إلى الساعة'])||'')}\n${escapeHtml(r['السبب']||'')}\n${escapeHtml(r['رقم الطلب']||'')}</p><div class="review-actions"><button class="primary-btn" data-decide-leave="${r.__row||''}" data-decide-leave-id="${escapeHtml(r['رقم الطلب']||'')}" data-decision="مقبول">موافقة</button><button class="secondary-btn" data-decide-leave="${r.__row||''}" data-decide-leave-id="${escapeHtml(r['رقم الطلب']||'')}" data-decision="مرفوض">رفض</button></div></article>`));
       box.innerHTML=cards.length?cards.join(''):'لا توجد طلبات أو أذونات معلقة.';
-      box.querySelectorAll('[data-decide-request]').forEach(b=>b.addEventListener('click',()=>decide('request_decide',b.dataset.decideRequest,b.dataset.decision)));
-      box.querySelectorAll('[data-decide-leave]').forEach(b=>b.addEventListener('click',()=>decide('leave_decide',b.dataset.decideLeave,b.dataset.decision)));
+      box.querySelectorAll('[data-decide-request]').forEach(b=>b.addEventListener('click',()=>decide('request_decide',b.dataset.decideRequest,b.dataset.decision,b.dataset.decideRequestId)));
+      box.querySelectorAll('[data-decide-leave]').forEach(b=>b.addEventListener('click',()=>decide('leave_decide',b.dataset.decideLeave,b.dataset.decision,b.dataset.decideLeaveId)));
     } catch(e){box.textContent=e.message;}
   }
-  async function decide(action,row,decision){if(!row){messageRequest('تعذر تحديد رقم السجل. حدّث القائمة. ',true);return;} if(!confirm(`تأكيد ${decision}؟`))return;try{await api(action,{row:Number(row),decision});await loadReviews();messageRequest('تم تسجيل القرار.');}catch(e){messageRequest(e.message,true);}}
+  async function decide(action,row,decision,recordId){if(!row){messageRequest('تعذر تحديد رقم السجل. حدّث القائمة. ',true);return;} if(!confirm(`تأكيد ${decision}؟`))return;try{await api(action,{row:Number(row),recordId:recordId,decision});await loadReviews();messageRequest('تم تسجيل القرار.');}catch(e){messageRequest(e.message,true);}}
 
 
   function financeMessage(text,isError=false){
@@ -1829,8 +1830,8 @@
     try{
       const rows=await api('list',{entity:'deductions'});
       const pending=rows.filter(r=>String(r['الحالة'])==='بانتظار اعتماد المدير');
-      box.innerHTML=pending.length?pending.map(r=>`<article class="review-item"><strong>${escapeHtml(r['اسم الموظف'])} · ${escapeHtml(r['نوع الخصم'])}</strong><p>${escapeHtml(r['السبب'])}<br>${escapeHtml(r['المبلغ بالجنيه'])} جنيه · ${escapeHtml(r['تاريخ الواقعة'])}</p><div class="review-actions"><button class="primary-btn" data-ded-row="${r.__row}" data-ded-decision="معتمد">اعتماد</button><button class="secondary-btn" data-ded-row="${r.__row}" data-ded-decision="مرفوض">رفض</button></div></article>`).join(''):'لا توجد خصومات معلقة.';
-      box.querySelectorAll('[data-ded-row]').forEach(b=>b.addEventListener('click',async()=>{const note=b.dataset.dedDecision==='مرفوض'?(prompt('سبب الرفض:')||''):'';if(b.dataset.dedDecision==='مرفوض'&&!note.trim())return;try{await api('deduction_decide',{row:Number(b.dataset.dedRow),decision:b.dataset.dedDecision,note});await loadPendingDeductions();}catch(e){financeMessage(e.message,true);}}));
+      box.innerHTML=pending.length?pending.map(r=>`<article class="review-item"><strong>${escapeHtml(r['اسم الموظف'])} · ${escapeHtml(r['نوع الخصم'])}</strong><p>${escapeHtml(r['السبب'])}<br>${escapeHtml(r['المبلغ بالجنيه'])} جنيه · ${escapeHtml(r['تاريخ الواقعة'])}</p><div class="review-actions"><button class="primary-btn" data-ded-row="${r.__row}" data-ded-id="${escapeHtml(r['رقم الخصم']||'')}" data-ded-decision="معتمد">اعتماد</button><button class="secondary-btn" data-ded-row="${r.__row}" data-ded-id="${escapeHtml(r['رقم الخصم']||'')}" data-ded-decision="مرفوض">رفض</button></div></article>`).join(''):'لا توجد خصومات معلقة.';
+      box.querySelectorAll('[data-ded-row]').forEach(b=>b.addEventListener('click',async()=>{const note=b.dataset.dedDecision==='مرفوض'?(prompt('سبب الرفض:')||''):'';if(b.dataset.dedDecision==='مرفوض'&&!note.trim())return;try{await api('deduction_decide',{row:Number(b.dataset.dedRow),recordId:b.dataset.dedId,decision:b.dataset.dedDecision,note});await loadPendingDeductions();}catch(e){financeMessage(e.message,true);}}));
     }catch(e){box.textContent=e.message;}
   }
   async function submitDeduction(){
@@ -4489,8 +4490,8 @@
               </span>
               <span class="fin-amount">${formatMoney(x.amount)} ج</span>
               <span class="task-row-actions">
-                <button type="button" class="task-mini-btn is-approve" data-ded-approve="${x.row}">اعتماد</button>
-                <button type="button" class="task-mini-btn" data-ded-reject="${x.row}">رفض</button>
+                <button type="button" class="task-mini-btn is-approve" data-ded-approve="${x.row}" data-ded-id="${escapeHtml(x.id||'')}">اعتماد</button>
+                <button type="button" class="task-mini-btn" data-ded-reject="${x.row}" data-ded-id="${escapeHtml(x.id||'')}">رفض</button>
               </span>
             </article>`;
           }).join('')}
@@ -4520,17 +4521,17 @@
 
     body.querySelector('#finAddDeduction').addEventListener('click', function() { openDeductionForm(content); });
 
-    const decide = async function(row, decision) {
+    const decide = async function(row, decision, recordId) {
       try {
-        await api('deduction_decide', { row: row, decision: decision });
+        await api('deduction_decide', { row: row, recordId: recordId, decision: decision });
         if (tg?.showAlert) tg.showAlert(decision === 'معتمد' ? 'تم اعتماد الخصم.' : 'تم رفض الخصم.');
         renderFinanceCenter(content);
       } catch (e) {
         if (tg?.showAlert) tg.showAlert(e.message);
       }
     };
-    body.querySelectorAll('[data-ded-approve]').forEach(function(b) { b.addEventListener('click', function() { decide(Number(b.dataset.dedApprove), 'معتمد'); }); });
-    body.querySelectorAll('[data-ded-reject]').forEach(function(b) { b.addEventListener('click', function() { decide(Number(b.dataset.dedReject), 'مرفوض'); }); });
+    body.querySelectorAll('[data-ded-approve]').forEach(function(b) { b.addEventListener('click', function() { decide(Number(b.dataset.dedApprove), 'معتمد', b.dataset.dedId); }); });
+    body.querySelectorAll('[data-ded-reject]').forEach(function(b) { b.addEventListener('click', function() { decide(Number(b.dataset.dedReject), 'مرفوض', b.dataset.dedId); }); });
   }
 
   function openDeductionForm(content) {
