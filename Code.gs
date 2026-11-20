@@ -160,6 +160,21 @@ function doPost(e) {
       case 'manager_update':
         data = managerUpdateAdmin_(profile, body);
         break;
+      case 'payment_recipients_list':
+        data = managerListPaymentRecipients_(profile);
+        break;
+      case 'payment_recipient_create':
+        data = managerCreatePaymentRecipient_(profile, body);
+        break;
+      case 'payment_recipient_update':
+        data = managerUpdatePaymentRecipient_(profile, body);
+        break;
+      case 'payment_recipient_delete':
+        data = managerDeletePaymentRecipient_(profile, body);
+        break;
+      case 'payment_recipient_test':
+        data = managerTestPaymentRecipient_(profile, body);
+        break;
       case 'list':
         data = listData_(profile, String(body.entity || ''));
         break;
@@ -863,7 +878,8 @@ function managerDashboard_(profile) {
     buttonsMatrix: ['super_admin','admin'].includes(role),
     system: ['super_admin','admin'].includes(role),
     notifications: ['super_admin','admin','supervisor'].includes(role),
-    managers: role === 'super_admin'
+    managers: role === 'super_admin',
+    paymentRecipients: role === 'super_admin'
   };
   const safeRows = function(name, enabled) {
     if (!enabled) return [];
@@ -7408,3 +7424,81 @@ function deviceDeliveryOptionsMini_(profile) {
   };
 }
 
+
+
+/* =========================================================
+   PAYMENT ALERT RECIPIENTS — isolated read-only notification targets
+   Only Super Admin can manage recipients. They receive no approval controls.
+========================================================= */
+const MH_PAYMENT_RECIPIENT_SHEET = 'مستلمو إشعارات التحويلات';
+const MH_PAYMENT_RECIPIENT_HEADERS = ['Chat ID','الاسم','الحالة','تاريخ الإضافة','آخر تحديث','أضيف بواسطة'];
+
+function mhPaymentRecipientSheet_() {
+  return mhEnsureSheet_(MH_PAYMENT_RECIPIENT_SHEET, MH_PAYMENT_RECIPIENT_HEADERS);
+}
+function managerListPaymentRecipients_(profile) {
+  mhRequireRole_(profile, ['super_admin']);
+  return mhRowsObjects_(mhPaymentRecipientSheet_()).map(function(r) {
+    return {
+      chatId: String(r['Chat ID'] || '').trim(),
+      name: String(r['الاسم'] || ''),
+      status: String(r['الحالة'] || 'نشط'),
+      addedAt: String(r['تاريخ الإضافة'] || ''),
+      updatedAt: String(r['آخر تحديث'] || '')
+    };
+  });
+}
+function managerCreatePaymentRecipient_(profile, body) {
+  mhRequireRole_(profile, ['super_admin']);
+  const id = String(body.chatId || '').trim();
+  const name = String(body.name || '').trim();
+  if (!/^\d{5,20}$/.test(id) || name.length < 2 || name.length > 80) throw new Error('INVALID_PAYMENT_RECIPIENT');
+  const lock = LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    const sh = mhPaymentRecipientSheet_();
+    const rows = mhRowsObjects_(sh);
+    if (rows.some(r => String(r['Chat ID'] || '').trim() === id)) throw new Error('PAYMENT_RECIPIENT_EXISTS');
+    const now = mhStamp_();
+    sh.appendRow([id, name, 'نشط', now, now, String(profile.chatId || '')]);
+  } finally { lock.releaseLock(); }
+  return {created:true, chatId:id, name:name, status:'نشط'};
+}
+function managerUpdatePaymentRecipient_(profile, body) {
+  mhRequireRole_(profile, ['super_admin']);
+  const id = String(body.chatId || '').trim();
+  const status = String(body.status || '').trim();
+  if (!/^\d{5,20}$/.test(id) || ['نشط','موقوف'].indexOf(status) < 0) throw new Error('INVALID_PAYMENT_RECIPIENT_UPDATE');
+  const lock = LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    const sh = mhPaymentRecipientSheet_(), map = mhHeaderMap_(sh);
+    const found = mhRowsObjects_(sh).find(r => String(r['Chat ID'] || '').trim() === id);
+    if (!found) throw new Error('PAYMENT_RECIPIENT_NOT_FOUND');
+    sh.getRange(found.__row, map['الحالة']).setValue(status);
+    sh.getRange(found.__row, map['آخر تحديث']).setValue(mhStamp_());
+  } finally { lock.releaseLock(); }
+  return {updated:true, chatId:id, status:status};
+}
+function managerDeletePaymentRecipient_(profile, body) {
+  mhRequireRole_(profile, ['super_admin']);
+  const id = String(body.chatId || '').trim();
+  if (!/^\d{5,20}$/.test(id)) throw new Error('INVALID_PAYMENT_RECIPIENT_ID');
+  const lock = LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    const sh = mhPaymentRecipientSheet_();
+    const found = mhRowsObjects_(sh).find(r => String(r['Chat ID'] || '').trim() === id);
+    if (!found) throw new Error('PAYMENT_RECIPIENT_NOT_FOUND');
+    sh.deleteRow(found.__row);
+  } finally { lock.releaseLock(); }
+  return {deleted:true, chatId:id};
+}
+function managerTestPaymentRecipient_(profile, body) {
+  mhRequireRole_(profile, ['super_admin']);
+  const id = String(body.chatId || '').trim();
+  if (!/^\d{5,20}$/.test(id)) throw new Error('INVALID_PAYMENT_RECIPIENT_ID');
+  const found = mhRowsObjects_(mhPaymentRecipientSheet_()).find(r => String(r['Chat ID'] || '').trim() === id && String(r['الحالة'] || 'نشط') === 'نشط');
+  if (!found) throw new Error('ACTIVE_PAYMENT_RECIPIENT_NOT_FOUND');
+  const message = '🧪 رسالة اختبار من MobiHub\n\nهذا اختبار لإشعارات التحويلات فقط. لا توجد عملية دفع حقيقية مرتبطة بهذه الرسالة.';
+  mhTelegramSend_(id, message);
+  mhAppendNotificationLog_(id, 'اختبار إشعار التحويلات', 'تم الإرسال', '');
+  return {sent:true, chatId:id};
+}

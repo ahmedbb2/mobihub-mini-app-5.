@@ -477,7 +477,7 @@
   const managerModuleTitles = {
     daily:'المتابعة اليومية', staff:'شؤون المهندسين', shifts:'إدارة الورديات', requests:'طلبات المهندسين والتواصل',
     tasks:'المهام والتسكات', parts:'قطع الغيار', procurement:'المشتريات والمخزون',
-    finance:'الإدارة المالية', overtime:'الأوفر تايم', devices:'الأجهزة والصيانة', delivery:'الجودة والتسليم', system:'التقارير والنظام', notifications:'مركز الإشعارات', notificationMatrix:'التحكم في الإشعارات', buttonsMatrix:'التحكم في الأزرار', managers:'إدارة المديرين'
+    finance:'الإدارة المالية', overtime:'الأوفر تايم', devices:'الأجهزة والصيانة', delivery:'الجودة والتسليم', system:'التقارير والنظام', notifications:'مركز الإشعارات', notificationMatrix:'التحكم في الإشعارات', buttonsMatrix:'التحكم في الأزرار', managers:'إدارة المديرين', paymentRecipients:'مستلمو إشعارات التحويلات'
   };
   let managerDashboardCache = null;
   function renderManagerDashboard(data) {
@@ -899,6 +899,16 @@
             bindForm();
           } catch(e) { if(tg?.showAlert) tg.showAlert(e.message); }
         }));
+      } else if(module==='paymentRecipients') {
+        const renderRecipients = async () => {
+          const rows = await api('payment_recipients_list');
+          content.innerHTML = `<form id="paymentRecipientForm" class="manager-staff-form"><h4>إضافة مستلم جديد</h4><p class="manager-note">أضف موظف الاستقبال أو أي موظف يحتاج استقبال تنبيه عند وصول رسالة تحويل. لا تمنحه هذه الإضافة صلاحية اعتماد أو رفض التحصيل.</p><label>اسم المستلم<input name="name" maxlength="80" required placeholder="اسم الموظف"></label><label>Telegram Chat ID<input name="chatId" inputmode="numeric" pattern="[0-9]{5,20}" maxlength="20" required placeholder="مثال: 123456789"></label><button type="submit" class="primary-btn">إضافة مستلم</button></form><div class="manager-list-head"><b>${rows.length} مستلم مسجل</b><small>يتم إرسال التنبيهات للمستلمين النشطين فقط</small></div>${rows.map(r=>`<article class="manager-row"><div><b>${escapeHtml(r.name||'مستلم')}</b><small>Chat ID: ${escapeHtml(r.chatId)} · أضيف: ${escapeHtml(r.addedAt||'—')}</small></div><span class="status-pill">${escapeHtml(r.status||'نشط')}</span><div class="manager-row-actions"><button type="button" class="secondary-btn" data-payment-test="${escapeHtml(r.chatId)}" ${r.status!=='نشط'?'disabled':''}>اختبار</button><button type="button" class="secondary-btn" data-payment-toggle="${escapeHtml(r.chatId)}" data-next-status="${r.status==='نشط'?'موقوف':'نشط'}">${r.status==='نشط'?'إيقاف':'تفعيل'}</button><button type="button" class="secondary-btn" data-payment-delete="${escapeHtml(r.chatId)}">حذف</button></div></article>`).join('')||'<p class="muted">لا يوجد مستلمون مضافون حتى الآن.</p>'}`;
+          content.querySelector('#paymentRecipientForm').addEventListener('submit',async ev=>{ev.preventDefault();const f=ev.currentTarget,b=f.querySelector('button');b.disabled=true;try{const fd=new FormData(f);await api('payment_recipient_create',Object.fromEntries(fd.entries()));await renderRecipients();if(tg?.showAlert)tg.showAlert('تمت إضافة المستلم وتفعيله.');}catch(e){if(tg?.showAlert)tg.showAlert(e.message==='PAYMENT_RECIPIENT_EXISTS'?'هذا الـChat ID مسجل بالفعل.':e.message);b.disabled=false;}});
+          content.querySelectorAll('[data-payment-test]').forEach(btn=>btn.addEventListener('click',async()=>{btn.disabled=true;try{await api('payment_recipient_test',{chatId:btn.dataset.paymentTest});if(tg?.showAlert)tg.showAlert('تم إرسال رسالة الاختبار.');}catch(e){if(tg?.showAlert)tg.showAlert(e.message);}finally{btn.disabled=false;}}));
+          content.querySelectorAll('[data-payment-toggle]').forEach(btn=>btn.addEventListener('click',async()=>{btn.disabled=true;try{await api('payment_recipient_update',{chatId:btn.dataset.paymentToggle,status:btn.dataset.nextStatus});await renderRecipients();}catch(e){if(tg?.showAlert)tg.showAlert(e.message);btn.disabled=false;}}));
+          content.querySelectorAll('[data-payment-delete]').forEach(btn=>btn.addEventListener('click',async()=>{if(!confirm('تأكيد حذف هذا المستلم؟'))return;btn.disabled=true;try{await api('payment_recipient_delete',{chatId:btn.dataset.paymentDelete});await renderRecipients();}catch(e){if(tg?.showAlert)tg.showAlert(e.message);btn.disabled=false;}}));
+        };
+        await renderRecipients();
       } else if(module==='system') {
         const d=managerDashboardCache||await api('manager_dashboard'); const r=d.monthlyReport||{};
         content.innerHTML=`<div class="manager-mini-kpis"><div><b>${Number(r.checkins)||0}</b><small>مرات تسجيل الحضور</small></div><div><b>${Number(r.checkouts)||0}</b><small>مرات تسجيل الانصراف</small></div><div><b>${Number(r.lateDays)||0}</b><small>أيام بها تأخير</small></div><div><b>${Number(r.lateMinutes)||0}</b><small>دقائق التأخير</small></div><div><b>${Number(r.confirmedAbsences)||0}</b><small>غياب مؤكد</small></div><div><b>${Number(r.pendingAbsences)||0}</b><small>غياب قيد المراجعة</small></div><div><b>${Number(r.leaveCount)||0}</b><small>طلبات أذونات خلال الشهر</small></div></div><p class="manager-note">تقرير تشغيلي عام لشهر ${escapeHtml(r.month||d.month||'')}، مجمع من سجلات الحضور والغياب والأذونات في Google Sheets، وليس تقريرًا فرديًا لمهندس واحد.</p>`;
@@ -3744,7 +3754,7 @@
     { key: 'team', title: 'الفريق والمهام', icon: '♙', modules: ['staff', 'tasks', 'parts', 'procurement'] },
     { key: 'money', title: 'المالية', icon: 'ج.م', modules: ['finance', 'overtime'] },
     { key: 'system', title: 'الأجهزة والتقارير', icon: '▥', modules: ['devices', 'delivery', 'system'] },
-    { key: 'control', title: 'الإشعارات والصلاحيات', icon: '🎛', modules: ['notifications', 'notificationMatrix', 'buttonsMatrix', 'managers'] }
+    { key: 'control', title: 'الإشعارات والصلاحيات', icon: '🎛', modules: ['notifications', 'notificationMatrix', 'buttonsMatrix', 'managers', 'paymentRecipients'] }
   ];
 
   function applyModulePermissions() {
